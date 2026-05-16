@@ -482,9 +482,9 @@ Get-Content -Encoding UTF8 projects/research-agenda/reviews/daily-codex-seed-rev
 - 不提交 PDF、SQLite、Zotero 缓存和本地自动化产物。
 - 不把真实 key 粘到 issue、README、截图或日志里。
 
-## License / Reuse Boundary
+## License
 
-This repository is public for inspection, learning, and personal adaptation, but it does not grant a broad open-source reuse license yet. See [LICENSE](LICENSE). The scripts, documentation, and literature notes may need separate licensing decisions because the notes summarize third-party academic papers.
+This repository is released under the [MIT License](LICENSE). Third-party papers, figures, datasets, product names, and external tools remain governed by their own authors, publishers, and licenses.
 
 公开包已经带有 `.gitignore`，但上传前仍建议运行：
 
