@@ -28,6 +28,12 @@ output/ projects/   综述、比较、研究 idea、每日 arXiv 日志
 
 核心原则是 **local-first answerability**：任何领域回答都先查本地 `wiki/`，结论必须能回到具体论文、概念页或实体页；本地没有证据时，才明确说明缺口并考虑外部检索。
 
+## 一个真实问答示例
+
+下面是 Claudian 在 Obsidian 中回答“有关 RL token 的论文有哪些？怎么做才可能形成创新点？”的实际效果。它先基于本地 `wiki/` 列出相关论文和笔记路径，再从精读笔记中抽取技术点、open problems 和面向 DLO 操控的研究空白。
+
+![Claudian local-first RL Token research answer](docs/assets/claudian-rl-token-result.png)
+
 ## 其他专业怎么迁移
 
 如果你不是机器人方向，也可以把这个仓库当成一套研究系统模板来用。建议保留 Obsidian + Zotero + Claudian + local retrieval + automation 的整体结构，然后重点替换这些地方：
@@ -327,6 +333,10 @@ Zotero 附件同步有多种路线：Zotero 官方存储、WebDAV、linked attac
 ![CSTCloud 数据胶囊 WebDAV client settings for Zotero](docs/assets/cstcloud-webdav-zotero.png)
 
 截图展示的是裁剪后的数据胶囊 WebDAV 客户端访问管理页；用户名、密码、创建时间和个人账号区域已打码或移除。
+
+Zotero Desktop 里对应的文件同步设置如下。WebDAV 用户名、密码和个人账号信息必须打码。
+
+![Zotero Desktop WebDAV file sync settings](docs/assets/zotero-desktop-webdav-settings.png)
 
 ## Claudian / Claude Code 工作流
 

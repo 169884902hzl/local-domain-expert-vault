@@ -112,6 +112,10 @@ Do not put the generated WebDAV username, password, account name, personal avata
 
 This screenshot is cropped and redacted. It keeps the WebDAV tab, public endpoint, and Zotero app entry visible, while masking the generated credential fields and removing the personal account area.
 
+In Zotero Desktop, the matching file-sync setting should use WebDAV and the same public endpoint. The account email, WebDAV username, and password must be redacted in public screenshots.
+
+![Zotero Desktop WebDAV file sync settings](assets/zotero-desktop-webdav-settings.png)
+
 ## Option C: Linked Attachments
 
 Use this if PDFs live in a local or cloud-synced folder outside Zotero storage.
