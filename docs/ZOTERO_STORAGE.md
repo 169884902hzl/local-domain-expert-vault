@@ -106,13 +106,13 @@ Reproducible setup:
 5. Use the generated WebDAV username and password in Zotero.
 6. In Zotero, open `Edit -> Settings -> Sync`, choose WebDAV for file syncing, enter the address, username, and password, then run Zotero's verification.
 
-Do not put the generated WebDAV username, password, account name, personal avatar, or permission-management table into Git. Screenshots for public docs should show the provider, the WebDAV endpoint, and the fact that the app is Zotero, but the username/password and personal account area must be masked.
+The example below is a sanitized public screenshot. It keeps the provider, WebDAV endpoint, and Zotero app entry visible while excluding account credentials and personal account details.
 
 ![CSTCloud Data Capsule WebDAV client settings for Zotero](assets/cstcloud-webdav-zotero.png)
 
 This screenshot is cropped and redacted. It keeps the WebDAV tab, public endpoint, and Zotero app entry visible, while masking the generated credential fields and removing the personal account area.
 
-In Zotero Desktop, the matching file-sync setting should use WebDAV and the same public endpoint. The account email, WebDAV username, and password must be redacted in public screenshots.
+In Zotero Desktop, the matching file-sync setting should use WebDAV and the same public endpoint. The screenshot shows the configuration shape without publishing credentials.
 
 ![Zotero Desktop WebDAV file sync settings](assets/zotero-desktop-webdav-settings.png)
 
@@ -168,4 +168,4 @@ If you want the GitHub README to show your exact Zotero expansion setup, capture
 | Linked attachment base | Base directory or plugin rule | Local username and private path |
 | Better BibTeX / ZotFile / Attanger | Only settings you actually use | Personal paths and library names |
 
-Do not add screenshots until private account names, server addresses, and local paths are masked.
+Public examples should show only the configuration shape needed for reproduction, not credentials or machine-specific paths.

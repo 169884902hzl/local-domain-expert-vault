@@ -2,6 +2,8 @@
 
 > A local-first Obsidian research operating system. This public version starts from robotic manipulation literature, but the workflow can be adapted to other research fields.
 
+[English README](README_EN.md)
+
 这个仓库不是一堆 Markdown 论文笔记，也不是一个简单的 Zotero 导出。它是一个可以 clone 后直接打开的 **local-first 研究工作台**：用 Obsidian 管理知识网络，用 Zotero 接论文来源，用 Claudian/Claude Code 执行脚本化精读，用本地检索约束回答，再用每日 arXiv 自动化持续补充新论文和研究 idea。
 
 ## 30 秒看懂
@@ -34,7 +36,7 @@ output/ projects/   综述、比较、研究 idea、每日 arXiv 日志
 
 ![Claudian local-first RL Token research answer](docs/assets/claudian-rl-token-result.png)
 
-下面是 research-agenda 工作流沉淀出的一个 generated-for-review idea seed。它展示的是从本地证据、方法改进主张、baseline / killer experiment、novelty pressure 到 no-hardware pilot 的结构化研究计划；这些 claim 仍需要人工审阅和实验验证。
+下面是 research-agenda 工作流沉淀出的一个待审阅研究 idea seed。它展示的是从本地证据、方法改进主张、baseline / killer experiment、novelty pressure 到 no-hardware pilot 的结构化研究计划；这些研究主张仍需要人工审阅和实验验证。
 
 ![Gemini-assisted research idea seed with local evidence and review fields](docs/assets/gemini-research-idea-seed-example.png)
 
@@ -332,13 +334,13 @@ python .claude/scripts/audit_kb.py
 
 Zotero 附件同步有多种路线：Zotero 官方存储、WebDAV、linked attachment、本地附件目录迁移，或配合 Better BibTeX / ZotFile / Attanger 等插件。这个公开仓库不内置任何个人存储账号、服务器地址或附件目录。
 
-本 vault 当前采用的是 **CSTCloud 数据胶囊 WebDAV + Zotero 应用专用账号** 路线，公开可写的非敏感 endpoint 是 `https://data.cstcloud.cn/dav`。可复现配置说明见 [docs/ZOTERO_STORAGE.md](docs/ZOTERO_STORAGE.md)。截图中必须打码 WebDAV 用户名、密码、个人账号和权限管理表。
+本 vault 当前采用的是 **CSTCloud 数据胶囊 WebDAV + Zotero 应用专用账号** 路线，公开可写的非敏感 endpoint 是 `https://data.cstcloud.cn/dav`。可复现配置说明见 [docs/ZOTERO_STORAGE.md](docs/ZOTERO_STORAGE.md)。
 
 ![CSTCloud 数据胶囊 WebDAV client settings for Zotero](docs/assets/cstcloud-webdav-zotero.png)
 
-截图展示的是裁剪后的数据胶囊 WebDAV 客户端访问管理页；用户名、密码、创建时间和个人账号区域已打码或移除。
+上图展示的是裁剪后的数据胶囊 WebDAV 客户端访问管理页，只保留 WebDAV endpoint 和 Zotero 应用条目，凭据和个人账号区域不随仓库发布。
 
-Zotero Desktop 里对应的文件同步设置如下。WebDAV 用户名、密码和个人账号信息必须打码。
+Zotero Desktop 里对应的文件同步设置如下，展示 WebDAV 同步方式和服务器地址。
 
 ![Zotero Desktop WebDAV file sync settings](docs/assets/zotero-desktop-webdav-settings.png)
 
