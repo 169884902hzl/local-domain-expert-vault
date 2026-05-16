@@ -119,7 +119,7 @@ python .claude/scripts/zotero_import.py --preflight --json
 
 不要把这些值写入仓库。
 
-附件同步、WebDAV、linked attachment、本地附件目录迁移和 Zotero 存储扩展见 [ZOTERO_STORAGE.md](ZOTERO_STORAGE.md)。公开仓库不会内置个人 Zotero 存储配置。
+附件同步、WebDAV、linked attachment、本地附件目录迁移和 Zotero 存储扩展见 [ZOTERO_STORAGE.md](ZOTERO_STORAGE.md)。本 vault 当前使用 CSTCloud 数据胶囊 WebDAV 路线，但 WebDAV 用户名和密码只保存在 Zotero 客户端里，公开仓库不会内置个人 Zotero 存储配置。
 
 ## 4. 导入单篇论文
 

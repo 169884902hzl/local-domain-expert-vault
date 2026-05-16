@@ -42,6 +42,27 @@ Use this if you want Zotero to sync stored attachments through a WebDAV provider
 
 The vault scripts do not need your WebDAV password. They only need Zotero Desktop or Zotero Web API access.
 
+### Confirmed Maintainer Route: CSTCloud Data Capsule WebDAV
+
+The maintainer's current Zotero attachment expansion route is WebDAV through CSTCloud Data Capsule (`数据胶囊`), using an app-specific WebDAV client credential for Zotero.
+
+Public, non-secret WebDAV endpoint:
+
+```text
+https://data.cstcloud.cn/dav
+```
+
+Reproducible setup:
+
+1. Open CSTCloud Data Capsule (`数据胶囊`) and go to `我的数据 -> zotero同步 -> 客户端访问管理`.
+2. Choose the `WebDAV客户端` tab.
+3. Create an app-specific WebDAV account for `Zotero`.
+4. Copy only the WebDAV address into Zotero's file sync settings.
+5. Use the generated WebDAV username and password in Zotero.
+6. In Zotero, open `Edit -> Settings -> Sync`, choose WebDAV for file syncing, enter the address, username, and password, then run Zotero's verification.
+
+Do not put the generated WebDAV username, password, account name, personal avatar, or permission-management table into Git. Screenshots for public docs should show the provider, the WebDAV endpoint, and the fact that the app is Zotero, but the username/password and personal account area must be masked.
+
 ## Option C: Linked Attachments
 
 Use this if PDFs live in a local or cloud-synced folder outside Zotero storage.
@@ -89,7 +110,8 @@ If you want the GitHub README to show your exact Zotero expansion setup, capture
 | --- | --- | --- |
 | Zotero Sync | Sync enabled and account state | Email, username |
 | Zotero File Sync | Official storage or WebDAV selection | Server credentials |
-| WebDAV verification | Verification success | URL details if private, username, password |
+| CSTCloud Data Capsule WebDAV client | WebDAV address and Zotero app entry | Username, password, account name, avatar |
+| WebDAV verification | Verification success | Username, password, account name |
 | Linked attachment base | Base directory or plugin rule | Local username and private path |
 | Better BibTeX / ZotFile / Attanger | Only settings you actually use | Personal paths and library names |
 

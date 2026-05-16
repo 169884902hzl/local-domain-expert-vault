@@ -300,7 +300,7 @@ python .claude/scripts/audit_kb.py
 
 Zotero 附件同步有多种路线：Zotero 官方存储、WebDAV、linked attachment、本地附件目录迁移，或配合 Better BibTeX / ZotFile / Attanger 等插件。这个公开仓库不内置任何个人存储账号、服务器地址或附件目录。
 
-可复现配置说明见 [docs/ZOTERO_STORAGE.md](docs/ZOTERO_STORAGE.md)。如果你要在自己的 README 里展示“我们如何扩容 Zotero”，请先补对应截图并打码。
+本 vault 当前采用的是 **CSTCloud 数据胶囊 WebDAV + Zotero 应用专用账号** 路线，公开可写的非敏感 endpoint 是 `https://data.cstcloud.cn/dav`。可复现配置说明见 [docs/ZOTERO_STORAGE.md](docs/ZOTERO_STORAGE.md)。截图中必须打码 WebDAV 用户名、密码、个人账号和权限管理表。
 
 ## Claudian / Claude Code 工作流
 
