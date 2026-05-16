@@ -302,6 +302,10 @@ Zotero 附件同步有多种路线：Zotero 官方存储、WebDAV、linked attac
 
 本 vault 当前采用的是 **CSTCloud 数据胶囊 WebDAV + Zotero 应用专用账号** 路线，公开可写的非敏感 endpoint 是 `https://data.cstcloud.cn/dav`。可复现配置说明见 [docs/ZOTERO_STORAGE.md](docs/ZOTERO_STORAGE.md)。截图中必须打码 WebDAV 用户名、密码、个人账号和权限管理表。
 
+![CSTCloud 数据胶囊 WebDAV client settings for Zotero](docs/assets/cstcloud-webdav-zotero.png)
+
+截图展示的是数据胶囊 WebDAV 客户端访问管理页；用户名、密码、创建时间和个人账号信息已打码。
+
 ## Claudian / Claude Code 工作流
 
 如果你安装了 Claudian 或使用 Claude Code，可以直接调用项目命令：
