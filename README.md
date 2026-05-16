@@ -262,6 +262,15 @@ notepad .claude/scripts/config.json
 | 无本机 Zotero，但要读写 Web API | `ZOTERO_API_KEY` + `ZOTERO_USER_ID` 或 `ZOTERO_LIBRARY_ID` | 适合服务器或自动化 |
 | 只浏览本地 wiki | 不需要 Zotero | 可跳过本节 |
 
+如果选择 Web API 路线，先创建自己的 Zotero API key：
+
+1. 登录 Zotero 官网，打开 [Zotero API Keys](https://www.zotero.org/settings/keys)。
+2. 选择 `Create new private key`。
+3. 如果只需要读取自己的库，给 `Read` 权限即可。
+4. 如果要让自动化创建 Zotero 条目、写入 collection 或修复附件记录，需要给 `Write` 权限。
+5. 页面上的数字 user id 不是用户名或邮箱，后面要写入 `ZOTERO_USER_ID`。
+6. 不要把生成的 key 放进 README、issue、commit、截图、`config.json` 或任何公开日志。
+
 PowerShell 示例：
 
 ```powershell
@@ -271,6 +280,19 @@ setx ZOTERO_COLLECTION_KEY "<your-collection-key>"
 ```
 
 `setx` 写入的是后续新终端环境；设置后重新打开 PowerShell 再运行脚本。不要把真实 key 写进 README、issue、commit、截图或 `config.json`。
+
+如果还不知道 collection key，可以在重新打开 PowerShell 后列出自己的 Zotero collections：
+
+```powershell
+$headers = @{
+  "Zotero-API-Key" = $env:ZOTERO_API_KEY
+  "Zotero-API-Version" = "3"
+}
+Invoke-RestMethod "https://api.zotero.org/users/$env:ZOTERO_USER_ID/collections?format=json&limit=100" -Headers $headers |
+  ForEach-Object { "{0}`t{1}" -f $_.data.key, $_.data.name }
+```
+
+把目标 collection 左侧的 key 写入 `ZOTERO_COLLECTION_KEY`。本公开脚本当前默认面向个人 user library；group library 需要按自己的 Zotero group 路径改脚本或包装命令。
 
 ### 3. 预检 Zotero
 

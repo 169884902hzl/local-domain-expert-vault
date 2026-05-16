@@ -14,6 +14,51 @@ The workflow can use Zotero in three levels:
 
 If you only browse `wiki/` or run `kb_search.py`, you do not need Zotero storage at all.
 
+## Zotero API Key Setup
+
+WebDAV credentials and Zotero API keys solve different problems:
+
+- WebDAV credentials let Zotero Desktop sync PDF attachments.
+- `ZOTERO_API_KEY` lets scripts read or write Zotero metadata through Zotero's Web API.
+
+To create a key:
+
+1. Log in to Zotero and open [Zotero API Keys](https://www.zotero.org/settings/keys).
+2. Choose `Create new private key`.
+3. Grant `Read` permission if the vault only needs to inspect your library.
+4. Grant `Write` permission only if automation should create items, add items to collections, or repair Zotero attachment records.
+5. Copy the numeric user id from the API key page. It is not your username or email address.
+6. Keep the generated key private. Do not commit it, paste it into public issues, or include it in screenshots.
+
+PowerShell configuration:
+
+```powershell
+setx ZOTERO_USER_ID "<your-zotero-user-id>"
+setx ZOTERO_API_KEY "<your-zotero-api-key>"
+setx ZOTERO_COLLECTION_KEY "<your-collection-key>"
+```
+
+Open a new PowerShell window after `setx`, then verify:
+
+```powershell
+python .claude/scripts/zotero_import.py --preflight --json
+```
+
+To list collection keys from your own library:
+
+```powershell
+$headers = @{
+  "Zotero-API-Key" = $env:ZOTERO_API_KEY
+  "Zotero-API-Version" = "3"
+}
+Invoke-RestMethod "https://api.zotero.org/users/$env:ZOTERO_USER_ID/collections?format=json&limit=100" -Headers $headers |
+  ForEach-Object { "{0}`t{1}" -f $_.data.key, $_.data.name }
+```
+
+Use the left column as `ZOTERO_COLLECTION_KEY`. This public package does not include the maintainer's private collection key.
+
+Official Zotero API reference: [Zotero Web API v3 Basics](https://www.zotero.org/support/dev/web_api/v3/basics).
+
 ## Option A: Zotero Official Storage
 
 Use this if you want the simplest sync path and your attachment volume fits Zotero's paid storage.

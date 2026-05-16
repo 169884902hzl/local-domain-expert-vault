@@ -93,6 +93,19 @@ setx ZOTERO_API_KEY "<your-zotero-api-key>"
 setx ZOTERO_COLLECTION_KEY "<your-collection-key>"
 ```
 
+`ZOTERO_API_KEY` 需要由使用者在 [Zotero API Keys](https://www.zotero.org/settings/keys) 自己创建。只读导入给 `Read` 权限即可；如果自动化要创建条目、写入 collection 或修复附件记录，再给 `Write` 权限。页面上的数字 user id 写入 `ZOTERO_USER_ID`，不要使用用户名或邮箱。
+
+如果还不知道 collection key，重新打开 PowerShell 后运行：
+
+```powershell
+$headers = @{
+  "Zotero-API-Key" = $env:ZOTERO_API_KEY
+  "Zotero-API-Version" = "3"
+}
+Invoke-RestMethod "https://api.zotero.org/users/$env:ZOTERO_USER_ID/collections?format=json&limit=100" -Headers $headers |
+  ForEach-Object { "{0}`t{1}" -f $_.data.key, $_.data.name }
+```
+
 重新打开 PowerShell 后检查：
 
 ```powershell
