@@ -30,13 +30,29 @@ output/ projects/   综述、比较、研究 idea、每日 arXiv 日志
 
 核心原则是 **local-first answerability**：任何领域回答都先查本地 `wiki/`，结论必须能回到具体论文、概念页或实体页；本地没有证据时，才明确说明缺口并考虑外部检索。
 
-## 一个真实问答示例
+## 工作流展示
 
-下面是 Claudian 在 Obsidian 中回答“有关 RL token 的论文有哪些？怎么做才可能形成创新点？”的实际效果。它先基于本地 `wiki/` 列出相关论文和笔记路径，再从精读笔记中抽取技术点、open problems 和面向 DLO 操控的研究空白。
+### 1. Local-first answerability
+
+Claudian 在 Obsidian 中回答“有关 RL token 的论文有哪些？怎么做才可能形成创新点？”时，会先基于本地 `wiki/` 列出相关论文和笔记路径，再从精读笔记中抽取技术点、open problems 和面向 DLO 操控的研究空白。
 
 ![Claudian local-first RL Token research answer](docs/assets/claudian-rl-token-result.png)
 
-下面是 research-agenda 工作流沉淀出的一个待审阅研究 idea seed。它展示的是从本地证据、方法改进主张、baseline / killer experiment、novelty pressure 到 no-hardware pilot 的结构化研究计划；这些研究主张仍需要人工审阅和实验验证。
+### 2. Deep reading report
+
+精读报告是 `paper -> local evidence -> KB answer -> research idea` 的中间层。它把论文从摘要变成可审计的 evidence metadata、method、experiment、limitation 和 local citation notes。
+
+![Deep reading report example](docs/assets/deep-reading-report-example.png)
+
+完整示例见 [docs/examples/deep-reading-report-example.md](docs/examples/deep-reading-report-example.md)。
+
+### 3. Paper -> concept/entity knowledge network
+
+每篇论文进入 `wiki/topics/` 后，会被连接到 `wiki/concepts/` 和 `wiki/entities/`。这让后续问题可以沿着“论文、概念、作者/数据集/系统”三层结构检索，而不是只在 PDF 摘要里关键词匹配。
+
+### 4. Research idea seed
+
+research-agenda 工作流会把本地证据沉淀成待审阅研究 idea seed。下面示例展示了从本地证据、方法改进主张、baseline / killer experiment、novelty pressure 到 no-hardware pilot 的结构化研究计划；这些研究主张仍需要人工审阅和实验验证。
 
 ![Gemini-assisted research idea seed with local evidence and review fields](docs/assets/gemini-research-idea-seed-example.png)
 
@@ -106,7 +122,8 @@ python .claude/scripts/audit_kb.py
 先 dry run：
 
 ```powershell
-python .claude/scripts/daily_arxiv_pipeline.py --dry-run --source search-api --max-candidates 30 --days-back 14
+python .claude/scripts/arxiv_metadata_sync.py --dry-run --days-back 14 --max-pages 1
+python .claude/scripts/daily_arxiv_pipeline.py --dry-run --source mirror-first --max-candidates 30 --days-back 14 --idea-mode template --skip-read
 ```
 
 再按 [docs/AUTOMATION.md](docs/AUTOMATION.md) 配置 Zotero、Gemini/Codex 和 Windows 计划任务。
@@ -151,8 +168,8 @@ docs/                         # 使用、自动化、安全说明
 如果你是从 GitHub clone 这个仓库，仓库根目录就是可打开的 Obsidian vault。
 
 ```powershell
-git clone https://github.com/<owner>/<repo>.git
-cd <repo>
+git clone https://github.com/169884902hzl/local-first-research-vault.git
+cd local-first-research-vault
 python --version
 python .claude/scripts/audit_kb.py
 python .claude/scripts/kb_search.py "diffusion policy DLO" --limit 5
@@ -161,8 +178,8 @@ python .claude/scripts/kb_search.py "diffusion policy DLO" --limit 5
 macOS/Linux 可用同样的 Python 命令：
 
 ```bash
-git clone https://github.com/<owner>/<repo>.git
-cd <repo>
+git clone https://github.com/169884902hzl/local-first-research-vault.git
+cd local-first-research-vault
 python3 --version
 python3 .claude/scripts/audit_kb.py
 python3 .claude/scripts/kb_search.py "diffusion policy DLO" --limit 5
@@ -197,9 +214,9 @@ python3 .claude/scripts/kb_search.py "diffusion policy DLO" --limit 5
 | Smart Connections | 语义检索；建议只索引 `wiki/` | 是 |
 | Templater | 笔记模板 | 是 |
 | Zotero Desktop Connector | 从 Zotero 取 metadata/fulltext | 部分配置 |
-| Paper Reading Workbench | 阅读辅助 | 部分配置 |
+| Paper Reading Workbench | 可选自定义阅读辅助 | 仅保留配置示例，不默认启用 |
 
-注意：仓库保留的是插件配置和启用清单，不打包插件二进制文件。第一次打开时仍需要从 Obsidian Community Plugins 安装插件本体。
+注意：仓库保留的是插件配置示例，不打包插件二进制文件，也不默认启用未随仓库提供本体的社区插件。第一次打开后，需要从 Obsidian Community Plugins 安装插件本体，再按需手动启用。
 
 ## 核心命令
 
@@ -264,7 +281,7 @@ notepad .claude/scripts/config.json
 
 把 `collection_key` 改成你自己的 Zotero collection key。如果你不需要固定 collection，也可以通过环境变量或命令参数传入。
 
-公开脚本不会内置维护者的 collection key。缺少 collection 配置时，Zotero 导入会明确返回 `missing_collection_key`，而不是默认写入某个私有 collection。
+公开脚本不会内置任何预设私有 collection key。缺少 collection 配置时，Zotero 导入会明确返回 `missing_collection_key`，而不是默认写入某个私有 collection。
 
 ### 2. 选择 Zotero 连接方式
 
@@ -369,6 +386,8 @@ Claudian 的公开配置已经放在：
 
 其中 `.claudian/claudian-settings.json` 包含本 vault 的核心 system prompt：本地证据优先、Zotero 导入走脚本、精读必须 finalize、批量处理要写进度、`raw/` 默认只追加。公开包已经清空个人用户名、CLI 绝对路径、环境变量和 host-specific 配置。你需要在自己的 Claudian 设置里重新选择 provider、登录账号并确认权限模式。
 
+公开脚本默认不绕过 Claude 权限。高自治模式需要你在本机显式传入 `--allow-dangerous-claude`，或临时设置 `LOCAL_FIRST_VAULT_ALLOW_DANGEROUS_CLAUDE=1`；不要把这个开关写进公开配置。
+
 ## 自动化流程
 
 详细说明见 [docs/AUTOMATION.md](docs/AUTOMATION.md)。下面是最常用的启动路径。
@@ -376,17 +395,18 @@ Claudian 的公开配置已经放在：
 ### 1. 只预览每日 arXiv 候选，不写文件、不写 Zotero
 
 ```powershell
-python .claude/scripts/daily_arxiv_pipeline.py --dry-run --source search-api --max-candidates 30 --days-back 14
+python .claude/scripts/arxiv_metadata_sync.py --dry-run --days-back 14 --max-pages 1
+python .claude/scripts/daily_arxiv_pipeline.py --dry-run --source mirror-first --max-candidates 30 --days-back 14 --idea-mode template --skip-read
 ```
 
-这个命令适合第一次试跑。它会抓取并排序候选，但不会写入 Zotero 或 vault。
+这组命令适合第一次试跑。metadata sync 的 dry-run 使用内存数据库，pipeline dry-run 会优先查本地 metadata mirror，再在需要时兜底外部 Search API。Search API 受外部限流影响，不能单独代表 vault 是否正常。
 
 ### 2. 手动运行一次每日 pipeline
 
 如果你还没有 Gemini CLI 或 Claudian，可以先用模板 idea，并跳过精读：
 
 ```powershell
-python .claude/scripts/daily_arxiv_pipeline.py --once --source search-api --idea-mode template --skip-read --max-candidates 40
+python .claude/scripts/daily_arxiv_pipeline.py --once --source mirror-first --idea-mode template --skip-read --max-candidates 40 --days-back 14
 ```
 
 如果你已经配置 Zotero、Claudian 和 Gemini CLI，可以使用更完整的模式：
@@ -532,11 +552,11 @@ rg -n --hidden --glob '!.git/**' "(OPENAI_API_KEY|ANTHROPIC_AUTH_TOKEN|ZOTERO_AP
 
 命中环境变量名说明可以保留；命中真实 key 值必须移除并轮换。
 
-## 维护者发布
+## 重新生成公开包（可选）
 
 如果你是从 GitHub clone 的使用者，不需要 `exports/`。仓库根目录就是 vault。
 
-如果你是原维护者，从完整本地工作目录重新生成公开包：
+只有从完整本地工作目录重新生成公开包时，才需要运行：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools/build_github_package.ps1 -PackageName github-ready-vault-YYYYMMDD-public -Force

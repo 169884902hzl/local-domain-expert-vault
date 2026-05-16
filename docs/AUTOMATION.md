@@ -35,22 +35,24 @@ python .claude/scripts/kb_search.py "VLM robot manipulation" --limit 5
 
 ## 1. arXiv 候选预览
 
-只抓取和排序，不写文件、不写 Zotero：
+每日自动化的主叙事是 **metadata mirror first**：先同步或检查本地 arXiv metadata mirror，再让 pipeline 以 `mirror-first` 方式选候选。这样第一体验不依赖 Search API 的实时可用性，也能减少 arXiv 429、timeout 或外部服务限流造成的误判。
+
+先做 mirror dry-run，不创建 SQLite 或 lock 文件：
 
 ```powershell
-python .claude/scripts/daily_arxiv_pipeline.py --dry-run --source search-api --max-candidates 30 --days-back 14
+python .claude/scripts/arxiv_metadata_sync.py --dry-run --days-back 14 --max-pages 1
 ```
 
-如果 arXiv 网络不稳定，可以降低候选数量：
+再预览每日候选，不写 Zotero、不写 vault：
+
+```powershell
+python .claude/scripts/daily_arxiv_pipeline.py --dry-run --source mirror-first --max-candidates 30 --days-back 14 --idea-mode template --skip-read
+```
+
+`search-api` 只作为 fallback / troubleshooting。外部 Search API 可能因为 429、timeout 或当天结果为空而返回 0 candidates；这不能单独说明 vault 或本地知识库坏了。
 
 ```powershell
 python .claude/scripts/daily_arxiv_pipeline.py --dry-run --source search-api --max-candidates 10 --days-back 7 --fetch-timeout 20 --fetch-retries 1
-```
-
-如果你已经同步过本地 arXiv metadata mirror，可以用：
-
-```powershell
-python .claude/scripts/daily_arxiv_pipeline.py --dry-run --source mirror-first --max-candidates 30
 ```
 
 ## 2. 同步 arXiv metadata mirror
@@ -163,7 +165,7 @@ python .claude/scripts/audit_kb.py --strict-reading
 ```powershell
 python .claude/scripts/daily_arxiv_pipeline.py `
   --once `
-  --source search-api `
+  --source mirror-first `
   --idea-mode template `
   --skip-read `
   --max-candidates 40 `
@@ -202,6 +204,20 @@ python .claude/scripts/daily_arxiv_pipeline.py `
 - `wiki/topics/...`
 
 这些输出默认不提交 Git。
+
+公开版默认不会给 Claude CLI 传 `--dangerously-skip-permissions`。如果你在自己的本机环境中已经理解 Claude 权限边界，并且确实要恢复高自治读写模式，可以显式 opt in：
+
+```powershell
+python .claude/scripts/daily_arxiv_pipeline.py --once --allow-dangerous-claude
+```
+
+或者只在当前终端会话中设置：
+
+```powershell
+$env:LOCAL_FIRST_VAULT_ALLOW_DANGEROUS_CLAUDE = "1"
+```
+
+这个开关只影响本机运行，不应该写入公开仓库配置。
 
 ## 6. Gemini CLI
 
@@ -323,7 +339,7 @@ Python 检索、审计和 arXiv dry-run 可以在 macOS/Linux 上运行，但本
 示例 cron 只作结构参考：
 
 ```cron
-0 12 * * * cd /path/to/local-first-research-vault && python3 .claude/scripts/daily_arxiv_pipeline.py --dry-run --source search-api --max-candidates 30 --days-back 14 >> projects/arxiv-daily/cron.log 2>&1
+0 12 * * * cd /path/to/local-first-research-vault && python3 .claude/scripts/arxiv_metadata_sync.py --incremental --days-back 60 --overlap-days 3 && python3 .claude/scripts/daily_arxiv_pipeline.py --dry-run --source mirror-first --max-candidates 30 --days-back 14 >> projects/arxiv-daily/cron.log 2>&1
 ```
 
 ## 11. 状态解释

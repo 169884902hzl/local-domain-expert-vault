@@ -28,7 +28,7 @@ rg -n --hidden --glob '!.git/**' "(OPENAI_API_KEY|ANTHROPIC_AUTH_TOKEN|ZOTERO_AP
 
 如果你是从 GitHub clone 的使用者，不需要执行本节；仓库根目录已经是脱敏发布包。
 
-如果你是原维护者，并且手上还有完整本地工作目录，优先上传脱敏发布包：
+如果你手上还有包含私有运行状态的完整本地工作目录，优先上传脱敏发布包：
 
 ```powershell
 cd exports/github-ready-vault-YYYYMMDD
