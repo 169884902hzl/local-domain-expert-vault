@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import shutil
 import subprocess
@@ -22,7 +23,8 @@ from generate_daily_ideas import (
 from kb_common import safe_print, safe_write, today_iso, vault_path
 
 
-CLAUDE_COMMAND = ["claude", "--permission-mode", "bypassPermissions", "--effort", "low", "-p"]
+CLAUDE_PERMISSION_MODE = os.environ.get("CLAUDE_PERMISSION_MODE", "default")
+CLAUDE_COMMAND = ["claude", "--permission-mode", CLAUDE_PERMISSION_MODE, "--effort", "low", "-p"]
 IDEA_FIELDS = [
     "title",
     "problem",

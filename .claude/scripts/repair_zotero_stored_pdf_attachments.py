@@ -436,7 +436,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", choices=["run-logs", "collection"], default="run-logs")
     parser.add_argument("--run-dates", default="all", help="Comma-separated run dates or 'all'.")
-    parser.add_argument("--collection", default="ZJK4PK4G")
+    parser.add_argument("--collection", default="", help="Zotero collection key. Required with --source collection.")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--limit", type=int, default=0)
@@ -447,6 +447,9 @@ def main() -> int:
     args = parser.parse_args()
 
     run_dates = discover_run_dates() if args.run_dates.lower() == "all" else split_csv(args.run_dates)
+    if args.source == "collection" and not args.collection.strip():
+        safe_print("ERROR: missing_collection_key. Pass --collection or set a private local wrapper script.")
+        return 2
     records = read_collection_linked_pdf_records(args.collection) if args.source == "collection" else read_run_records(run_dates)
     if not args.dry_run and zotero_running() and not args.write_even_if_zotero_running:
         safe_print("ERROR: Zotero is running. Close Zotero before applying SQLite/storage repair.")

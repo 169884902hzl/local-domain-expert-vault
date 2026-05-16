@@ -106,7 +106,7 @@ Claudian 的主配置在：
 | 配置 | 当前值/含义 |
 | --- | --- |
 | `locale` | `zh-CN` |
-| `permissionMode` | `yolo`，用于高自动化工作流 |
+| `permissionMode` | `normal`，公开包默认保守权限 |
 | `model` | `opus` |
 | `effortLevel` | `max` |
 | `mediaFolder` | `attachments` |
@@ -118,7 +118,9 @@ Claudian 的主配置在：
 
 ### 重要安全提醒
 
-公开配置保留了 `permissionMode = yolo`，因为这个 vault 的自动化流程原本就是围绕较高自治能力设计的。新用户如果只是浏览或试用，建议先在 Claudian UI 里改成更保守的权限模式，确认命令行为后再提高权限。
+公开配置默认使用 `permissionMode = normal`。这个 vault 的完整自动化流程原本可以在更高自治权限下运行，但新用户第一次打开仓库时不应该默认继承高权限写入和命令执行边界。
+
+如果你已经理解 `.claude/commands/` 和 `.claude/scripts/` 会做什么，并且愿意让 agent 自动读写 vault 文件，可以在 Claudian UI 里手动切到更高权限模式。不要把高权限配置直接提交到公开仓库。
 
 不管使用什么权限模式，都不要让 agent 看到真实 API key 文本；用系统环境变量或本机 CLI 登录状态提供凭据。
 
@@ -245,4 +247,3 @@ codex --version
 ### 自动化写了很多 `projects/` 内容
 
 这是正常的。`projects/` 是运行产物和研究议程目录，默认被 `.gitignore` 忽略，不会上传 GitHub。
-

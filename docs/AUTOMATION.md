@@ -70,7 +70,7 @@ python .claude/scripts/arxiv_metadata_sync.py --incremental --days-back 60 --ove
 python .claude/scripts/arxiv_metadata_sync.py --status
 ```
 
-metadata 数据库会写入 `projects/arxiv-daily/metadata/`，该目录内容默认不提交 Git。
+非 dry-run 的 metadata 同步会写入 `projects/arxiv-daily/metadata/`，该目录内容默认不提交 Git。`--dry-run` 使用内存数据库，不创建 SQLite 或 lock 文件。
 
 ## 3. 配置 Zotero
 
@@ -99,6 +99,8 @@ setx ZOTERO_COLLECTION_KEY "<your-collection-key>"
 python .claude/scripts/zotero_import.py --preflight --json
 ```
 
+默认 `--json` 会脱敏 collection key、library id、collection name 和本机 collection tree id，适合贴到 issue 或审计报告。只有私下排障时才使用 `--unsafe-json`，不要把该输出公开。
+
 可选环境变量：
 
 | 变量 | 用途 |
@@ -116,6 +118,8 @@ python .claude/scripts/zotero_import.py --preflight --json
 | `ZOTERO_REQUIRE_STORED_PDF` | 是否要求 stored PDF |
 
 不要把这些值写入仓库。
+
+附件同步、WebDAV、linked attachment、本地附件目录迁移和 Zotero 存储扩展见 [ZOTERO_STORAGE.md](ZOTERO_STORAGE.md)。公开仓库不会内置个人 Zotero 存储配置。
 
 ## 4. 导入单篇论文
 
@@ -231,11 +235,11 @@ powershell -ExecutionPolicy Bypass -File .claude/scripts/run_daily_codex_seed_re
 codex --version
 ```
 
-注意：当前包装器会使用 Codex CLI 的非交互执行模式，并带有自动化参数。只在你理解本机 CLI 权限边界时启用。
+注意：当前包装器默认不绕过 Codex sandbox/approval。只有在你完全理解本机 CLI 权限边界时，才手动追加 `-DangerouslyBypassSandbox`。
 
 ## 8. Windows 计划任务
 
-所有注册脚本都支持 `-DryRun`。先 dry run，再注册。
+所有注册脚本都支持 `-DryRun`。先 dry run，再注册。默认 dry-run 输出会把当前 Windows 用户名和本机绝对路径替换成占位符；如果你在自己机器上私下排障，可以追加 `-ShowLocalPaths`。
 
 ### 每日 arXiv scout
 
@@ -299,7 +303,17 @@ Unregister-ScheduledTask -TaskName DailyCodexSeedReview -Confirm:$false
 Unregister-ScheduledTask -TaskName WeeklyResearchAgendaReview -Confirm:$false
 ```
 
-## 10. 状态解释
+## 10. macOS/Linux 自动化边界
+
+Python 检索、审计和 arXiv dry-run 可以在 macOS/Linux 上运行，但本仓库只提供 Windows Task Scheduler 注册脚本。非 Windows 用户可以把同等命令放入 `cron`、`systemd timer` 或自己的 CI runner；注意不要把 API key 写入仓库。
+
+示例 cron 只作结构参考：
+
+```cron
+0 12 * * * cd /path/to/local-first-research-vault && python3 .claude/scripts/daily_arxiv_pipeline.py --dry-run --source search-api --max-candidates 30 --days-back 14 >> projects/arxiv-daily/cron.log 2>&1
+```
+
+## 11. 状态解释
 
 | 状态 | 含义 |
 | --- | --- |
@@ -326,4 +340,3 @@ Unregister-ScheduledTask -TaskName WeeklyResearchAgendaReview -Confirm:$false
 11. weekly agenda review
 
 这样做的好处是每一步都有明确验收，不会把 Zotero、Gemini、Codex、计划任务的问题混在一起。
-

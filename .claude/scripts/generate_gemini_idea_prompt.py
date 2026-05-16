@@ -97,7 +97,7 @@ def render_prompt(*, run_date: str, candidates_path: Path | None, items: list[di
         "",
         "## Prompt",
         "",
-        "你是我的研究 idea 发散伙伴，也是一个非常严厉的 Physical AI / robotics PhD advisor。研究背景是双臂机器人 DLO 操控、触觉、VLA、Diffusion Policy、Sim-to-Real、具身智能机器人学习。",
+        "你是我的研究 idea 发散伙伴，也是一个非常严厉的 Physical AI / robotics PhD advisor。研究背景是双臂机器人 DLO 操控、触觉、VLA、Diffusion Policy、Sim-to-Real 和 embodied robot learning。",
         "",
         "我不希望你太快收敛，也不要只做保守的论文总结。请先发散再审稿，寻找被忽略的问题、跨方向组合、反常识假设、工程病灶、低成本试验切入点，以及能形成博士课题主线的创新点。可以给不成熟但有潜力的 idea，但请标出哪些地方需要后续核查。",
         "",

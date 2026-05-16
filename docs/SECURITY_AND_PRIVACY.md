@@ -14,12 +14,12 @@
 - `projects/arxiv-daily/metadata/*.sqlite`
 - 任何 `.env`、key、token、cookie、credential 文件
 
-本地体检发现旧备份目录里有疑似真实 API key。发布包不会包含这些文件，但已经暴露在本机文件系统里的 key 建议立即轮换。
+如果你曾经把真实 API key 写入本地备份、日志或截图，即使这些文件没有进入公开仓库，也应该轮换对应 key。不要把具体 key、会话 id、机器名或私有路径写进 issue、README 或公开审计报告。
 
 ## 公开前检查
 
 ```powershell
-rg -n --hidden --glob '!exports/**' --glob '!archive/**' --glob '!.git/**' "(OPENAI_API_KEY|ANTHROPIC_AUTH_TOKEN|ZOTERO_API_KEY|GEMINI_API_KEY|sk-[0-9A-Za-z_-]{20,}|ghp_[0-9A-Za-z_]{20,})" .
+rg -n --hidden --glob '!.git/**' "(OPENAI_API_KEY|ANTHROPIC_AUTH_TOKEN|ZOTERO_API_KEY|GEMINI_API_KEY|sk-[0-9A-Za-z_-]{20,}|ghp_[0-9A-Za-z_]{20,})" .
 ```
 
 如果命中的是文档里对环境变量名的说明，可以保留；如果命中真实 key 值，必须移除并轮换。

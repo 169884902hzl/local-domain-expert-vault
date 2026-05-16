@@ -1,6 +1,7 @@
 param(
   [switch]$PrepareOnly,
-  [switch]$SkipCodex
+  [switch]$SkipCodex,
+  [switch]$DangerouslyBypassSandbox
 )
 
 $ErrorActionPreference = "Stop"
@@ -85,11 +86,23 @@ try {
         "--ephemeral",
         "--cd",
         "$VaultRoot",
-        "--dangerously-bypass-approvals-and-sandbox",
         "--output-last-message",
         "$RawOutputPath",
         "-"
       )
+      if ($DangerouslyBypassSandbox) {
+        $CodexArgs = @(
+          "exec",
+          "--skip-git-repo-check",
+          "--ephemeral",
+          "--cd",
+          "$VaultRoot",
+          "--dangerously-bypass-approvals-and-sandbox",
+          "--output-last-message",
+          "$RawOutputPath",
+          "-"
+        )
+      }
       for ($Attempt = 1; $Attempt -le $CodexMaxAttempts; $Attempt++) {
         if (Test-Path $CodexEventsPath) { Remove-Item -LiteralPath $CodexEventsPath -Force -ErrorAction SilentlyContinue }
         if (Test-Path $CodexErrorPath) { Remove-Item -LiteralPath $CodexErrorPath -Force -ErrorAction SilentlyContinue }

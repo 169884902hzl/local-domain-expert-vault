@@ -1,0 +1,15 @@
+# License / Reuse Boundary
+
+This repository is public for inspection, learning, and personal adaptation.
+
+No broad open-source license is granted yet. Unless a future release adds a standard license, you may not redistribute, sell, relicense, or publish substantial copies of this repository as your own project without permission from the repository maintainer.
+
+The repository contains three kinds of material that may need different licensing decisions:
+
+- scripts and configuration files for the local-first research workflow;
+- documentation about Obsidian, Zotero, Claudian, and automation setup;
+- literature notes and summaries derived from third-party academic papers.
+
+Original papers, figures, datasets, trademarks, and third-party tools remain governed by their own authors, publishers, and licenses.
+
+If you want to reuse the workflow publicly, create your own vault, replace the literature notes with your own material, remove private configuration, and choose an appropriate license for your derived project.

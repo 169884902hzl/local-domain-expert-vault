@@ -48,7 +48,7 @@ def _env(name: str, default: str = "") -> str:
 LOCAL_API = _env("ZOTERO_LOCAL_API", "http://localhost:23119/api/users/0")
 LOCAL_CONNECTOR_API = _env("ZOTERO_CONNECTOR_API", "http://127.0.0.1:23119")
 WEB_API = _env("ZOTERO_WEB_API", "https://api.zotero.org")
-DEFAULT_COLLECTION_KEY = _env("ZOTERO_COLLECTION_KEY", "ZJK4PK4G")
+DEFAULT_COLLECTION_KEY = _env("ZOTERO_COLLECTION_KEY", "")
 DEFAULT_TAGS = ["auto-arxiv", "embodied-ai", "daily-scout"]
 PDF_UPLOAD_DISABLED_VALUES = {"0", "false", "no", "off", "disabled"}
 PDF_UPLOAD_ENABLED_VALUES = {"1", "true", "yes", "on", "enabled"}
@@ -190,7 +190,15 @@ def _web_headers(api_key: str) -> dict[str, str]:
     }
 
 
+def require_collection_key(collection_key: str = DEFAULT_COLLECTION_KEY) -> str:
+    key = collection_key.strip()
+    if not key:
+        raise ZoteroError("missing_collection_key")
+    return key
+
+
 def read_collection(collection_key: str = DEFAULT_COLLECTION_KEY) -> dict[str, Any]:
+    collection_key = require_collection_key(collection_key)
     url = f"{LOCAL_API}/collections/{urllib.parse.quote(collection_key)}?format=json"
     return _read_json(url, timeout=10)
 
@@ -976,6 +984,7 @@ def import_ranked_paper(
     poll_local: bool = True,
     local_sync_timeout: int = 300,
 ) -> ImportResult:
+    collection_key = require_collection_key(collection_key)
     existing = find_existing_paper(ranked.paper, collection_key)
     if existing:
         if should_require_stored_pdf() and existing.zotero_key:
@@ -1023,6 +1032,9 @@ def preflight(collection_key: str = DEFAULT_COLLECTION_KEY) -> dict[str, Any]:
         "pdf_sync_ready": False,
         "errors": [],
     }
+    if not collection_key.strip():
+        result["errors"].append("missing_collection_key")
+        return result
     try:
         collection = read_collection(collection_key)
         result["local_read"] = True
@@ -1049,6 +1061,32 @@ def preflight(collection_key: str = DEFAULT_COLLECTION_KEY) -> dict[str, Any]:
     return result
 
 
+def _redact_preflight(result: dict[str, Any]) -> dict[str, Any]:
+    collection_key = str(result.get("collection_key") or "")
+
+    def redact_text(value: Any) -> Any:
+        if not isinstance(value, str):
+            return value
+        if collection_key:
+            value = value.replace(collection_key, "<collection_key>")
+        return value
+
+    redacted = dict(result)
+    if collection_key:
+        redacted["collection_key"] = "<configured>"
+    for key in ("library_id", "collection_name"):
+        if key in redacted and redacted[key]:
+            redacted[key] = "<redacted>"
+    redacted["errors"] = [redact_text(error) for error in result.get("errors", [])]
+    connector = dict(result.get("local_connector") or {})
+    if connector.get("collection_tree_id"):
+        connector["collection_tree_id"] = "<redacted>"
+    if connector.get("errors"):
+        connector["errors"] = [redact_text(error) for error in connector.get("errors", [])]
+    redacted["local_connector"] = connector
+    return redacted
+
+
 def _load_ranked(path: str) -> RankedPaper:
     text = sys.stdin.read() if path == "-" else open(path, encoding="utf-8").read()
     return RankedPaper.from_dict(json.loads(text))
@@ -1061,12 +1099,14 @@ def main() -> int:
     parser.add_argument("--paper-json", help="JSON file containing one RankedPaper record, or '-' for stdin.")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--unsafe-json", action="store_true", help="Print raw local Zotero metadata. Do not paste this output publicly.")
     args = parser.parse_args()
 
     if args.preflight:
         result = preflight(args.collection)
-        if args.json:
-            safe_print(json.dumps(result, ensure_ascii=False, indent=2))
+        if args.json or args.unsafe_json:
+            output = result if args.unsafe_json else _redact_preflight(result)
+            safe_print(json.dumps(output, ensure_ascii=False, indent=2))
         else:
             safe_print("PASS local Zotero read" if result["local_read"] else "FAIL local Zotero read")
             safe_print("PASS Zotero write credentials" if result["write_credentials"] else "FAIL missing ZOTERO_API_KEY")

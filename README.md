@@ -146,10 +146,20 @@ python .claude/scripts/audit_kb.py
 python .claude/scripts/kb_search.py "diffusion policy DLO" --limit 5
 ```
 
+macOS/Linux 可用同样的 Python 命令：
+
+```bash
+git clone https://github.com/<owner>/<repo>.git
+cd <repo>
+python3 --version
+python3 .claude/scripts/audit_kb.py
+python3 .claude/scripts/kb_search.py "diffusion policy DLO" --limit 5
+```
+
 要求：
 
 - Python 3.10+
-- PowerShell 5+ 或 PowerShell 7+
+- PowerShell 5+ 或 PowerShell 7+（Windows 自动化脚本需要）
 - Obsidian 可选，但推荐安装
 
 基础审计和检索脚本只依赖 Python 标准库。你不配置 Zotero、不安装 Gemini、不登录 Codex，也能浏览 `wiki/`、运行 `audit_kb.py` 和 `kb_search.py`。
@@ -242,6 +252,8 @@ notepad .claude/scripts/config.json
 
 把 `collection_key` 改成你自己的 Zotero collection key。如果你不需要固定 collection，也可以通过环境变量或命令参数传入。
 
+公开脚本不会内置维护者的 collection key。缺少 collection 配置时，Zotero 导入会明确返回 `missing_collection_key`，而不是默认写入某个私有 collection。
+
 ### 2. 选择 Zotero 连接方式
 
 | 场景 | 需要什么 | 说明 |
@@ -266,10 +278,13 @@ setx ZOTERO_COLLECTION_KEY "<your-collection-key>"
 python .claude/scripts/zotero_import.py --preflight --json
 ```
 
+`--json` 默认会脱敏本机 Zotero collection 和 library 信息；私下排障才使用 `--unsafe-json`。
+
 常见结果：
 
 - `PASS Zotero local read`：本机 Zotero connector 可读。
 - `PASS Zotero write credentials`：Web API 写入凭据可用。
+- `missing_collection_key`：还没有配置自己的 Zotero collection key。
 - `FAIL missing ZOTERO_API_KEY`：不能写入 Zotero Web API，但本地浏览和本地检索仍可用。
 
 ### 4. 导入单篇论文
@@ -280,6 +295,12 @@ python .claude/scripts/audit_kb.py
 ```
 
 `ZOTERO_KEY` 是 Zotero item key。导入完成后会在 `wiki/topics/` 生成或更新文献笔记，并补齐本地知识网络字段。
+
+### 5. Zotero 附件和存储扩展
+
+Zotero 附件同步有多种路线：Zotero 官方存储、WebDAV、linked attachment、本地附件目录迁移，或配合 Better BibTeX / ZotFile / Attanger 等插件。这个公开仓库不内置任何个人存储账号、服务器地址或附件目录。
+
+可复现配置说明见 [docs/ZOTERO_STORAGE.md](docs/ZOTERO_STORAGE.md)。如果你要在自己的 README 里展示“我们如何扩容 Zotero”，请先补对应截图并打码。
 
 ## Claudian / Claude Code 工作流
 
@@ -456,6 +477,10 @@ Get-Content -Encoding UTF8 projects/research-agenda/reviews/daily-codex-seed-rev
 - 不提交 `.claude/backups/`、`.claudian/sessions/`、`.obsidian/workspace.json`。
 - 不提交 PDF、SQLite、Zotero 缓存和本地自动化产物。
 - 不把真实 key 粘到 issue、README、截图或日志里。
+
+## License / Reuse Boundary
+
+This repository is public for inspection, learning, and personal adaptation, but it does not grant a broad open-source reuse license yet. See [LICENSE](LICENSE). The scripts, documentation, and literature notes may need separate licensing decisions because the notes summarize third-party academic papers.
 
 公开包已经带有 `.gitignore`，但上传前仍建议运行：
 

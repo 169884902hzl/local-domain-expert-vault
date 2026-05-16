@@ -25,7 +25,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 OUT_DIR = vault_path("wiki", "topics")
 CONFIG_PATH = SCRIPT_DIR / "config.json"
 
-DEFAULT_COLLECTION_KEY = "ZJK4PK4G"
+DEFAULT_COLLECTION_KEY = ""
 DEFAULT_LIMIT = 500
 
 SKIP_WORDS = {
@@ -306,6 +306,9 @@ def main() -> int:
 
     config = load_config()
     collection_key = config.get("collection_key", DEFAULT_COLLECTION_KEY)
+    if not str(collection_key).strip():
+        safe_print("ERROR: missing_collection_key. Set collection_key in .claude/scripts/config.json or ZOTERO_COLLECTION_KEY.")
+        return 2
     limit = int(config.get("limit", DEFAULT_LIMIT))
     schema = load_schema()
     items = fetch_items(collection_key, limit)

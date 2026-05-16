@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import argparse
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
@@ -66,11 +66,13 @@ def file_lock(path: Path, *, timeout: int = 180):
             pass
 
 
-def connect(db_path: Path = DEFAULT_DB) -> sqlite3.Connection:
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(db_path)
+def connect(db_path: Path | str = DEFAULT_DB) -> sqlite3.Connection:
+    if str(db_path) != ":memory:":
+        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
+    if str(db_path) != ":memory:":
+        conn.execute("PRAGMA journal_mode=WAL")
     init_db(conn)
     return conn
 
@@ -307,8 +309,9 @@ def sync_metadata(
     total_written = 0
     errors: list[str] = []
     scopes: list[dict[str, str]] = []
-    conn = connect(db_path)
-    with file_lock(LOCK_PATH):
+    conn = connect(":memory:" if dry_run else db_path)
+    lock_context = nullcontext() if dry_run else file_lock(LOCK_PATH)
+    with lock_context:
         for set_name in sets:
             scope = f"set:{set_name}"
             state = conn.execute("SELECT * FROM sync_state WHERE scope=?", (scope,)).fetchone()

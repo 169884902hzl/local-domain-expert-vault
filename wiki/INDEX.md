@@ -2,7 +2,7 @@
 title: Wiki Index
 type: index
 created: 2026-04-25
-updated: 2026-04-25
+updated: 2026-05-16
 ---
 
 # Wiki Index
@@ -44,5 +44,5 @@ WHERE type = "literature"
 SORT year DESC
 ```
 
-> 共 89 篇文献笔记，来自 Zotero collection「具身智能机器人学习」
-> 精读某篇论文：在 Claudian 中使用 `/read-paper <zotero_key>`
+> 文献数量以 `wiki/topics/` 实际文件和 Dataview 查询结果为准；公开仓库不绑定任何私有 Zotero collection。
+> 精读某篇论文：在 Claudian 中使用 `/read-paper <zotero_key>`。

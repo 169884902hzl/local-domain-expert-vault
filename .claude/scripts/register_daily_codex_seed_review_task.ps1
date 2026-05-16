@@ -1,5 +1,6 @@
 param(
   [switch]$DryRun,
+  [switch]$ShowLocalPaths,
   [string]$TaskName = "DailyCodexSeedReview",
   [string]$Time = "16:30"
 )
@@ -20,12 +21,18 @@ if ($TimeParts.Count -ne 2) {
 $At = [datetime]::Today.AddHours([int]$TimeParts[0]).AddMinutes([int]$TimeParts[1])
 
 if ($DryRun) {
-  Write-Host "DRY-RUN Register-ScheduledTask -TaskName $TaskName -UserId $CurrentUser -Daily $Time"
-  Write-Host "VaultRoot: $VaultRoot"
-  Write-Host "WrapperPath: $WrapperPath"
+  $DisplayUser = if ($ShowLocalPaths) { $CurrentUser } else { "<current-user>" }
+  $DisplayVaultRoot = if ($ShowLocalPaths) { $VaultRoot } else { "<vault-root>" }
+  $DisplayWrapperPath = if ($ShowLocalPaths) { $WrapperPath } else { "<vault-root>\.claude\scripts\run_daily_codex_seed_review_task.ps1" }
+  $DisplayTaskArguments = if ($ShowLocalPaths) { $TaskArguments } else { "-NoProfile -ExecutionPolicy Bypass -File `"<vault-root>\.claude\scripts\run_daily_codex_seed_review_task.ps1`"" }
+  $DisplayLogDir = if ($ShowLocalPaths) { $LogDir } else { "<vault-root>\projects\research-agenda\reviews" }
+  Write-Host "DRY-RUN Register-ScheduledTask -TaskName $TaskName -UserId $DisplayUser -Daily $Time"
+  Write-Host "VaultRoot: $DisplayVaultRoot"
+  Write-Host "WrapperPath: $DisplayWrapperPath"
   Write-Host "ActionExecute: powershell.exe"
-  Write-Host "ActionArguments: $TaskArguments"
-  Write-Host "LogDir: $LogDir"
+  Write-Host "ActionArguments: $DisplayTaskArguments"
+  Write-Host "LogDir: $DisplayLogDir"
+  Write-Host "Tip: add -ShowLocalPaths to print real local paths for private debugging."
   exit 0
 }
 
