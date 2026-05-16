@@ -34,6 +34,10 @@ output/ projects/   综述、比较、研究 idea、每日 arXiv 日志
 
 ![Claudian local-first RL Token research answer](docs/assets/claudian-rl-token-result.png)
 
+下面是 research-agenda 工作流沉淀出的一个 generated-for-review idea seed。它展示的是从本地证据、方法改进主张、baseline / killer experiment、novelty pressure 到 no-hardware pilot 的结构化研究计划；这些 claim 仍需要人工审阅和实验验证。
+
+![Gemini-assisted research idea seed with local evidence and review fields](docs/assets/gemini-research-idea-seed-example.png)
+
 ## 其他专业怎么迁移
 
 如果你不是机器人方向，也可以把这个仓库当成一套研究系统模板来用。建议保留 Obsidian + Zotero + Claudian + local retrieval + automation 的整体结构，然后重点替换这些地方：
