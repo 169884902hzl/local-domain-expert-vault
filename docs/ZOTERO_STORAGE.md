@@ -63,6 +63,10 @@ Reproducible setup:
 
 Do not put the generated WebDAV username, password, account name, personal avatar, or permission-management table into Git. Screenshots for public docs should show the provider, the WebDAV endpoint, and the fact that the app is Zotero, but the username/password and personal account area must be masked.
 
+![CSTCloud Data Capsule WebDAV client settings for Zotero](assets/cstcloud-webdav-zotero.png)
+
+This screenshot is cropped and redacted. It keeps the WebDAV tab, public endpoint, and Zotero app entry visible, while masking the generated credential fields and removing the personal account area.
+
 ## Option C: Linked Attachments
 
 Use this if PDFs live in a local or cloud-synced folder outside Zotero storage.
@@ -102,7 +106,7 @@ The public scripts are intentionally conservative:
 - `--unsafe-json` exists only for private debugging;
 - PDF cache, SQLite metadata, and local attachment outputs are ignored by Git.
 
-## Screenshots To Add Later
+## Additional Screenshots To Add
 
 If you want the GitHub README to show your exact Zotero expansion setup, capture only the relevant route and redact private fields.
 

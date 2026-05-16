@@ -111,6 +111,8 @@ Claudian 的主配置在：
 | `effortLevel` | `max` |
 | `mediaFolder` | `attachments` |
 | `systemPrompt` | 本地证据优先、Zotero 脚本化导入、精读 finalize、维护后审计 |
+| `providerConfigs.claude.safeMode` | `acceptEdits`，Claudian provider 级行为；首次使用前请在 UI 中确认 |
+| `providerConfigs.codex.safeMode` | `workspace-write`，Codex provider 级行为；首次使用前请在 UI 中确认 |
 | `providerConfigs.claude.cliPath` | 已清空，用户自己配置 |
 | `providerConfigs.codex.cliPath` | 已清空，用户自己配置 |
 | `sharedEnvironmentVariables` | 已清空 |
@@ -123,6 +125,10 @@ Claudian 的主配置在：
 如果你已经理解 `.claude/commands/` 和 `.claude/scripts/` 会做什么，并且愿意让 agent 自动读写 vault 文件，可以在 Claudian UI 里手动切到更高权限模式。不要把高权限配置直接提交到公开仓库。
 
 不管使用什么权限模式，都不要让 agent 看到真实 API key 文本；用系统环境变量或本机 CLI 登录状态提供凭据。
+
+`.claude/settings.json` 是 Claude Code 的项目级 allow list。公开包默认只保留 `Read`、`Glob`、`Grep` 和少数明确的本地安全命令，例如 `audit_kb.py`、`kb_search.py`、`daily_arxiv_pipeline.py --dry-run`、`arxiv_metadata_sync.py --dry-run` 和脱敏 Zotero preflight。第三方 MCP、通用 `Write/Edit`、`curl`、`claude`、`gemini`、宽泛 `python *` 不在公开默认 allow list 中。
+
+如果你要启用更完整的 Zotero、arXiv、Gemini 或 Codex 自动化，请先理解对应命令会读写哪些目录，再在自己的本地配置中手动放宽权限。不要把本机高权限 allow list 提交回公开仓库。
 
 ## Claudian system prompt 做了什么
 

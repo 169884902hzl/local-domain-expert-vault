@@ -304,7 +304,7 @@ Zotero 附件同步有多种路线：Zotero 官方存储、WebDAV、linked attac
 
 ![CSTCloud 数据胶囊 WebDAV client settings for Zotero](docs/assets/cstcloud-webdav-zotero.png)
 
-截图展示的是数据胶囊 WebDAV 客户端访问管理页；用户名、密码、创建时间和个人账号信息已打码。
+截图展示的是裁剪后的数据胶囊 WebDAV 客户端访问管理页；用户名、密码、创建时间和个人账号区域已打码或移除。
 
 ## Claudian / Claude Code 工作流
 

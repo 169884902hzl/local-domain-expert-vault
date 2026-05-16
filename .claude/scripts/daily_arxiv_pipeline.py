@@ -29,6 +29,7 @@ from arxiv_ranker import (
     rank_papers,
 )
 from generate_gemini_idea_prompt import render_prompt as render_gemini_prompt
+from arxiv_metadata_sync import DEFAULT_DB as ARXIV_METADATA_DB
 from arxiv_metadata_sync import query_mirror, mirror_status, connect as connect_mirror
 from kb_common import extract_frontmatter, parse_frontmatter_map, safe_print, safe_write, today_iso, vault_path
 from zotero_import import (
@@ -209,11 +210,18 @@ def collect_candidates_from_source(
     fetch_timeout: int,
     fetch_retries: int,
     query_delay: float,
+    dry_run: bool = False,
 ) -> tuple[list[ArxivPaper], dict[str, Any]]:
     mirror_info: dict[str, Any] = {}
     if source in {"mirror-first", "mirror-only"}:
         try:
-            papers, mirror_info = query_mirror(queries=queries, days_back=days_back, max_candidates=max_candidates, as_of=as_of)
+            papers, mirror_info = query_mirror(
+                queries=queries,
+                days_back=days_back,
+                max_candidates=max_candidates,
+                as_of=as_of,
+                db_path=":memory:" if dry_run else ARXIV_METADATA_DB,
+            )
         except Exception as exc:
             papers, mirror_info = [], {"source": "mirror_failed", "records_total": 0, "last_success_at": "", "stale": True}
             errors.append(f"arxiv_mirror_failed:{exc}")
@@ -242,12 +250,15 @@ def collect_candidates_from_source(
             "source": "search_api" if source == "search-api" else "search_api_fallback",
             "search_api_fallback_used": source == "mirror-first",
         }
-    try:
-        conn = connect_mirror()
-        status = mirror_status(conn)
-        conn.close()
-    except Exception:
+    if dry_run:
         status = {}
+    else:
+        try:
+            conn = connect_mirror()
+            status = mirror_status(conn)
+            conn.close()
+        except Exception:
+            status = {}
     return papers, {
         **mirror_info,
         "source": "search_api_empty",
@@ -1569,6 +1580,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
         fetch_timeout=args.fetch_timeout,
         fetch_retries=args.fetch_retries,
         query_delay=args.query_delay,
+        dry_run=args.dry_run,
     )
     cache_fallback = False
     ranked_all = rank_papers(papers)

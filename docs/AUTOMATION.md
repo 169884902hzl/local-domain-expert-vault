@@ -325,7 +325,7 @@ Python 检索、审计和 arXiv dry-run 可以在 macOS/Linux 上运行，但本
 
 `partial` 不一定是坏状态。先读日志里的 `ERROR:` 行，再决定是否要配置缺失能力。
 
-## 11. 推荐启用顺序
+## 12. 推荐启用顺序
 
 1. `audit_kb.py`
 2. `kb_search.py`
