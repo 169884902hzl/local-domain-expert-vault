@@ -1,0 +1,92 @@
+﻿{
+    "userName":  "",
+    "permissionMode":  "yolo",
+    "model":  "opus",
+    "thinkingBudget":  "medium",
+    "effortLevel":  "max",
+    "serviceTier":  "default",
+    "enableAutoTitleGeneration":  true,
+    "titleGenerationModel":  "opus",
+    "excludedTags":  [
+                         "template",
+                         "meta",
+                         "dashboard"
+                     ],
+    "mediaFolder":  "attachments",
+    "systemPrompt":  "你是这个 Obsidian vault 的本地文献知识库专家，重点领域是 robotic manipulation、DLO 操控、Sim-to-Real、VLM 与机器人学习。你正在维护这个 Obsidian vault，必须本地证据优先，并且必须按本 vault 的脚本化工作流执行。\n\n最高优先级规则：\n1. 回答任何领域问题前，必须先运行 python .claude/scripts/kb_search.py \"问题\" --limit 12，打开并阅读返回的 wiki/topics、wiki/concepts、wiki/entities 后再回答。回答必须引用本地笔记路径。若返回 NO_LOCAL_MATCHES，说明 vault 无本地证据，并询问用户是否同意使用 web/arXiv/PubMed；不得直接外搜。\n2. 用户说“导入/新增/加入/ingest/import + Zotero key 或论文名”时，先确认 Zotero key，再运行 python .claude/scripts/ingest_paper.py ZOTERO_KEY --force-overwrite-stub。不要编造 key。\n3. 用户说“精读/read-paper/读这篇”时，必须执行 .claude/commands/read-paper.md 的完整流程：获取全文，写 raw/readings/ZOTERO_KEY-analysis.md，运行 finalize_reading.py，运行维护脚本和严格审计。不得只写简短总结。\n4. 精读分析必须有 Evidence Metadata、Problem、Key Contributions、Method、Experiments、Limitations、Key Takeaways、结构化提取、本地引用关系。禁止留下“待精读补充”、通用 summary、空 Evidence Notes 或无证据的结果数字。\n5. 批量处理时一篇一篇获取 fulltext，不要并行抓多个全文。每完成一篇就更新进度文件；上下文接近上限时先写明已完成/待处理/失败列表，再 compact 后继续。\n6. 创建或更新笔记时，遵守 .claude/scripts/schema.json 的 frontmatter required 字段和 canonical_order。引用概念、论文、研究者时使用 [[wikilinks]] 并优先链接到 wiki/ 已有页面。\n7. 文献精读只有在 finalize_reading.py 成功写回后，才能把 literature status 改为 done，并更新 updated。\n8. 批量导入、批量精读、概念页维护结束后，必须运行：python .claude/scripts/fix_wikilinks.py；python .claude/scripts/backfill_concepts.py；python .claude/scripts/extract_citation_links.py；python .claude/scripts/audit_kb.py --strict-reading。\n9. 概念页不是论文索引。用户要求更新/修复/补全概念页时，执行 /update-concepts；概念页必须基于本地文献证据写 Definition、Method Families、Key Papers、Evidence Map、Open Problems、Related Concepts、Related Papers，完成后才能把 concept status 改为 done。\n10. raw/ 是原始材料区，默认只追加不改写。不要回显 secrets。",
+    "persistentExternalContextPaths":  [
+
+                                       ],
+    "sharedEnvironmentVariables":  "",
+    "envSnippets":  [
+
+                    ],
+    "customContextLimits":  {
+
+                            },
+    "keyboardNavigation":  {
+                               "scrollUpKey":  "w",
+                               "scrollDownKey":  "s",
+                               "focusInputKey":  "i"
+                           },
+    "locale":  "zh-CN",
+    "providerConfigs":  {
+                            "claude":  {
+                                           "safeMode":  "acceptEdits",
+                                           "cliPath":  "",
+                                           "cliPathsByHost":  {
+
+                                                              },
+                                           "loadUserSettings":  true,
+                                           "enableChrome":  true,
+                                           "enableBangBash":  true,
+                                           "enableOpus1M":  false,
+                                           "enableSonnet1M":  false,
+                                           "customModels":  "",
+                                           "lastModel":  "opus",
+                                           "environmentVariables":  "",
+                                           "environmentHash":  ""
+                                       },
+                            "codex":  {
+                                          "enabled":  true,
+                                          "safeMode":  "workspace-write",
+                                          "cliPath":  "",
+                                          "cliPathsByHost":  {
+
+                                                             },
+                                          "reasoningSummary":  "detailed",
+                                          "environmentVariables":  "",
+                                          "environmentHash":  "",
+                                          "installationMethodsByHost":  {
+
+                                                                        },
+                                          "wslDistroOverridesByHost":  {
+
+                                                                       }
+                                      }
+                        },
+    "settingsProvider":  "claude",
+    "savedProviderModel":  {
+                               "claude":  "opus",
+                               "codex":  "gpt-5.4"
+                           },
+    "savedProviderEffort":  {
+                                "claude":  "max",
+                                "codex":  "xhigh"
+                            },
+    "savedProviderServiceTier":  {
+                                     "codex":  "default"
+                                 },
+    "savedProviderThinkingBudget":  {
+                                        "claude":  "medium",
+                                        "codex":  "medium"
+                                    },
+    "lastCustomModel":  "",
+    "maxTabs":  6,
+    "tabBarPosition":  "input",
+    "enableAutoScroll":  true,
+    "openInMainTab":  false,
+    "hiddenProviderCommands":  {
+
+                               }
+}

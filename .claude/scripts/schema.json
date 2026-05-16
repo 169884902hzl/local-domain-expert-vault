@@ -1,0 +1,335 @@
+{
+  "literature": {
+    "required": ["title", "tags", "created", "updated", "type", "status", "summary", "authors", "year", "venue", "zotero_key"],
+    "required_sections": ["## 摘要", "## 中文简述", "## 关键贡献", "## 结构化提取", "## 本地引用关系", "## 相关概念", "## 相关研究者"],
+    "structured_fields": ["Problem", "Method", "Tasks", "Sensors", "Robot Setup", "Metrics", "Limitations", "Evidence Notes"],
+    "fields": {
+      "title": {"type": "string", "desc": "Paper title"},
+      "tags": {"type": "list", "max": 5, "desc": "Topic tags from tag_taxonomy"},
+      "created": {"type": "date", "format": "YYYY-MM-DD", "desc": "Import date"},
+      "updated": {"type": "date", "format": "YYYY-MM-DD", "desc": "Last edit date"},
+      "type": {"type": "enum", "values": ["literature"], "desc": "Note type"},
+      "status": {"type": "enum", "values": ["stub", "reading", "done", "archived"], "desc": "Reading progress"},
+      "summary": {"type": "string", "desc": "Chinese one-liner summary"},
+      "authors": {"type": "string", "desc": "Semicolon-separated: \"Last, First; Last, First\""},
+      "year": {"type": "string", "pattern": "20\\d{2}", "desc": "Publication year"},
+      "venue": {"type": "string", "desc": "Conference/journal name"},
+      "zotero_key": {"type": "string", "length": 8, "desc": "Zotero item ID"}
+    },
+    "canonical_order": ["title", "tags", "created", "updated", "type", "status", "summary", "authors", "year", "venue", "zotero_key"],
+    "tag_taxonomy": {
+      "manipulation": {
+        "keywords": ["manipulation", "robot manipulation", "robotic manipulation", "manipulate", "assembly", "insertion", "pushing", "dexterous manipulation", "contact-rich manipulation", "机器人操控", "操控", "装配", "插入", "推动", "灵巧操控"],
+        "cn": "机器人操控",
+        "concept": "robotic-manipulation",
+        "title": "Robotic Manipulation",
+        "summary": "机器人操控：使机器人与物理世界交互完成任务的领域",
+        "aliases": ["manipulation", "robot manipulation", "robotic manipulation", "机器人操控", "机器人操作", "操控"],
+        "key_ideas": ["关注机器人如何感知、规划并执行对物体的物理操作。", "常见任务包括抓取、推动、插入、装配、双臂协作和灵巧手操作。", "评价重点通常是成功率、泛化能力、接触稳定性和真实机器人可部署性。"]
+      },
+      "imitation": {
+        "keywords": ["imitation", "imitation learning", "demonstration", "demo", "behavioral cloning", "behavioural cloning", "diffusion policy", "DAgger", "teleoperation", "模仿学习", "示范", "示范数据", "行为克隆", "遥操作"],
+        "cn": "模仿学习",
+        "concept": "imitation-learning",
+        "title": "Imitation Learning",
+        "summary": "模仿学习：从专家示范中学习策略的方法",
+        "aliases": ["imitation learning", "behavioral cloning", "IL", "模仿学习", "行为克隆"],
+        "key_ideas": ["核心输入是专家轨迹、视频或遥操作数据，目标是学习可执行策略。", "常见形式包括 behavior cloning、DAgger、trajectory/action chunking 和 diffusion policy。", "主要风险是分布偏移、示范质量不一致和长时序误差累积。"]
+      },
+      "VLM": {
+        "keywords": ["vision-language", "vision language", "vlm", "large language model", "llm", "gpt-4v", "multimodal", "language-conditioned", "open vocabulary", "视觉语言", "视觉-语言", "大语言模型", "多模态", "开放词汇"],
+        "cn": "视觉-语言模型",
+        "concept": "vision-language-model",
+        "title": "Vision-Language Model",
+        "summary": "视觉-语言模型：融合视觉和语言理解的多模态模型",
+        "aliases": ["VLM", "vision-language model", "vision language model", "视觉-语言模型", "视觉语言模型"],
+        "key_ideas": ["VLM 将图像、语言指令和场景语义映射到任务理解或中间表示。", "在机器人操控中常用于开放词汇目标识别、 affordance 推理和任务分解。", "落地难点是空间精度、实时性、幻觉控制和与低层控制器的接口。"]
+      },
+      "RL": {
+        "keywords": ["reinforcement learning", "policy optimization", "q-learning", "ppo", "reward", "actor-critic", "强化学习", "奖励", "策略优化"],
+        "cn": "强化学习",
+        "concept": "reinforcement-learning",
+        "title": "Reinforcement Learning",
+        "summary": "强化学习：通过与环境交互获得奖励信号来学习策略的方法",
+        "aliases": ["RL", "reinforcement learning", "强化学习"],
+        "key_ideas": ["RL 通过奖励函数优化策略，适合接触丰富和难以手写控制律的任务。", "机器人场景常结合仿真、课程学习、离线数据或模仿学习来降低采样成本。", "关键风险包括奖励设计、样本效率、sim-to-real 差距和安全探索。"]
+      },
+      "diffusion": {
+        "keywords": ["diffusion", "diffusion policy", "diffusion model", "denois", "score matching", "generative policy", "扩散", "扩散策略", "扩散模型", "去噪"],
+        "cn": "扩散模型",
+        "concept": "diffusion-model",
+        "title": "Diffusion Model",
+        "summary": "扩散模型：通过逐步去噪生成数据的生成模型",
+        "aliases": ["diffusion model", "diffusion policy", "diffusion", "扩散模型", "扩散策略", "扩散"],
+        "key_ideas": ["扩散策略将动作序列生成建模为条件去噪过程，适合多模态动作分布。", "在操控中常结合视觉、点云、触觉或状态输入生成短时域动作块。", "需要关注推理速度、闭环纠错、长时序规划和训练数据覆盖度。"]
+      },
+      "diffusion-model": {
+        "keywords": ["diffusion model", "diffusion-model", "diffusion policy", "generative policy", "扩散模型", "扩散策略"],
+        "cn": "扩散模型",
+        "concept": "diffusion-model",
+        "title": "Diffusion Model",
+        "summary": "diffusion-model 标签别名；用于显式标记扩散模型和扩散策略相关论文",
+        "aliases": ["diffusion-model", "diffusion model", "diffusion policy", "扩散模型"],
+        "key_ideas": ["这是 diffusion 标签的规范别名，用于兼容概念页和 topic 标签。", "适用于以扩散或去噪生成作为动作、视频或状态模型核心机制的工作。", "审计时应把它归入 diffusion-model 概念而不是未知标签。"]
+      },
+      "flow-matching": {
+        "keywords": ["flow matching", "flow-matching", "rectified flow", "velocity field", "流匹配"],
+        "cn": "Flow Matching",
+        "concept": "flow-matching",
+        "title": "Flow Matching",
+        "summary": "Flow matching：通过学习连续速度场生成动作或轨迹的生成式策略建模方法",
+        "aliases": ["flow matching", "flow-matching", "rectified flow", "流匹配"],
+        "key_ideas": ["Flow matching 在 VLA 和动作生成中常作为 action head 或 diffusion 替代方案。", "关键优势是连续轨迹生成和较少采样步数，关键风险是异步执行、闭环修正和 OOD 安全。", "评估时应比较 diffusion、discrete diffusion、RTC 和优化式生成等替代接口。"]
+      },
+      "sim-to-real": {
+        "keywords": ["sim-to-real", "sim2real", "simulation-to-real", "domain adapt", "domain adaptation", "domain transfer", "domain randomization", "real-to-sim", "仿真到真实", "仿真迁移", "域适应", "域随机化"],
+        "cn": "仿真到真实迁移",
+        "concept": "sim-to-real",
+        "title": "Sim-to-Real Transfer",
+        "summary": "仿真到真实迁移：将仿真环境训练的策略迁移到真实机器人",
+        "aliases": ["sim-to-real", "sim to real", "simulation-to-real", "sim2real", "仿真到真实迁移", "仿真到真实"],
+        "key_ideas": ["Sim-to-Real 用仿真降低真实采样成本，再迁移到物理机器人。", "常见技术包括 domain randomization、系统辨识、真实数据微调和视觉域适配。", "主要瓶颈是接触建模、传感器噪声、动力学偏差和场景外泛化。"]
+      },
+      "robot-learning": {
+        "keywords": ["robot learning", "embodied", "end-to-end", "visuomotor", "policy learning", "foundation model", "机器人学习", "具身", "端到端", "视觉运动", "策略学习"],
+        "cn": "机器人学习",
+        "concept": "robot-learning",
+        "title": "Robot Learning",
+        "summary": "机器人学习：使机器人通过数据驱动方法习得技能的交叉领域",
+        "aliases": ["robot learning", "robotic learning", "机器人学习"],
+        "key_ideas": ["机器人学习覆盖从感知表征到策略学习、规划和控制的端到端或模块化方法。", "数据来源可以是真机、仿真、视频、遥操作、语言或多模态传感器。", "评价时必须同时看算法指标和机器人执行约束，如延迟、鲁棒性和安全性。"]
+      },
+      "embodied-AI": {
+        "keywords": ["embodied AI", "embodied-AI", "physical AI", "embodied intelligence", "具身智能"],
+        "cn": "具身智能",
+        "concept": "robot-learning",
+        "title": "Embodied AI",
+        "summary": "具身智能：面向物理环境交互的感知、推理和行动系统",
+        "aliases": ["embodied AI", "embodied-AI", "physical AI", "具身智能"],
+        "key_ideas": ["具身智能强调模型必须通过身体、传感器和动作接口与物理世界交互。", "在本 vault 中主要服务机器人学习、VLA、世界模型和操控任务。", "评价时要关注真实执行、闭环反馈、延迟、安全和跨场景泛化。"]
+      },
+      "physics-simulation": {
+        "keywords": ["physics simulation", "physics-simulation", "physical simulation", "simulator", "physics engine", "物理仿真"],
+        "cn": "物理仿真",
+        "concept": "sim-to-real",
+        "title": "Physics Simulation",
+        "summary": "物理仿真：用物理引擎或生成式模型近似机器人与环境交互的训练和评估环境",
+        "aliases": ["physics simulation", "physics-simulation", "simulator", "物理仿真"],
+        "key_ideas": ["物理仿真可降低真实机器人采样成本，但容易引入接触、材料和传感器偏差。", "在操控中常与 domain randomization、系统辨识、world model 或 real-to-sim 闭环结合。", "关键验收是仿真收益是否能迁移到真实执行，而不只是仿真指标好看。"]
+      },
+      "3D-generation": {
+        "keywords": ["3D generation", "3D-generation", "3D generative", "novel view synthesis", "3D生成"],
+        "cn": "3D 生成",
+        "concept": "novel-view-synthesis",
+        "title": "3D Generation",
+        "summary": "3D 生成：生成或重建三维场景、物体和视角的视觉建模方法",
+        "aliases": ["3D generation", "3D-generation", "3D generative", "3D生成"],
+        "key_ideas": ["3D 生成能为机器人提供可交互场景、视角补全或几何先验。", "机器人场景中必须区分视觉逼真和物理可交互，不能只用渲染质量判断价值。", "相关 idea 应检查几何一致性、物理约束、视角覆盖和下游控制收益。"]
+      },
+      "DLO": {
+        "keywords": ["deformable linear object", "dlo", "deformable cable", "deformable rope", "rope", "cable", "wire", "linear deformable object", "deformable object", "可变形线性物体", "可变形物体", "绳索", "线缆", "软体"],
+        "cn": "可变形物体操控",
+        "concept": "deformable-linear-object",
+        "title": "Deformable Linear Object",
+        "summary": "可变形线性物体：绳索、线缆等一维可变形物体",
+        "aliases": ["DLO", "deformable linear object", "deformable object", "可变形线性物体", "可变形物体", "绳索操控", "线缆操控"],
+        "key_ideas": ["DLO 包括绳索、线缆、软管等一维可变形物体，状态维度高且难以直接观测。", "操控任务常涉及布线、穿孔、打结、拉直、绕障和双臂协同。", "核心挑战是形状表示、接触约束、遮挡、长时序规划和真实系统稳定性。"]
+      },
+      "tactile": {
+        "keywords": ["tactile", "touch", "force sensor", "force-domain", "haptic", "slip", "contact sensing", "触觉", "力传感", "接触感知", "滑移"],
+        "cn": "触觉感知",
+        "concept": "tactile-sensing",
+        "title": "Tactile Sensing",
+        "summary": "触觉感知：通过接触、力或表面形变信号辅助机器人操控的方法",
+        "aliases": ["tactile", "touch sensing", "haptic sensing", "触觉感知", "力觉"],
+        "key_ideas": ["触觉信号能补充视觉遮挡和接触状态不可见的问题。", "常用于抓取稳定性、滑移检测、材料/形状识别和精细装配。", "主要挑战是传感器标定、仿真建模、数据规模和跨物体泛化。"]
+      },
+      "bimanual": {
+        "keywords": ["bimanual", "dual-arm", "two-arm", "coordinated", "coordination", "both hands", "two hands", "双臂", "双臂操控", "双手", "协同操控", "协调"],
+        "cn": "双臂操控",
+        "concept": "bimanual-manipulation",
+        "title": "Bimanual Manipulation",
+        "summary": "双臂操控：通过两只机械臂协同完成单臂难以完成的接触丰富任务",
+        "aliases": ["bimanual manipulation", "dual-arm manipulation", "two-arm manipulation", "双臂操控", "双臂", "双手协同"],
+        "key_ideas": ["双臂任务强调时序同步、力/位姿协调和任务分工。", "在 DLO、布料、装配、打开容器等长时序任务中尤其常见。", "难点包括动作空间高维、双臂避碰、接触约束和示范采集成本。"]
+      },
+      "planning": {
+        "keywords": ["motion planning", "task planning", "behavior tree", "trajectory optimization", "planner", "planning", "routing", "path planning", "运动规划", "任务规划", "轨迹优化", "路径规划", "行为树"],
+        "cn": "运动规划",
+        "concept": "planning",
+        "title": "Planning",
+        "summary": "运动规划：在任务、几何和动力学约束下生成可执行机器人行为的过程",
+        "aliases": ["planning", "motion planning", "task planning", "运动规划", "任务规划", "规划"],
+        "key_ideas": ["规划负责把高层目标转成可执行动作序列或轨迹。", "常与学习策略结合，用于处理长时序、约束和安全性。", "机器人场景中要同时考虑可达性、碰撞、接触、实时性和失败恢复。"]
+      },
+      "grasping": {
+        "keywords": ["grasp", "grasping", "gripper", "prehensile", "dexterous hand", "in-hand", "抓取", "夹爪", "灵巧手", "手内操作"],
+        "cn": "抓取",
+        "concept": "grasping",
+        "title": "Grasping",
+        "summary": "抓取：机器人通过夹爪、手或接触策略稳定获取物体控制权的基础技能",
+        "aliases": ["grasping", "robot grasping", "prehensile manipulation", "抓取", "机器人抓取"],
+        "key_ideas": ["抓取是多数操控任务的前置技能，决定后续操作稳定性。", "常用输入包括 RGB-D、点云、触觉和物体姿态估计。", "核心问题是可泛化抓取表示、遮挡、接触不确定性和真实部署鲁棒性。"]
+      },
+      "LfD": {
+        "keywords": ["learning from demonstration", "LfD", "learning-from-demonstration", "demonstration learning", "示范学习", "示教学习"],
+        "cn": "示范学习",
+        "concept": "imitation-learning",
+        "title": "Learning from Demonstration",
+        "summary": "示范学习：从人类或专家轨迹中学习可执行策略的方法族",
+        "aliases": ["LfD", "learning from demonstration", "learning-from-demonstration", "示范学习"],
+        "key_ideas": ["LfD 强调从少量专家轨迹中提取控制规律。", "常见方法包括动态系统、运动基元、行为克隆和交互式示教。", "核心风险是轨迹交叉、状态重访、分布偏移和扰动恢复。"]
+      },
+      "dynamical-systems": {
+        "keywords": ["dynamical system", "dynamical systems", "dynamic movement primitive", "DMP", "stable motion", "动力学系统", "动态系统", "运动基元"],
+        "cn": "动力学系统",
+        "concept": "dynamical-systems",
+        "title": "Dynamical Systems",
+        "summary": "动力学系统：用连续稳定系统表示和生成机器人运动的方法",
+        "aliases": ["dynamical systems", "DS", "DMP", "动力学系统"],
+        "key_ideas": ["动力学系统方法把运动生成写成状态到速度或加速度的映射。", "优势是连续、可反应和可加入稳定性约束。", "难点包括轨迹交叉、状态重访、相位估计和复杂任务组合。"]
+      },
+      "neural-potential-function": {
+        "keywords": ["neural potential function", "potential function", "PNPF", "energy function", "势函数", "神经势函数"],
+        "cn": "神经势函数",
+        "concept": "dynamical-systems",
+        "title": "Neural Potential Function",
+        "summary": "神经势函数：用可学习势函数约束机器人运动生成和稳定性的表示",
+        "aliases": ["neural potential function", "potential function", "PNPF", "神经势函数"],
+        "key_ideas": ["神经势函数用标量势能或其梯度组织运动方向。", "它可为 LfD 和动态系统提供稳定性和可解释约束。", "需要验证是否能处理多阶段、轨迹交叉和接触扰动。"]
+      },
+      "phase-variable": {
+        "keywords": ["phase variable", "phase-conditioned", "phase-varying", "phase estimation", "相位变量", "相位条件"],
+        "cn": "相位变量",
+        "concept": "dynamical-systems",
+        "title": "Phase Variable",
+        "summary": "相位变量：用于区分运动阶段和处理状态重访的连续任务进度表示",
+        "aliases": ["phase variable", "phase-conditioned", "phase-varying", "相位变量"],
+        "key_ideas": ["相位变量把同一空间状态映射到不同任务阶段。", "它常用于动态系统、运动基元和长时序示范学习。", "关键风险是开环时间依赖、扰动后相位漂移和阶段边界不稳定。"]
+      },
+      "reactive-control": {
+        "keywords": ["reactive control", "closed-loop control", "feedback control", "disturbance recovery", "反应式控制", "闭环控制", "反馈控制"],
+        "cn": "反应式控制",
+        "concept": "robotic-manipulation",
+        "title": "Reactive Control",
+        "summary": "反应式控制：根据当前观测和扰动实时修正机器人动作的控制方式",
+        "aliases": ["reactive control", "closed-loop control", "feedback control", "反应式控制", "闭环控制"],
+        "key_ideas": ["反应式控制强调在线反馈而不是一次性开环轨迹执行。", "适合处理接触误差、扰动恢复和视觉/触觉闭环修正。", "评估时要关注延迟、稳定性、可恢复失败和安全边界。"]
+      },
+      "collision-avoidance": {
+        "keywords": ["collision avoidance", "obstacle avoidance", "self-collision", "safety", "避障", "碰撞避免", "安全约束"],
+        "cn": "碰撞避免",
+        "concept": "collision-avoidance",
+        "title": "Collision Avoidance",
+        "summary": "碰撞避免：在机器人运动和操控中避免环境、自碰撞和人体接触风险的方法",
+        "aliases": ["collision avoidance", "obstacle avoidance", "碰撞避免", "避障"],
+        "key_ideas": ["碰撞避免可来自几何规划、控制屏障、学习约束或近距感知。", "操控任务中需要同时考虑末端、连杆、物体和环境接触。", "关键指标包括安全裕度、任务成功率、保守性和实时性。"]
+      },
+      "test-time-scaling": {
+        "keywords": ["test-time scaling", "test time compute", "best-of-N", "inference scaling", "采样选择", "推理时扩展", "推理计算"],
+        "cn": "推理时扩展",
+        "concept": "test-time-scaling",
+        "title": "Test-Time Scaling",
+        "summary": "推理时扩展：在推理阶段增加计算量以提升输出质量的方法",
+        "aliases": ["test-time scaling", "test-time compute", "best-of-N", "推理时扩展"],
+        "key_ideas": ["通过采样多个候选并选择最优来提升性能。", "计算开销随候选数线性增长是核心瓶颈。", "噪声级过滤和价值引导是降低开销的主要方向。"]
+      },
+      "MPC": {
+        "keywords": ["MPC", "model predictive control", "predictive control", "模型预测控制"],
+        "cn": "模型预测控制",
+        "concept": "planning",
+        "title": "Model Predictive Control",
+        "summary": "模型预测控制：在滚动时域内预测未来状态并优化控制序列的方法",
+        "aliases": ["MPC", "model predictive control", "模型预测控制"],
+        "key_ideas": ["MPC 通过滚动优化把动力学模型、约束和目标函数结合起来。", "在机器人操控中常用于接触约束、避障、轨迹跟踪和学习模型闭环。", "关键风险是模型误差、计算延迟和约束设定过于保守。"]
+      },
+      "contact-implicit": {
+        "keywords": ["contact implicit", "contact-implicit", "implicit contact", "contact mode", "接触隐式", "隐式接触"],
+        "cn": "接触隐式",
+        "concept": "contact-implicit-trajectory-optimization",
+        "title": "Contact-Implicit Optimization",
+        "summary": "接触隐式优化：不预先固定接触模式，而在优化中共同决定接触序列和运动轨迹的方法",
+        "aliases": ["contact-implicit", "contact implicit", "implicit contact", "接触隐式"],
+        "key_ideas": ["接触隐式方法适合接触模式难以提前枚举的操控任务。", "常与互补约束、MPCC、轨迹优化和接触动力学建模结合。", "主要挑战是非光滑优化、局部最优、数值稳定性和实时性。"]
+      },
+      "physical-reasoning": {
+        "keywords": ["physical reasoning", "physics reasoning", "physical-reasoning", "physical intelligence", "物理推理", "物理常识"],
+        "cn": "物理推理",
+        "concept": "physical-reasoning",
+        "title": "Physical Reasoning",
+        "summary": "物理推理：利用几何、动力学、接触和因果约束理解并规划物理世界行动的能力",
+        "aliases": ["physical reasoning", "physics reasoning", "physical-reasoning", "物理推理"],
+        "key_ideas": ["物理推理关注动作是否满足几何、接触、稳定性和可达性约束。", "在 VLA 和机器人规划中可用于过滤语言上合理但物理上不可执行的方案。", "评估应关注强 baseline、可证伪任务和真实失败模式，而不是只看文本解释。"]
+      },
+      "trajectory-optimization": {
+        "keywords": ["trajectory optimization", "trajectory-optimization", "motion optimization", "optimal control", "轨迹优化", "最优控制"],
+        "cn": "轨迹优化",
+        "concept": "trajectory-optimization",
+        "title": "Trajectory Optimization",
+        "summary": "轨迹优化：直接优化状态、动作或关键点序列以满足任务目标和动力学约束的方法",
+        "aliases": ["trajectory optimization", "trajectory-optimization", "optimal control", "轨迹优化"],
+        "key_ideas": ["轨迹优化把目标、约束和动力学统一成优化问题。", "在操控中常用于接触丰富任务、双臂协调、避障和可行性检查。", "主要风险是局部最优、模型误差、初始化敏感和在线计算开销。"]
+      },
+      "proximity-sensing": {
+        "keywords": ["proximity sensing", "proximity sensor", "near-field sensing", "pre-touch", "接近感知", "近距感知", "预接触"],
+        "cn": "接近感知",
+        "concept": "proximity-sensing",
+        "title": "Proximity Sensing",
+        "summary": "接近感知：在接触前检测近场物体、人体或障碍的传感能力",
+        "aliases": ["proximity sensing", "near-field sensing", "pre-touch sensing", "接近感知"],
+        "key_ideas": ["接近感知补视觉盲区和触觉的接触后滞后。", "常用于避障、安全人机交互和预接触姿态调整。", "核心问题是感知范围、误报率、遮挡和与控制闭环的耦合。"]
+      },
+      "tactile-sensing": {
+        "keywords": ["tactile sensing", "touch sensing", "force sensing", "haptic sensing", "contact sensing", "触觉感知", "力觉感知", "接触感知"],
+        "cn": "触觉感知",
+        "concept": "tactile-sensing",
+        "title": "Tactile Sensing",
+        "summary": "触觉感知：通过接触、力或表面形变信号辅助机器人操控的方法",
+        "aliases": ["tactile sensing", "touch sensing", "haptic sensing", "触觉感知", "力觉感知"],
+        "key_ideas": ["触觉感知能补充视觉遮挡和接触状态不可见的问题。", "常用于滑移检测、插入装配、灵巧抓取和材料识别。", "主要挑战是标定、耐用性、仿真建模、数据规模和跨物体泛化。"]
+      }
+    }
+  },
+  "concept": {
+    "required": ["title", "tags", "created", "updated", "type", "status", "summary"],
+    "fields": {
+      "title": {"type": "string", "desc": "Concept name"},
+      "tags": {"type": "list", "desc": "Related topic tags"},
+      "created": {"type": "date", "format": "YYYY-MM-DD"},
+      "updated": {"type": "date", "format": "YYYY-MM-DD"},
+      "type": {"type": "enum", "values": ["concept"]},
+      "status": {"type": "enum", "values": ["stub", "done"]},
+      "summary": {"type": "string", "desc": "Chinese one-liner definition"},
+      "aliases": {"type": "list", "desc": "Alternative names"}
+    },
+    "canonical_order": ["title", "tags", "created", "updated", "type", "status", "summary", "aliases"]
+  },
+  "entity": {
+    "required": ["title", "tags", "created", "updated", "type", "status", "summary"],
+    "fields": {
+      "title": {"type": "string", "desc": "Entity name (researcher, lab, etc.)"},
+      "tags": {"type": "list", "desc": "Entity type tags: researcher, lab"},
+      "created": {"type": "date", "format": "YYYY-MM-DD"},
+      "updated": {"type": "date", "format": "YYYY-MM-DD"},
+      "type": {"type": "enum", "values": ["entity"]},
+      "status": {"type": "enum", "values": ["stub", "done"]},
+      "summary": {"type": "string", "desc": "Chinese one-liner description"},
+      "affiliation": {"type": "string", "desc": "Institution"},
+      "url": {"type": "string", "desc": "Homepage"}
+    },
+    "canonical_order": ["title", "tags", "created", "updated", "type", "status", "summary", "affiliation", "url"]
+  },
+  "permanent": {
+    "required": ["title", "tags", "created", "updated", "type", "status", "summary"],
+    "fields": {
+      "title": {"type": "string", "desc": "Permanent page title"},
+      "tags": {"type": "list", "desc": "Page tags"},
+      "created": {"type": "date", "format": "YYYY-MM-DD"},
+      "updated": {"type": "date", "format": "YYYY-MM-DD"},
+      "type": {"type": "enum", "values": ["permanent"]},
+      "status": {"type": "enum", "values": ["active", "done", "archived"]},
+      "summary": {"type": "string", "desc": "One-line page summary"}
+    },
+    "canonical_order": ["title", "tags", "created", "updated", "type", "status", "summary"]
+  }
+}

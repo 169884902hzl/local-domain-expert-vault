@@ -1,0 +1,72 @@
+# Local runtime state
+.smart-env/
+.omx/
+.sisyphus/
+__pycache__/
+*.py[cod]
+*.tmp
+tmp_*
+
+# Agent sessions, logs, backups, and local permissions
+.claude/backups/
+.claude/logs/
+.claude/tmp/
+.claude/settings.local.json
+.claude/scripts/backups/
+.claudian/sessions/
+.claudian/backups/
+
+# Local secrets and machine-specific config
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+*credentials*
+*secret*
+*cookie*
+.token
+.tokens
+token.json
+tokens.json
+.claude/scripts/config.json
+
+# Obsidian workspace and plugin runtime caches
+.obsidian/workspace.json
+.obsidian/workspace-mobile.json
+.obsidian/plugins/*/cache/
+.obsidian/plugins/*/data-cache/
+.obsidian/plugins/*/embeddings/
+
+# Generated exports, archives, and private work products
+exports/
+archive/
+daily/
+projectsideas/
+Excalidraw/
+
+# Keep public directory skeletons while ignoring local contents
+raw/*
+!raw/.gitkeep
+!raw/readings/
+raw/readings/*
+!raw/readings/.gitkeep
+output/*
+!output/.gitkeep
+projects/*
+!projects/.gitkeep
+attachments/*
+!attachments/.gitkeep
+
+# Large or copyrighted attachments
+*.pdf
+*.epub
+*.zip
+*.7z
+*.rar
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+desktop.ini

@@ -1,0 +1,18 @@
+{
+  "promptDelete": false,
+  "attachmentFolderPath": "attachments",
+  "newFileLocation": "raw",
+  "userIgnoreFilters": [
+    "templates/",
+    ".claude/",
+    ".agents/",
+    ".claudian/",
+    ".obsidian/",
+    ".smart-env/",
+    "raw/",
+    "output/",
+    "archive/",
+    "exports/",
+    "attachments/"
+  ]
+}

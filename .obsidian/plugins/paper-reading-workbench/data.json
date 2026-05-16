@@ -1,0 +1,7 @@
+{
+  "translationMaxConcurrency": 5,
+  "translationTimeoutSec": 1200,
+  "translationModel": "gemini-3.1-pro-preview",
+  "pythonCommand": "python",
+  "openControlPanelOnStartup": false
+}
