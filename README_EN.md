@@ -103,6 +103,8 @@ The base vault only needs Python for local audit and search. Extra integrations 
 
 Paper Reading Workbench is bundled and enabled in the public vault. Open a `wiki/topics/*.md` note with `zotero_key`, then run `Paper Reading Workbench: Open paper reading workbench for current note`. The plugin queries the local Zotero Connector API, creates a `projects/reading-workbench/<ZOTERO_KEY>-zotero-source.md` source note, and provides links back to the Zotero item, Zotero PDF attachment, and arXiv PDF fallback. Zotero Desktop must be open, and the Zotero item must already have a stored or linked PDF attachment. The plugin does not copy PDFs into the vault. It is local executable Obsidian plugin code; translation and diagram actions spawn the local Python helper scripts only when you click those actions.
 
+Read [Paper Reading Workbench Security Notes](docs/SECURITY_PLUGIN_WORKBENCH.md) for the plugin's read scope, write directories, Python helper boundary, and disable path.
+
 ## Zotero Setup
 
 Zotero is optional for browsing and local search. It is needed for import and automation.
@@ -193,6 +195,7 @@ Detailed docs are currently Chinese-first. The links below are still useful beca
 - [Automation](docs/AUTOMATION.md)
 - [Zotero Storage and Attachments](docs/ZOTERO_STORAGE.md)
 - [Security and Privacy](docs/SECURITY_AND_PRIVACY.md)
+- [Paper Reading Workbench Security Notes](docs/SECURITY_PLUGIN_WORKBENCH.md)
 
 ## License
 

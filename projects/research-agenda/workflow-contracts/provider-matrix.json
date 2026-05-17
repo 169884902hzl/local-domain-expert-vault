@@ -1,11 +1,23 @@
 {
   "schema_version": "provider_matrix.v1",
   "updated": "2026-05-14",
+  "deployment_profiles": {
+    "public_safe_profile": {
+      "public_default": true,
+      "permission_posture": "normal permissions, no dangerous bypass, explicit local configuration required"
+    },
+    "private_high_autonomy_profile": {
+      "public_default": false,
+      "permission_posture": "maintainer-only local profile after risk acceptance; may use yolo or CLI sandbox bypass"
+    }
+  },
   "providers": [
     {
       "name": "Claudian",
       "role": "deep_reading",
-      "default_mode": "yolo",
+      "default_mode": "public_safe_profile",
+      "public_mode": "normal",
+      "private_profile_mode": "yolo",
       "default_model": "configured_by_claudian",
       "timeout_sec": 2700,
       "network_allowed": true,
@@ -17,6 +29,7 @@
     {
       "name": "Gemini CLI",
       "role": "divergent_greenhouse_ideation",
+      "default_mode": "public_safe_profile",
       "auth": "OAuth CLI",
       "default_model": "gemini-3.1-pro-preview",
       "fallback_model": "auto",
@@ -31,7 +44,9 @@
     {
       "name": "Codex CLI",
       "role": "second_pass_review",
-      "default_mode": "dangerously-bypass-approvals-and-sandbox",
+      "default_mode": "public_safe_profile",
+      "public_mode": "sandboxed/default approvals",
+      "private_profile_mode": "dangerously-bypass-approvals-and-sandbox",
       "default_model": "configured_by_codex_cli",
       "timeout_sec": 7200,
       "network_allowed": true,
@@ -43,7 +58,9 @@
     {
       "name": "OpenCode DeepSeek",
       "role": "mandatory_adversarial_model_battle",
-      "default_mode": "opencode run --format json",
+      "default_mode": "public_safe_profile",
+      "public_mode": "opencode run --format json",
+      "private_profile_mode": "maintainer local provider profile",
       "default_model": "deepseek/deepseek-v4-pro(max)",
       "timeout_sec": 1200,
       "network_allowed": true,

@@ -230,6 +230,8 @@ python3 .claude/scripts/kb_search.py "diffusion policy DLO" --limit 5
 
 Paper Reading Workbench 的用途是给人类对照阅读：打开带 `zotero_key` 的 `wiki/topics/*.md` 精读笔记后，运行命令 `Paper Reading Workbench: Open paper reading workbench for current note`，插件会读取 Zotero key、查询本机 Zotero Connector API、生成 `projects/reading-workbench/<ZOTERO_KEY>-zotero-source.md`，并提供 `Open Zotero item`、`Open Zotero PDF attachment` 和 arXiv PDF fallback 链接。Zotero Desktop 必须打开，且该条目需要已有 stored PDF 或 linked PDF 附件；插件不会把 PDF 复制进 vault。这个插件是随仓库打包的本地可执行插件；只有在你点击翻译、知识图等工作台动作时，才会调用本机 Python 脚本生成本地工作文件。
 
+插件读取范围、写入目录、Python helper 调用边界和禁用方法见 [docs/SECURITY_PLUGIN_WORKBENCH.md](docs/SECURITY_PLUGIN_WORKBENCH.md)。
+
 ## 核心命令
 
 ### 本地检索
