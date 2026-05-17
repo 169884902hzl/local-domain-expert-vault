@@ -5,13 +5,13 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](#what-works-immediately-after-cloning)
 
-> Turn Zotero / arXiv papers into a local domain expert: long-term literature memory, evidence-grounded answers, deep reading, research hypotheses, and reviewable experiment-plan drafts.
+> An Obsidian + Zotero local domain-expert vault that turns Zotero / arXiv papers into long-term literature memory, evidence-grounded answers, Claudian deep reading, research hypothesis drafts, Zotero/PDF back-links, and mirror-first arXiv automation.
 
 [中文 README](README.md)
 
 Current public version: `v0.1.0`. This first release covers local browsing, knowledge-base audits, `kb_search.py` retrieval, Zotero/Obsidian setup documentation, Paper Reading Workbench, arXiv mirror-first automation docs, and the Windows scheduled-task entry point. Full AI automation still requires local Zotero, Claudian / Claude Code, Gemini / Codex, and explicit permission configuration.
 
-This is an Obsidian / Zotero vault template for researchers working with a specialized literature corpus. More precisely, it is a **local domain-expert vault**: instead of sending every question to a generic AI chat, it organizes the papers, concepts, entities, deep-reading reports, local retrieval, and research idea drafts of one field into traceable evidence.
+This is an **Obsidian + Zotero research vault** for researchers working with a specialized literature corpus. More precisely, it is a **local domain-expert vault**: instead of sending every question to a generic AI chat, it organizes the papers, concepts, entities, deep-reading reports, local retrieval, and research idea drafts of one field into traceable evidence.
 
 The phrase "domain expert" does not mean this repository trains a new model. It means LLM-assisted reading, comparison, brainstorming, and experiment-plan drafting are constrained by local `wiki/` evidence, Zotero sources, concept networks, and human-review boundaries. The system is meant to behave like a research colleague that has long-term memory of your literature corpus, while keeping claims traceable.
 
