@@ -80,7 +80,7 @@ research-agenda 工作流会把本地证据沉淀成待审阅研究 idea seed。
 | `audit_kb.py` | 检查 frontmatter、heading、精读质量和概念页结构 | 是 |
 | `.claude/commands/` | Claudian / Claude Code 项目命令 | 需要 Claudian 或 Claude Code |
 | `.claudian/claudian-settings.json` | 已脱敏的 Claudian 行为配置和 system prompt | 需要用户本机配置 CLI |
-| `.obsidian/` | Graph、Smart Connections、Dataview 等插件配置 | 需要用户安装插件本体 |
+| `.obsidian/` | Graph、Smart Connections、Dataview 等插件配置；Paper Reading Workbench 已打包 | Paper Reading Workbench 可直接用；其它插件需用户安装 |
 | `daily_arxiv_pipeline.py` | 每日 arXiv 检索、排序、导入、idea 生成流水线 | 需要网络；完整模式需要 Zotero/CLI |
 | `docs/AUTOMATION.md` | 自动化启动、计划任务、日志和排错说明 | 是 |
 
@@ -137,7 +137,7 @@ python .claude/scripts/daily_arxiv_pipeline.py --dry-run --source mirror-first -
 | 基础浏览 | 可直接使用 |
 | 本地检索 | 可直接使用，Python 标准库即可 |
 | 结构审计 | 可直接使用，Python 标准库即可 |
-| Obsidian 插件配置 | 已包含配置；插件本体需用户安装 |
+| Obsidian 插件配置 | Paper Reading Workbench 已打包；其它插件需用户安装 |
 | Claudian 配置 | 已包含脱敏配置；CLI 路径和账号需用户本机配置 |
 | Zotero 导入 | 需要用户自己的 Zotero 或 Zotero API 配置 |
 | 每日 arXiv 自动化 | 需要网络；写入 Zotero 时需要 Zotero 配置 |
@@ -216,9 +216,11 @@ python3 .claude/scripts/kb_search.py "diffusion policy DLO" --limit 5
 | Smart Connections | 语义检索；建议只索引 `wiki/` | 是 |
 | Templater | 笔记模板 | 是 |
 | Zotero Desktop Connector | 从 Zotero 取 metadata/fulltext | 部分配置 |
-| Paper Reading Workbench | 可选自定义阅读辅助 | 仅保留配置示例，不默认启用 |
+| Paper Reading Workbench | 从 Obsidian 精读页回跳 Zotero item/PDF，并生成阅读工作台 | 已打包并默认启用 |
 
-注意：仓库保留的是插件配置示例，不打包插件二进制文件，也不默认启用未随仓库提供本体的社区插件。第一次打开后，需要从 Obsidian Community Plugins 安装插件本体，再按需手动启用。
+注意：公开包只默认启用已随仓库提供 `main.js` / `styles.css` 的 `paper-reading-workbench`。Claudian、Dataview、Smart Connections、Templater、Zotero Desktop Connector 等社区插件仍需要从 Obsidian Community Plugins 安装后手动启用。
+
+Paper Reading Workbench 的用途是给人类对照阅读：打开带 `zotero_key` 的 `wiki/topics/*.md` 精读笔记后，运行命令 `Paper Reading Workbench: Open paper reading workbench for current note`，插件会读取 Zotero key、查询本机 Zotero Connector API、生成 `projects/reading-workbench/<ZOTERO_KEY>-zotero-source.md`，并提供 `Open Zotero item`、`Open Zotero PDF attachment` 和 arXiv PDF fallback 链接。Zotero Desktop 必须打开，且该条目需要已有 stored PDF 或 linked PDF 附件；插件不会把 PDF 复制进 vault。
 
 ## 核心命令
 

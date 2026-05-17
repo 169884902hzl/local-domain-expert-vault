@@ -77,7 +77,11 @@ function Copy-ObsidianPluginConfig {
     }
     $dst = Join-Path $PackageRoot ".obsidian\plugins\$PluginName"
     New-Item -ItemType Directory -Force -Path $dst | Out-Null
-    foreach ($file in @("manifest.json", "data.json")) {
+    $filesToCopy = @("manifest.json", "data.json")
+    if ($PluginName -eq "paper-reading-workbench") {
+        $filesToCopy += @("main.js", "styles.css")
+    }
+    foreach ($file in $filesToCopy) {
         $path = Join-Path $src $file
         if (Test-Path -LiteralPath $path -PathType Leaf) {
             Copy-Item -LiteralPath $path -Destination (Join-Path $dst $file) -Force
@@ -91,6 +95,25 @@ function Copy-ObsidianPluginConfig {
                 activeTabId = $null
             }
         } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $dataPath -Encoding UTF8
+    }
+    if ($PluginName -eq "paper-reading-workbench") {
+        $mainPath = Join-Path $dst "main.js"
+        if (Test-Path -LiteralPath $mainPath -PathType Leaf) {
+            $mainText = Get-Content -LiteralPath $mainPath -Encoding UTF8 -Raw
+            $mainText = [regex]::Replace($mainText, 'placeholder: "Zotero key, e\.g\. [^"]+"', 'placeholder: "Zotero key, e.g. <ZOTERO_KEY>"')
+            $mainText = $mainText.Replace(
+                'const attachmentKey = child.key || data.key || "";
+              return {',
+                'const attachmentKey = child.key || data.key || "";
+              const isPdfAttachment = /pdf/i.test(data.contentType || "") || /\.pdf$/i.test(data.path || data.localPath || data.filename || "") || /\/pdf\//i.test(data.url || "");
+              return {'
+            )
+            $mainText = $mainText.Replace(
+                'uri: attachmentKey ? `zotero://select/library/items/${attachmentKey}` : "",',
+                'uri: attachmentKey ? (isPdfAttachment ? `zotero://open-pdf/library/items/${attachmentKey}` : `zotero://select/library/items/${attachmentKey}`) : "",'
+            )
+            $mainText | Set-Content -LiteralPath $mainPath -Encoding UTF8
+        }
     }
 }
 
@@ -220,6 +243,10 @@ foreach ($plugin in @(
     Copy-ObsidianPluginConfig $plugin
 }
 
+$publicEnabledPlugins = @("paper-reading-workbench")
+ConvertTo-Json -InputObject $publicEnabledPlugins |
+    Set-Content -LiteralPath (Join-Path $PackageRoot ".obsidian\community-plugins.json") -Encoding UTF8
+
 Sanitize-ClaudianSettings
 Sanitize-PackageTextFiles
 
@@ -242,7 +269,8 @@ Source: local working copy (path omitted from public package)
 - wiki/ structured knowledge layer
 - .claude/commands/, .claude/scripts/, .claude/agents/, .claude/skills/
 - sanitized .claudian/claudian-settings.json
-- minimal .obsidian/ settings and plugin config examples; plugin `main.js` files are not bundled
+- minimal .obsidian/ settings and plugin config examples
+- bundled local Obsidian plugin: `.obsidian/plugins/paper-reading-workbench/main.js` and `styles.css`
 - templates/, SCHEMA.md, Dashboard.md, AGENTS.md, CLAUDE.md
 - README.md, README_EN.md, LICENSE, docs/, docs/assets/, docs/examples/
 - root GitHub documentation, license boundary, safety docs, and tools/build_github_package.ps1

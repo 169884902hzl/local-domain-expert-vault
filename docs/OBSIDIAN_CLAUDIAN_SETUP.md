@@ -4,22 +4,22 @@
 
 ## 先说结论
 
-这个仓库已经带了 **vault 级配置**，但没有打包 Obsidian 插件本体，也没有包含任何个人账号、API key、CLI 绝对路径或会话记录。
+这个仓库已经带了 **vault 级配置**，并打包了一个本地插件 `paper-reading-workbench`。其它社区插件只保留配置示例，不包含任何个人账号、API key、CLI 绝对路径或会话记录。
 
 也就是说：
 
 - 你 clone 后可以直接用 Obsidian 打开仓库根目录。
 - Graph、Smart Connections 排除规则、模板路径、部分插件设置已经预置。
 - Claudian 的行为规则和 system prompt 已经预置在 `.claudian/claudian-settings.json`。
-- 公开包默认不启用未打包本体的社区插件，避免第一次打开 Obsidian 时出现缺 `main.js` 的插件报错。
-- 你仍然需要在 Obsidian 里安装插件本体，然后按需启用。
+- 公开包默认只启用已打包本体的 `paper-reading-workbench`，避免第一次打开 Obsidian 时出现缺 `main.js` 的插件报错。
+- 你仍然需要在 Obsidian 里安装 Claudian、Dataview、Smart Connections、Templater、Zotero Desktop Connector 等第三方插件，然后按需启用。
 - 你仍然需要在自己的机器上配置 Claude/Codex/Gemini/Zotero 登录或环境变量。
 
 ## 配置文件地图
 
 | 路径 | 作用 | 是否含个人秘密 |
 | --- | --- | --- |
-| `.obsidian/community-plugins.json` | 公开包默认留空；插件需用户安装后手动启用 | 否 |
+| `.obsidian/community-plugins.json` | 默认只启用已打包的 `paper-reading-workbench` | 否 |
 | `.obsidian/graph.json` | Graph 默认过滤为 `path:wiki` | 否 |
 | `.obsidian/templates.json` | 模板目录配置 | 否 |
 | `.obsidian/plugins/obsidian-smart-connections/data.json` | Smart Connections 排除非知识源路径 | 否 |
@@ -48,12 +48,29 @@ Settings -> Community plugins -> Browse
 | Smart Connections | 语义检索；本 vault 建议只索引 `wiki/` |
 | Templater | 使用 `templates/` 创建标准笔记 |
 | Zotero Desktop Connector | 从 Zotero 读取 metadata/fulltext |
-| Paper Reading Workbench | 自定义阅读辅助；公开包只保留配置示例，不默认启用 |
+| Paper Reading Workbench | 已打包本地插件；从精读笔记回跳 Zotero item/PDF，并生成阅读工作台 |
 | Excalidraw | 可选绘图；公开包不含个人绘图内容 |
 
-注意：公开包没有提交这些插件的 `main.js`，因此 `.obsidian/community-plugins.json` 默认是空数组。这样新用户第一次打开 vault 时不会看到“插件已启用但本体不存在”的失败状态。安装插件后，可以在 Obsidian UI 中手动启用；保留在 `.obsidian/plugins/*/data.json` 的配置会作为参考配置使用。
+注意：公开包只提交了 `paper-reading-workbench` 的 `main.js` / `styles.css`，因此默认只启用这个插件。其它插件没有提交 `main.js`，需要安装后再手动启用；保留在 `.obsidian/plugins/*/data.json` 的配置会作为参考配置使用。
 
-`paper-reading-workbench` 是 optional/custom workflow。如果你没有对应插件本体或构建说明，把它视为本地自定义阅读辅助配置示例，不影响基础 vault、KB search、Zotero 或 arXiv dry-run。
+### Paper Reading Workbench：从 Obsidian 回到 Zotero PDF
+
+这个插件解决的是人类阅读时的回跳路径：你在 Obsidian 看到一篇精读笔记后，可以回到 Zotero 条目和 PDF 原文对照阅读。
+
+使用方式：
+
+1. 打开一个带 `zotero_key` frontmatter 的 `wiki/topics/*.md` 文献笔记。
+2. 确认 Zotero Desktop 正在运行，并且该 item 下已有 stored PDF 或 linked PDF 附件。
+3. 在命令面板运行 `Paper Reading Workbench: Open paper reading workbench for current note`，也可以点左侧 ribbon / status bar 的 `Paper Workbench`。
+4. 插件会读取 `zotero_key`，查询本机 Zotero Connector API `http://localhost:23119`，并生成或更新 `projects/reading-workbench/<ZOTERO_KEY>-zotero-source.md`。
+5. 工作台会提供 `Open Zotero item`、`Open Zotero PDF attachment`、`Open arXiv PDF fallback`、精读笔记、Gemini idea、翻译缓存和知识图入口。PDF 附件会优先使用 Zotero 的 `zotero://open-pdf/...` URI 打开；非 PDF 附件会回退到 Zotero item selection。
+
+边界：
+
+- 插件不会把 PDF 复制进 vault。
+- Zotero 仍然是原文 PDF 的 source of truth。
+- 如果 Zotero Desktop 没打开，或者该 item 没有 PDF 附件，插件会显示 Zotero local API unavailable 或回退到 Zotero item / arXiv PDF URL。
+- 插件会在 `projects/reading-workbench/`、`projects/translations/`、`projects/knowledge-diagrams/` 生成本地工作台文件；这些运行产物默认不提交 Git。
 
 ## Smart Connections 配置
 
@@ -228,7 +245,7 @@ setx ZOTERO_COLLECTION_KEY "<your-collection-key>"
 
 ### 插件列表里有 Claudian，但 Obsidian 没有显示 Claudian
 
-仓库只包含插件配置示例，不包含插件本体；公开包默认也不启用未安装的社区插件。去 Community Plugins 安装 Claudian 后，再手动启用。
+公开包只打包了 Paper Reading Workbench。本节说的是 Claudian：去 Community Plugins 安装 Claudian 后，再手动启用。
 
 ### Claudian 打开后没有项目命令
 

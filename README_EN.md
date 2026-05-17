@@ -94,11 +94,14 @@ The base vault only needs Python for local audit and search. Extra integrations 
 | Integration | Needed for |
 | --- | --- |
 | Obsidian plugins | Graph/dashboard ergonomics, Smart Connections, Claudian UI |
+| Paper Reading Workbench | Bundled local plugin for opening Zotero items/PDF attachments from literature notes |
 | Zotero Desktop / Web API | Importing papers and syncing metadata |
 | CSTCloud WebDAV or another storage route | Syncing Zotero stored attachments |
 | Claudian / Claude Code | AI-assisted deep reading and project commands |
 | Gemini CLI | Divergent research idea generation |
 | Codex CLI | Optional second-pass seed review |
+
+Paper Reading Workbench is bundled and enabled in the public vault. Open a `wiki/topics/*.md` note with `zotero_key`, then run `Paper Reading Workbench: Open paper reading workbench for current note`. The plugin queries the local Zotero Connector API, creates a `projects/reading-workbench/<ZOTERO_KEY>-zotero-source.md` source note, and provides links back to the Zotero item, Zotero PDF attachment, and arXiv PDF fallback. Zotero Desktop must be open, and the Zotero item must already have a stored or linked PDF attachment. The plugin does not copy PDFs into the vault.
 
 ## Zotero Setup
 
