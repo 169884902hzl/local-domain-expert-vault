@@ -1,12 +1,20 @@
-# Local-First Research Literature Vault
+# Local-First Research Vault
 
-> A local-first Obsidian research operating system for literature notes, Zotero workflows, Claudian / Claude Code reading, local evidence retrieval, and daily arXiv idea generation.
+> A local-first research OS that connects Zotero, Obsidian, Claudian / Claude Code, an arXiv metadata mirror, and local evidence retrieval into one auditable research workflow.
 
 [中文 README](README.md)
 
-This repository is not just a folder of Markdown notes or a Zotero export. It is a cloneable research workspace that keeps literature review, structured notes, local retrieval, AI-assisted reading, and research-idea generation inside one auditable vault.
+This repository is not just a folder of Markdown notes or a Zotero export. It is a cloneable research workspace where papers become structured wiki pages, concept/entity networks, deep-reading reports, local retrieval evidence, and reviewable research-idea seeds. AI can help read, compare, summarize, and ideate, but the workflow is designed to keep answers tied to local evidence.
 
 The public version starts from robotic manipulation literature, especially DLO manipulation, VLM/VLA systems, RL, Sim-to-Real, and embodied AI. The workflow itself is domain-independent: replace the papers, concepts, entities, prompts, and arXiv filters to adapt it to another research field.
+
+## Why This Is Different
+
+- **It is an evidence system, not an AI chat archive.** `kb_search.py` retrieves local `wiki/topics/`, `wiki/concepts/`, and `wiki/entities/` before an answer is written.
+- **It is a reading pipeline, not a summary dump.** Zotero items can become topic notes, then Claudian reading reports, finalized notes, audits, and reusable evidence.
+- **It is arXiv mirror-first, not Search API first.** Daily scouting ranks candidates from a local SQLite metadata mirror harvested via OAI-PMH; Search API is only a fallback.
+- **It treats ideas as reviewable seeds, not proven novelty.** Research seeds carry local evidence, gaps, baselines, killer experiments, risk notes, and human-review boundaries.
+- **It is designed for public reuse.** The package excludes API keys, PDFs, SQLite caches, logs, personal paths, and machine-specific runtime state.
 
 ## What Problem It Solves
 
@@ -31,6 +39,26 @@ research-agenda      reviewable idea seeds and automation logs
 ```
 
 The core principle is **local-first answerability**: domain answers should point back to local `wiki/` notes, concept pages, entity pages, or explicit evidence gaps.
+
+## Configuration Roadmap
+
+You do not need to configure the full automation stack on day one. Enable the system in layers:
+
+| Level | What works | Required setup |
+| --- | --- | --- |
+| Level 0 | Browse `wiki/`, dashboards, graph-oriented notes, and example outputs | Obsidian optional; GitHub web view is enough |
+| Level 1 | Local search and structure audits with `kb_search.py` and `audit_kb.py` | Python 3.10+ |
+| Level 2 | Import Zotero metadata into topic notes | Zotero API key, user ID, collection key |
+| Level 3 | Jump from an Obsidian reading note back to Zotero item / PDF | Zotero Desktop, PDF attachment, Paper Reading Workbench |
+| Level 4 | Claudian / Claude Code reading, comparison, and question-answer commands | Local CLI, model account, explicit permission choices |
+| Level 5 | Daily arXiv scouting, Zotero import, idea seeds, optional review | arXiv metadata mirror, Zotero write permission, optional Gemini / Codex |
+
+Setup entry points:
+
+- Obsidian / Claudian: [docs/OBSIDIAN_CLAUDIAN_SETUP.md](docs/OBSIDIAN_CLAUDIAN_SETUP.md)
+- Zotero API, WebDAV, attachments: [docs/ZOTERO_STORAGE.md](docs/ZOTERO_STORAGE.md)
+- Automation, scheduled tasks, arXiv mirror-first: [docs/AUTOMATION.md](docs/AUTOMATION.md)
+- Paper Reading Workbench security boundary: [docs/SECURITY_PLUGIN_WORKBENCH.md](docs/SECURITY_PLUGIN_WORKBENCH.md)
 
 ## Example Outputs
 

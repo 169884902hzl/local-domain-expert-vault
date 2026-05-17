@@ -1,16 +1,26 @@
-# Local-First Research Literature Vault
+# Local-First Research Vault
 
-> A local-first Obsidian research operating system. This public version starts from robotic manipulation literature, but the workflow can be adapted to other research fields.
+> 把 Zotero、Obsidian、Claudian / Claude Code、arXiv metadata mirror 和本地检索串成一个可审计的科研工作流系统。
 
 [English README](README_EN.md)
 
-这个仓库不是一堆 Markdown 论文笔记，也不是一个简单的 Zotero 导出。它是一个可以 clone 后直接打开的 **local-first 研究工作台**：用 Obsidian 管理知识网络，用 Zotero 接论文来源，用 Claudian/Claude Code 执行脚本化精读，用本地检索约束回答，再用每日 arXiv 自动化持续补充新论文和研究 idea。
+这个仓库不是一堆 Markdown 论文笔记，也不是一个简单的 Zotero 导出。它更像一个 **local-first research OS**：论文从 Zotero / arXiv 进来，变成结构化 wiki、概念网络、精读报告、本地证据检索和可审阅 research idea。AI 可以参与精读、比较、综述和发散，但回答必须回到本地证据链。
+
+公开版本以仓库内置的机器人操控文献作为示例，尤其覆盖 DLO、VLM/VLA、RL、Sim-to-Real 和 embodied AI。你也可以把它迁移到其他学科：换掉论文、概念、实体和 arXiv 过滤规则，保留这套可审计的研究工作流。
+
+## 这个项目最强的地方
+
+- **不是聊天记录，是证据系统。** 回答问题前先跑 `kb_search.py`，把结论绑定到 `wiki/topics/`、`wiki/concepts/` 和 `wiki/entities/`。
+- **不是摘要收藏，是精读流水线。** Zotero 条目可以进入 topic note，再经过 Claudian 精读、finalize、audit，形成可复用 evidence layer。
+- **不是盲目追 arXiv，是本地 mirror-first scout。** 每日流程优先用 OAI-PMH 同步到本地 SQLite metadata mirror，再筛选候选；Search API 只是 fallback。
+- **不是“AI 说有创新”，而是 research idea seed。** idea 会带 local evidence、gap、baseline、killer experiment、risk 和人工 review 边界。
+- **不是只适合作者本人。** 公开版去掉 API key、PDF、SQLite、日志和个人路径；clone 后可以先浏览、检索、审计，再逐步接 Zotero / Claudian / automation。
 
 ## 30 秒看懂
 
-这个公开版本的论文和示例配置主要来自机器人专业方向，尤其是机器人操控、DLO、VLM、RL、Sim-to-Real 和 embodied AI。它解决的是一个更通用的问题：
+它解决的是一个很现实的问题：
 
-> 论文越来越多，PDF、Zotero、Obsidian、AI 对话和研究 idea 分散在不同地方；AI 很容易凭空总结，Zotero 导入后也很难变成可检索、可追踪、可复用的本地知识。
+> 论文越来越多，PDF、Zotero、Obsidian、AI 对话和研究 idea 分散在不同地方；AI 很容易给出流畅但不可追溯的总结，Zotero 导入后也很难自然变成可检索、可审计、可复用的研究知识。
 
 这个仓库把流程收束成一个闭环：
 
@@ -29,6 +39,26 @@ output/ projects/   综述、比较、研究 idea、每日 arXiv 日志
 ```
 
 核心原则是 **local-first answerability**：任何领域回答都先查本地 `wiki/`，结论必须能回到具体论文、概念页或实体页；本地没有证据时，才明确说明缺口并考虑外部检索。
+
+## 配置路线图
+
+你不需要一次把所有自动化都配完。公开仓库按下面的层级逐步启用：
+
+| 层级 | 能做什么 | 需要配置什么 |
+| --- | --- | --- |
+| Level 0 | 直接浏览 `wiki/`、Dashboard、图谱和示例结果 | Obsidian 可选；GitHub 网页也能看 |
+| Level 1 | 本地检索和结构审计：`kb_search.py`、`audit_kb.py` | Python 3.10+ |
+| Level 2 | 从 Zotero 导入论文 metadata，并把条目变成 topic note | Zotero API key、user ID、collection key |
+| Level 3 | 在 Obsidian 中从精读笔记回跳 Zotero item / PDF 原文 | Zotero Desktop、PDF 附件、Paper Reading Workbench |
+| Level 4 | Claudian / Claude Code 精读、比较、问答命令 | 本机 CLI、模型账号、权限确认 |
+| Level 5 | 每日 arXiv scout、Zotero 导入、idea seed、二审 | arXiv metadata mirror、Zotero 写权限、可选 Gemini / Codex |
+
+详细配置入口：
+
+- Obsidian / Claudian: [docs/OBSIDIAN_CLAUDIAN_SETUP.md](docs/OBSIDIAN_CLAUDIAN_SETUP.md)
+- Zotero API、WebDAV、附件同步: [docs/ZOTERO_STORAGE.md](docs/ZOTERO_STORAGE.md)
+- 自动化、计划任务、arXiv mirror-first: [docs/AUTOMATION.md](docs/AUTOMATION.md)
+- Paper Reading Workbench 安全边界: [docs/SECURITY_PLUGIN_WORKBENCH.md](docs/SECURITY_PLUGIN_WORKBENCH.md)
 
 ## 工作流展示
 
