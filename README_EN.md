@@ -94,14 +94,14 @@ The base vault only needs Python for local audit and search. Extra integrations 
 | Integration | Needed for |
 | --- | --- |
 | Obsidian plugins | Graph/dashboard ergonomics, Smart Connections, Claudian UI |
-| Paper Reading Workbench | Bundled local plugin for opening Zotero items/PDF attachments from literature notes |
+| Paper Reading Workbench | Bundled local plugin for opening Zotero items/PDF attachments from literature notes; Zotero Desktop and a stored/linked PDF are still required |
 | Zotero Desktop / Web API | Importing papers and syncing metadata |
 | CSTCloud WebDAV or another storage route | Syncing Zotero stored attachments |
 | Claudian / Claude Code | AI-assisted deep reading and project commands |
 | Gemini CLI | Divergent research idea generation |
 | Codex CLI | Optional second-pass seed review |
 
-Paper Reading Workbench is bundled and enabled in the public vault. Open a `wiki/topics/*.md` note with `zotero_key`, then run `Paper Reading Workbench: Open paper reading workbench for current note`. The plugin queries the local Zotero Connector API, creates a `projects/reading-workbench/<ZOTERO_KEY>-zotero-source.md` source note, and provides links back to the Zotero item, Zotero PDF attachment, and arXiv PDF fallback. Zotero Desktop must be open, and the Zotero item must already have a stored or linked PDF attachment. The plugin does not copy PDFs into the vault.
+Paper Reading Workbench is bundled and enabled in the public vault. Open a `wiki/topics/*.md` note with `zotero_key`, then run `Paper Reading Workbench: Open paper reading workbench for current note`. The plugin queries the local Zotero Connector API, creates a `projects/reading-workbench/<ZOTERO_KEY>-zotero-source.md` source note, and provides links back to the Zotero item, Zotero PDF attachment, and arXiv PDF fallback. Zotero Desktop must be open, and the Zotero item must already have a stored or linked PDF attachment. The plugin does not copy PDFs into the vault. It is local executable Obsidian plugin code; translation and diagram actions spawn the local Python helper scripts only when you click those actions.
 
 ## Zotero Setup
 
@@ -155,12 +155,20 @@ Project commands include:
 
 ## Automation
 
-The daily arXiv workflow is **local metadata mirror first**. It incrementally harvests arXiv metadata through the official OAI-PMH endpoint into a local SQLite database, ranks recent candidates from that local mirror, and only falls back to the arXiv Search API when the mirror is missing or insufficient. The mirror stores metadata and PDF URLs, not PDF files.
+The daily arXiv workflow is **local metadata mirror first**. It incrementally harvests arXiv metadata through the official OAI-PMH endpoint into a local SQLite database, ranks recent candidates from that local mirror, and uses the arXiv Search API only as a fallback/troubleshooting path in real daily runs when the mirror is stale or insufficient. The mirror stores metadata and PDF URLs, not PDF files.
 
-Start with dry-runs before enabling scheduled tasks:
+Start with zero-write checks before enabling scheduled tasks:
 
 ```powershell
 python .claude/scripts/arxiv_metadata_sync.py --dry-run --days-back 14 --max-pages 1
+python .claude/scripts/arxiv_metadata_sync.py --status
+python .claude/scripts/daily_arxiv_pipeline.py --dry-run --source mirror-first --max-candidates 5 --days-back 14 --idea-mode template --skip-read
+```
+
+If `--status` reports `missing=true`, the local SQLite mirror has not been created yet. In that case, the pipeline dry-run reports `arxiv_mirror_missing` quickly instead of silently using Search API fallback. If a tiny mirror exists but has too few matching papers, dry-run reports `arxiv_mirror_insufficient`. To preview real ranked candidates, first create a small local mirror:
+
+```powershell
+python .claude/scripts/arxiv_metadata_sync.py --incremental --days-back 14 --max-pages 1
 python .claude/scripts/daily_arxiv_pipeline.py --dry-run --source mirror-first --max-candidates 5 --days-back 14 --idea-mode template --skip-read
 ```
 
@@ -171,7 +179,7 @@ arXiv data layer:
 - OAI-PMH sync builds `projects/arxiv-daily/metadata/arxiv_metadata.sqlite`.
 - The SQLite mirror stores metadata only: title, authors, abstract, dates, categories, URL, PDF URL, DOI, journal reference, comments.
 - Default OAI-PMH sets are `cs` and `stat`; this is not a bundled all-arXiv database.
-- The public repository does not include the SQLite mirror. Use `python .claude/scripts/arxiv_metadata_sync.py --status` to inspect your local mirror.
+- The public repository does not include the SQLite mirror. Use `python .claude/scripts/arxiv_metadata_sync.py --status` to inspect your local mirror; this command is read-only and does not create the database when it is missing.
 - Zotero import later uses selected metadata and PDF URLs to create library items; PDFs are managed by Zotero storage, WebDAV, or linked attachments.
 
 Windows Task Scheduler setup and dry-run examples are documented in [docs/AUTOMATION.md](docs/AUTOMATION.md).

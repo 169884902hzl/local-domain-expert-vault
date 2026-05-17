@@ -60,12 +60,14 @@ daily arXiv 主路线是 local SQLite metadata mirror first：先用 arXiv OAI-P
 
 ```powershell
 python .claude/scripts/arxiv_metadata_sync.py --dry-run --days-back 14 --max-pages 1
+python .claude/scripts/arxiv_metadata_sync.py --status
+python .claude/scripts/arxiv_metadata_sync.py --incremental --days-back 14 --max-pages 1
 python .claude/scripts/daily_arxiv_pipeline.py --dry-run --source mirror-first --max-candidates 30 --days-back 14 --idea-mode template --skip-read
 python .claude/scripts/zotero_import.py --preflight --json
 powershell -ExecutionPolicy Bypass -File .claude/scripts/register_daily_arxiv_task.ps1 -DryRun -Time "12:00"
 ```
 
-确认 dry run、Zotero preflight 和计划任务路径都正确后，再注册真实任务。
+`--status` 在 fresh clone 中可能显示 `missing=true`，这是正常的；`--incremental --max-pages 1` 会建立一个小规模本地 SQLite mirror，文件位于 `projects/arxiv-daily/metadata/` 且默认不提交 Git。确认 dry run、Zotero preflight 和计划任务路径都正确后，再注册真实任务。
 
 ## 日常维护
 

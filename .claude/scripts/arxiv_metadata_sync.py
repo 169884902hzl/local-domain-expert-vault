@@ -77,6 +77,16 @@ def connect(db_path: Path | str = DEFAULT_DB) -> sqlite3.Connection:
     return conn
 
 
+def connect_readonly(db_path: Path | str = DEFAULT_DB) -> sqlite3.Connection:
+    path = Path(db_path)
+    if not path.exists():
+        raise FileNotFoundError("arxiv_metadata_mirror_missing")
+    uri_path = urllib.parse.quote(str(path.resolve()).replace("\\", "/"), safe="/:")
+    conn = sqlite3.connect(f"file:{uri_path}?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
 def init_db(conn: sqlite3.Connection) -> None:
     conn.execute(
         """
@@ -273,6 +283,38 @@ def mirror_status(conn: sqlite3.Connection) -> dict[str, Any]:
     }
 
 
+def mirror_missing_status(*, error: str = "") -> dict[str, Any]:
+    return {
+        "records_total": 0,
+        "last_success_at": "",
+        "stale": True,
+        "states": [],
+        "missing": True,
+        "error": error,
+    }
+
+
+def mirror_status_path(db_path: Path | str = DEFAULT_DB) -> dict[str, Any]:
+    try:
+        conn = connect_readonly(db_path)
+    except FileNotFoundError as exc:
+        return mirror_missing_status(error=str(exc))
+    except sqlite3.Error as exc:
+        status = mirror_missing_status(error=f"arxiv_metadata_mirror_unreadable:{exc}")
+        status["missing"] = False
+        return status
+    try:
+        status = mirror_status(conn)
+        status["missing"] = False
+        return status
+    except sqlite3.Error as exc:
+        status = mirror_missing_status(error=f"arxiv_metadata_mirror_unreadable:{exc}")
+        status["missing"] = False
+        return status
+    finally:
+        conn.close()
+
+
 def _request_oai(params: dict[str, str], *, timeout: int, retries: int) -> ET.Element:
     last_error: Exception | None = None
     for attempt in range(retries + 1):
@@ -423,7 +465,19 @@ def query_mirror(
     as_of: datetime | None = None,
     db_path: Path = DEFAULT_DB,
 ) -> tuple[list[ArxivPaper], dict[str, Any]]:
-    conn = connect(db_path)
+    if str(db_path) == ":memory:":
+        conn = connect(":memory:")
+    else:
+        try:
+            conn = connect_readonly(db_path)
+        except FileNotFoundError:
+            status = mirror_status_path(db_path)
+            status.update({"source": "mirror_missing"})
+            return [], status
+        except sqlite3.Error as exc:
+            status = mirror_status_path(db_path)
+            status.update({"source": "mirror_failed", "error": f"arxiv_metadata_mirror_unreadable:{exc}"})
+            return [], status
     reference_time = as_of or datetime.now(timezone.utc)
     cutoff = reference_time - timedelta(days=days_back)
     rows = conn.execute("SELECT * FROM papers").fetchall()
@@ -470,9 +524,7 @@ def main() -> int:
     parser.add_argument("--status", action="store_true")
     args = parser.parse_args()
     if args.status:
-        conn = connect(DEFAULT_DB)
-        safe_print(json.dumps(mirror_status(conn), ensure_ascii=False, indent=2))
-        conn.close()
+        safe_print(json.dumps(mirror_status_path(DEFAULT_DB), ensure_ascii=False, indent=2))
         return 0
     result = sync_metadata(
         days_back=args.days_back,

@@ -80,7 +80,7 @@ research-agenda 工作流会把本地证据沉淀成待审阅研究 idea seed。
 | `audit_kb.py` | 检查 frontmatter、heading、精读质量和概念页结构 | 是 |
 | `.claude/commands/` | Claudian / Claude Code 项目命令 | 需要 Claudian 或 Claude Code |
 | `.claudian/claudian-settings.json` | 已脱敏的 Claudian 行为配置和 system prompt | 需要用户本机配置 CLI |
-| `.obsidian/` | Graph、Smart Connections、Dataview 等插件配置；Paper Reading Workbench 已打包 | Paper Reading Workbench 可直接用；其它插件需用户安装 |
+| `.obsidian/` | Graph、Smart Connections、Dataview 等插件配置；Paper Reading Workbench 已打包 | 插件本体可直接用；Zotero/PDF 回跳需 Zotero Desktop 和 PDF 附件 |
 | `daily_arxiv_pipeline.py` | 每日 arXiv 检索、排序、导入、idea 生成流水线 | 需要网络；完整模式需要 Zotero/CLI |
 | `docs/AUTOMATION.md` | 自动化启动、计划任务、日志和排错说明 | 是 |
 
@@ -119,12 +119,20 @@ python .claude/scripts/audit_kb.py
 
 ### 5. 当每日 arXiv 自动化系统用
 
-daily arXiv 工作流是 **local metadata mirror first**：先通过 arXiv 官方 OAI-PMH endpoint 增量同步 metadata 到本地 SQLite，再从本地 mirror 排序候选；Search API 只作为 mirror 缺失或候选不足时的 fallback / troubleshooting 路径。
+daily arXiv 工作流是 **local metadata mirror first**：先通过 arXiv 官方 OAI-PMH endpoint 增量同步 metadata 到本地 SQLite，再从本地 mirror 排序候选；真实每日任务中，Search API 只作为 mirror 过旧或候选不足时的 fallback / troubleshooting 路径。
 
-先 dry run：
+先做零写入检查：
 
 ```powershell
 python .claude/scripts/arxiv_metadata_sync.py --dry-run --days-back 14 --max-pages 1
+python .claude/scripts/arxiv_metadata_sync.py --status
+python .claude/scripts/daily_arxiv_pipeline.py --dry-run --source mirror-first --max-candidates 30 --days-back 14 --idea-mode template --skip-read
+```
+
+如果 `--status` 显示 `missing=true`，说明本机还没有 SQLite mirror；此时 pipeline dry-run 会快速提示 `arxiv_mirror_missing`，不会静默兜底 Search API。即使本地 mirror 太小导致候选不足，dry-run 也只报告 `arxiv_mirror_insufficient`。要真实预览候选，先运行一次小规模本地同步：
+
+```powershell
+python .claude/scripts/arxiv_metadata_sync.py --incremental --days-back 14 --max-pages 1
 python .claude/scripts/daily_arxiv_pipeline.py --dry-run --source mirror-first --max-candidates 30 --days-back 14 --idea-mode template --skip-read
 ```
 
@@ -137,7 +145,7 @@ python .claude/scripts/daily_arxiv_pipeline.py --dry-run --source mirror-first -
 | 基础浏览 | 可直接使用 |
 | 本地检索 | 可直接使用，Python 标准库即可 |
 | 结构审计 | 可直接使用，Python 标准库即可 |
-| Obsidian 插件配置 | Paper Reading Workbench 已打包；其它插件需用户安装 |
+| Obsidian 插件配置 | Paper Reading Workbench 已打包；PDF 回跳需 Zotero Desktop 和附件；其它插件需用户安装 |
 | Claudian 配置 | 已包含脱敏配置；CLI 路径和账号需用户本机配置 |
 | Zotero 导入 | 需要用户自己的 Zotero 或 Zotero API 配置 |
 | 每日 arXiv 自动化 | 需要网络；写入 Zotero 时需要 Zotero 配置 |
@@ -216,11 +224,11 @@ python3 .claude/scripts/kb_search.py "diffusion policy DLO" --limit 5
 | Smart Connections | 语义检索；建议只索引 `wiki/` | 是 |
 | Templater | 笔记模板 | 是 |
 | Zotero Desktop Connector | 从 Zotero 取 metadata/fulltext | 部分配置 |
-| Paper Reading Workbench | 从 Obsidian 精读页回跳 Zotero item/PDF，并生成阅读工作台 | 已打包并默认启用 |
+| Paper Reading Workbench | 从 Obsidian 精读页回跳 Zotero item/PDF，并生成阅读工作台 | 已打包并默认启用；PDF 回跳依赖 Zotero Desktop 和附件 |
 
 注意：公开包只默认启用已随仓库提供 `main.js` / `styles.css` 的 `paper-reading-workbench`。Claudian、Dataview、Smart Connections、Templater、Zotero Desktop Connector 等社区插件仍需要从 Obsidian Community Plugins 安装后手动启用。
 
-Paper Reading Workbench 的用途是给人类对照阅读：打开带 `zotero_key` 的 `wiki/topics/*.md` 精读笔记后，运行命令 `Paper Reading Workbench: Open paper reading workbench for current note`，插件会读取 Zotero key、查询本机 Zotero Connector API、生成 `projects/reading-workbench/<ZOTERO_KEY>-zotero-source.md`，并提供 `Open Zotero item`、`Open Zotero PDF attachment` 和 arXiv PDF fallback 链接。Zotero Desktop 必须打开，且该条目需要已有 stored PDF 或 linked PDF 附件；插件不会把 PDF 复制进 vault。
+Paper Reading Workbench 的用途是给人类对照阅读：打开带 `zotero_key` 的 `wiki/topics/*.md` 精读笔记后，运行命令 `Paper Reading Workbench: Open paper reading workbench for current note`，插件会读取 Zotero key、查询本机 Zotero Connector API、生成 `projects/reading-workbench/<ZOTERO_KEY>-zotero-source.md`，并提供 `Open Zotero item`、`Open Zotero PDF attachment` 和 arXiv PDF fallback 链接。Zotero Desktop 必须打开，且该条目需要已有 stored PDF 或 linked PDF 附件；插件不会把 PDF 复制进 vault。这个插件是随仓库打包的本地可执行插件；只有在你点击翻译、知识图等工作台动作时，才会调用本机 Python 脚本生成本地工作文件。
 
 ## 核心命令
 
@@ -396,14 +404,15 @@ Claudian 的公开配置已经放在：
 
 详细说明见 [docs/AUTOMATION.md](docs/AUTOMATION.md)。下面是最常用的启动路径。
 
-### 1. 只预览每日 arXiv 候选，不写文件、不写 Zotero
+### 1. 零写入检查 arXiv 入口
 
 ```powershell
 python .claude/scripts/arxiv_metadata_sync.py --dry-run --days-back 14 --max-pages 1
+python .claude/scripts/arxiv_metadata_sync.py --status
 python .claude/scripts/daily_arxiv_pipeline.py --dry-run --source mirror-first --max-candidates 30 --days-back 14 --idea-mode template --skip-read
 ```
 
-这组命令适合第一次试跑。metadata sync 的 dry-run 使用内存数据库；pipeline dry-run 会优先查本地 SQLite metadata mirror，再在需要时兜底外部 Search API。Search API 受外部限流影响，不能单独代表 vault 是否正常。
+这组命令适合第一次零写入检查。metadata sync 的 dry-run 使用内存数据库；`--status` 只读检查本机 mirror，不会创建 SQLite；pipeline dry-run 会读取已有 SQLite metadata mirror。如果 mirror 不存在、为空或候选不足，它会提示 `arxiv_mirror_missing` / `arxiv_mirror_empty` / `arxiv_mirror_insufficient`，不会把 Search API fallback 伪装成 mirror-first 成功。要看到真实候选，需要先运行一次非 dry-run metadata sync。
 
 arXiv 数据层边界：
 
@@ -412,6 +421,13 @@ arXiv 数据层边界：
 - 默认同步 OAI-PMH sets 是 `cs` 和 `stat`，不是全 arXiv，也不是 PDF 全文。
 - 公开仓库不提交 SQLite mirror；使用者可以通过 `python .claude/scripts/arxiv_metadata_sync.py --status` 查看自己本机 mirror 的规模和更新时间。
 - Zotero 后续用选中的 metadata / PDF URL 创建 library item；PDF 同步由 Zotero 官方存储、WebDAV 或 linked attachment 负责，不由 arXiv mirror 保存。
+
+小规模建立本机 mirror 后再预览候选：
+
+```powershell
+python .claude/scripts/arxiv_metadata_sync.py --incremental --days-back 14 --max-pages 1
+python .claude/scripts/daily_arxiv_pipeline.py --dry-run --source mirror-first --max-candidates 30 --days-back 14 --idea-mode template --skip-read
+```
 
 ### 2. 手动运行一次每日 pipeline
 

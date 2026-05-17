@@ -294,7 +294,10 @@ Source: local working copy (path omitted from public package)
     python .claude/scripts/audit_kb.py --strict-reading --strict-concepts
     python .claude/scripts/kb_search.py "diffusion policy DLO" --limit 5
     python .claude/scripts/arxiv_metadata_sync.py --dry-run --days-back 14 --max-pages 1
+    python .claude/scripts/arxiv_metadata_sync.py --status
     python .claude/scripts/daily_arxiv_pipeline.py --dry-run --source mirror-first --max-candidates 5 --days-back 14 --idea-mode template --skip-read
+    python .claude/scripts/zotero_import.py --preflight --json
+    powershell -ExecutionPolicy Bypass -File .claude/scripts/register_daily_arxiv_task.ps1 -DryRun -Time "12:00"
 "@
 $manifest | Set-Content -LiteralPath (Join-Path $PackageRoot "PACKAGE_MANIFEST.md") -Encoding UTF8
 

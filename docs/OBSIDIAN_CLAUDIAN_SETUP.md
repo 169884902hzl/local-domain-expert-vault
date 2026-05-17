@@ -71,6 +71,7 @@ Settings -> Community plugins -> Browse
 - Zotero 仍然是原文 PDF 的 source of truth。
 - 如果 Zotero Desktop 没打开，或者该 item 没有 PDF 附件，插件会显示 Zotero local API unavailable 或回退到 Zotero item / arXiv PDF URL。
 - 插件会在 `projects/reading-workbench/`、`projects/translations/`、`projects/knowledge-diagrams/` 生成本地工作台文件；这些运行产物默认不提交 Git。
+- 这是随仓库打包的本地可执行插件。打开工作台只读取当前 note 和 Zotero local API；点击翻译、知识图等动作时，插件会启动本机 Python helper script。首次使用前可以先读 `.obsidian/plugins/paper-reading-workbench/main.js`。
 
 ## Smart Connections 配置
 

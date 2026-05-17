@@ -8,7 +8,7 @@
 | --- | --- | --- | --- |
 | Level 0 | 本地检索和审计 | Python 3.10+ | 所有人 |
 | Level 1 | arXiv metadata mirror smoke test | Python + 网络 | 想确认 OAI-PMH metadata 同步入口可用 |
-| Level 2 | mirror-first daily pipeline dry-run | Python + metadata mirror 或 fallback 网络 | 想看每日候选但不写库 |
+| Level 2 | mirror-first daily pipeline dry-run | Python + metadata mirror | 想看每日候选但不写库 |
 | Level 3 | optional Search API fallback troubleshooting | Python + 网络 | 只在 mirror 缺失、过旧或候选不足时排错 |
 | Level 4 | Zotero + Claudian + Gemini + Codex automation | Zotero / Claudian / Gemini / Codex 按需配置 | 想导入、精读、生成 idea、二审 |
 | Level 5 | Windows 定时运行 | Windows Task Scheduler | 想每天自动跑 |
@@ -34,7 +34,7 @@ python .claude/scripts/kb_search.py "VLM robot manipulation" --limit 5
 
 ## 1. arXiv metadata mirror smoke test
 
-每日自动化的主叙事是 **local SQLite metadata mirror first**：先通过 arXiv 官方 OAI-PMH endpoint 同步或检查本地 arXiv metadata mirror，再让 pipeline 以 `mirror-first` 方式选候选。这样第一体验不依赖 Search API 的实时可用性，也能减少 arXiv 429、timeout 或外部服务限流造成的误判。
+每日自动化的主叙事是 **local SQLite metadata mirror first**：先通过 arXiv 官方 OAI-PMH endpoint 同步或检查本地 arXiv metadata mirror，再让 pipeline 以 `mirror-first` 方式选候选。这样主路径不依赖 Search API 的实时可用性，也能减少 arXiv 429、timeout 或外部服务限流造成的误判。
 
 先做 OAI-PMH mirror dry-run，不创建 SQLite 或 lock 文件：
 
@@ -56,6 +56,8 @@ arXiv 数据层边界：
 python .claude/scripts/arxiv_metadata_sync.py --status
 ```
 
+`--status` 是只读命令。fresh clone 中如果还没有 SQLite mirror，它会输出 `missing=true`，不会创建 `projects/arxiv-daily/metadata/arxiv_metadata.sqlite`。
+
 ## 2. mirror-first daily pipeline dry-run
 
 预览每日候选，不写 Zotero、不写 vault：
@@ -64,7 +66,16 @@ python .claude/scripts/arxiv_metadata_sync.py --status
 python .claude/scripts/daily_arxiv_pipeline.py --dry-run --source mirror-first --max-candidates 30 --days-back 14 --idea-mode template --skip-read
 ```
 
-`mirror-first` 会先查本地 SQLite metadata mirror。只有 mirror 缺失、过旧或候选不足时，才会 fallback 到 Search API。
+`mirror-first` 会先查本地 SQLite metadata mirror。dry-run 会读取真实本地 SQLite；如果 mirror 不存在、为空或候选不足，它会快速输出 `arxiv_mirror_missing` / `arxiv_mirror_empty` / `arxiv_mirror_insufficient`，不会静默 fallback 到 Search API。这样可以确认你是否真的有本地 mirror，而不是把外部 Search API 结果误判成 mirror-first 成功。
+
+如果你想看到真实候选，先运行一次小规模本地同步：
+
+```powershell
+python .claude/scripts/arxiv_metadata_sync.py --incremental --days-back 14 --max-pages 1
+python .claude/scripts/daily_arxiv_pipeline.py --dry-run --source mirror-first --max-candidates 30 --days-back 14 --idea-mode template --skip-read
+```
+
+完整非 dry-run 每日任务仍然允许在 mirror 过旧或候选不足时 fallback 到 Search API；那是排错和兜底路径，不是 first-run 成功标准。
 
 ## 3. optional Search API fallback troubleshooting
 
@@ -91,7 +102,7 @@ python .claude/scripts/arxiv_metadata_sync.py --incremental --days-back 60 --ove
 python .claude/scripts/arxiv_metadata_sync.py --status
 ```
 
-非 dry-run 的 metadata 同步会写入 `projects/arxiv-daily/metadata/`，该目录内容默认不提交 Git。`--dry-run` 使用内存数据库，不创建 SQLite 或 lock 文件。不要在文档或 README 中写死本机 mirror 规模；如需查看规模，运行 `python .claude/scripts/arxiv_metadata_sync.py --status`。
+非 dry-run 的 metadata 同步会写入 `projects/arxiv-daily/metadata/`，该目录内容默认不提交 Git。`--dry-run` 使用内存数据库，不创建 SQLite 或 lock 文件；`--max-pages 1` 出现 `partial` / `resumption_token` 是预期 smoke-test 结果，表示只拉了第一页。不要在文档或 README 中写死本机 mirror 规模；如需查看规模，运行 `python .claude/scripts/arxiv_metadata_sync.py --status`。
 
 ## 5. 配置 Zotero
 
@@ -378,14 +389,16 @@ Python 检索、审计和 arXiv dry-run 可以在 macOS/Linux 上运行，但本
 1. `audit_kb.py`
 2. `kb_search.py`
 3. `arxiv_metadata_sync.py --dry-run`
-4. `daily_arxiv_pipeline.py --dry-run --source mirror-first`
-5. Zotero preflight
-6. 单篇 `ingest_paper.py`
-7. 手动 `daily_arxiv_pipeline.py --once --source mirror-first --idea-mode template`
-8. Gemini CLI
-9. `run_daily_arxiv_task.ps1`
-10. `register_daily_arxiv_task.ps1`
-11. Codex seed review
-12. weekly agenda review
+4. `arxiv_metadata_sync.py --status`
+5. 小规模 `arxiv_metadata_sync.py --incremental --days-back 14 --max-pages 1`
+6. `daily_arxiv_pipeline.py --dry-run --source mirror-first`
+7. Zotero preflight
+8. 单篇 `ingest_paper.py`
+9. 手动 `daily_arxiv_pipeline.py --once --source mirror-first --idea-mode template`
+10. Gemini CLI
+11. `run_daily_arxiv_task.ps1`
+12. `register_daily_arxiv_task.ps1`
+13. Codex seed review
+14. weekly agenda review
 
 这样做的好处是每一步都有明确验收，不会把 Zotero、Gemini、Codex、计划任务的问题混在一起。

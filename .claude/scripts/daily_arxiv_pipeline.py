@@ -31,7 +31,7 @@ from arxiv_ranker import (
 )
 from generate_gemini_idea_prompt import render_prompt as render_gemini_prompt
 from arxiv_metadata_sync import DEFAULT_DB as ARXIV_METADATA_DB
-from arxiv_metadata_sync import query_mirror, mirror_status, connect as connect_mirror
+from arxiv_metadata_sync import query_mirror, mirror_status_path
 from kb_common import extract_frontmatter, parse_frontmatter_map, safe_print, safe_write, today_iso, vault_path
 from zotero_import import (
     DEFAULT_COLLECTION_KEY,
@@ -222,12 +222,22 @@ def collect_candidates_from_source(
                 days_back=days_back,
                 max_candidates=max_candidates,
                 as_of=as_of,
-                db_path=":memory:" if dry_run else ARXIV_METADATA_DB,
+                db_path=ARXIV_METADATA_DB,
             )
         except Exception as exc:
             papers, mirror_info = [], {"source": "mirror_failed", "records_total": 0, "last_success_at": "", "stale": True}
             errors.append(f"arxiv_mirror_failed:{exc}")
         if source == "mirror-only":
+            mirror_info["search_api_fallback_used"] = False
+            return papers, mirror_info
+        if dry_run and (mirror_info.get("missing") or mirror_info.get("records_total", 0) == 0):
+            reason = "missing" if mirror_info.get("missing") else "empty"
+            errors.append(f"arxiv_mirror_{reason}:run_arxiv_metadata_sync_incremental_first")
+            mirror_info["search_api_fallback_used"] = False
+            return papers, mirror_info
+        if dry_run:
+            if len(papers) < MIN_MIRROR_CANDIDATES_FOR_DAILY:
+                errors.append(f"arxiv_mirror_insufficient:candidates={len(papers)}:threshold={MIN_MIRROR_CANDIDATES_FOR_DAILY}")
             mirror_info["search_api_fallback_used"] = False
             return papers, mirror_info
         if len(papers) >= MIN_MIRROR_CANDIDATES_FOR_DAILY:
@@ -252,15 +262,7 @@ def collect_candidates_from_source(
             "source": "search_api" if source == "search-api" else "search_api_fallback",
             "search_api_fallback_used": source == "mirror-first",
         }
-    if dry_run:
-        status = {}
-    else:
-        try:
-            conn = connect_mirror()
-            status = mirror_status(conn)
-            conn.close()
-        except Exception:
-            status = {}
+    status = mirror_status_path()
     return papers, {
         **mirror_info,
         "source": "search_api_empty",
@@ -573,6 +575,10 @@ def exclude_existing_candidates(
     *,
     collection_key: str,
 ) -> tuple[list[RankedPaper], list[dict[str, Any]], str]:
+    if not ranked:
+        return ranked, [], "skipped:no_candidates"
+    if not collection_key:
+        return ranked, [], "skipped:missing_collection_key"
     try:
         local_items = iter_local_items(collection_key)
     except Exception as exc:
@@ -2069,5 +2075,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
-
