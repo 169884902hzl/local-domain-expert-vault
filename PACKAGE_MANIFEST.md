@@ -11,6 +11,7 @@ Source: local working copy (path omitted from public package)
 - minimal .obsidian/ settings and plugin config examples
 - bundled local Obsidian plugin: `.obsidian/plugins/paper-reading-workbench/main.js` and `styles.css`
 - templates/, SCHEMA.md, Dashboard.md, AGENTS.md, CLAUDE.md
+- stable workflow contracts: `projects/research-agenda/workflow-contracts/`
 - README.md, README_EN.md, LICENSE, docs/, docs/assets/, docs/examples/
 - root GitHub documentation, license boundary, safety docs, and tools/build_github_package.ps1
 
@@ -23,7 +24,7 @@ Source: local working copy (path omitted from public package)
 - attachments/ contents
 - raw/ contents
 - output/ contents
-- projects/ contents
+- projects/ contents, except stable `projects/research-agenda/workflow-contracts/`
 - daily/, archive/, exports/, projectsideas/, Excalidraw/
 - PDFs, SQLite databases, local caches, and machine-specific credentials
 

@@ -246,7 +246,17 @@ def collect_candidates_from_source(
         if papers:
             errors.append(f"arxiv_mirror_insufficient:candidates={len(papers)}:threshold={MIN_MIRROR_CANDIDATES_FOR_DAILY}")
     if source == "mirror-first":
-        errors.append("arxiv_mirror_empty_search_api_fallback")
+        if mirror_info.get("source") == "mirror_failed":
+            fallback_reason = "failed"
+        elif mirror_info.get("missing"):
+            fallback_reason = "missing"
+        elif mirror_info.get("records_total", 0) == 0:
+            fallback_reason = "empty"
+        elif papers:
+            fallback_reason = "insufficient"
+        else:
+            fallback_reason = "empty"
+        errors.append(f"arxiv_mirror_{fallback_reason}_search_api_fallback")
     papers = collect_candidates(
         queries,
         max_candidates=max_candidates,

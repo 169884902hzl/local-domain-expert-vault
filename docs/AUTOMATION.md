@@ -366,10 +366,16 @@ Unregister-ScheduledTask -TaskName WeeklyResearchAgendaReview -Confirm:$false
 
 Python 检索、审计和 arXiv dry-run 可以在 macOS/Linux 上运行，但本仓库只提供 Windows Task Scheduler 注册脚本。非 Windows 用户可以把同等命令放入 `cron`、`systemd timer` 或自己的 CI runner；注意不要把 API key 写入仓库。
 
-示例 cron 只作结构参考：
+smoke-test cron 示例只作结构参考，不会写 Zotero 或 vault：
 
 ```cron
 0 12 * * * cd /path/to/local-first-research-vault && python3 .claude/scripts/arxiv_metadata_sync.py --incremental --days-back 60 --overlap-days 3 && python3 .claude/scripts/daily_arxiv_pipeline.py --dry-run --source mirror-first --max-candidates 30 --days-back 14 >> projects/arxiv-daily/cron.log 2>&1
+```
+
+真实每日任务示例会写入本地 `projects/` 运行产物，并在你配置 Zotero / Claudian / Gemini 后继续执行导入、精读和 idea 生成：
+
+```cron
+0 12 * * * cd /path/to/local-first-research-vault && python3 .claude/scripts/arxiv_metadata_sync.py --incremental --days-back 60 --overlap-days 3 && python3 .claude/scripts/daily_arxiv_pipeline.py --once --source mirror-first --idea-mode template --skip-read --max-candidates 40 --days-back 14 >> projects/arxiv-daily/cron.log 2>&1
 ```
 
 ## 13. 状态解释

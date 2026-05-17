@@ -11,6 +11,7 @@
       "Bash(python .claude/scripts/kb_search.py*)",
       "Bash(python .claude/scripts/daily_arxiv_pipeline.py --dry-run*)",
       "Bash(python .claude/scripts/arxiv_metadata_sync.py --dry-run*)",
+      "Bash(python .claude/scripts/arxiv_metadata_sync.py --status)",
       "Bash(python .claude/scripts/zotero_import.py --preflight --json)"
     ],
     "deny": [

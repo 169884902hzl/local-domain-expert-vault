@@ -1,0 +1,91 @@
+{
+  "schema_version": "daily_readable_workflow.v1",
+  "updated": "2026-05-14",
+  "name": "Daily arXiv readable workflow",
+  "boundary": {
+    "local_first": true,
+    "does_not_modify_raw": true,
+    "does_not_run_sim_or_hardware": true,
+    "sidecar_failures_block_daily": false,
+    "mandatory_model_battle_failures_block_clean_idea_success": true,
+    "top1_candidate_means": "high-priority candidate, not confirmed top1"
+  },
+  "steps": [
+    {
+      "id": "metadata_sync",
+      "owner": "local_scripts",
+      "inputs": ["arXiv OAI-PMH metadata", "local SQLite mirror"],
+      "outputs": ["projects/arxiv-daily/metadata/arxiv_metadata.sqlite"],
+      "timeout_sec": 900,
+      "failure_semantics": "warn_and_use_recent_mirror"
+    },
+    {
+      "id": "daily_candidate_selection",
+      "owner": "local_scripts",
+      "inputs": ["local metadata mirror", "Zotero existing library filter"],
+      "outputs": ["projects/arxiv-daily/YYYY-MM-DD-run.md"],
+      "failure_semantics": "partial_if_no_candidate_source"
+    },
+    {
+      "id": "zotero_import_and_claudian_reading",
+      "owner": "Claudian",
+      "inputs": ["selected new-only arXiv papers"],
+      "outputs": ["wiki/topics/*.md", "raw/readings/*-analysis.md"],
+      "timeout_sec_per_paper": 2700,
+      "failure_semantics": "record_backlog_continue_next_paper"
+    },
+    {
+      "id": "evidence_extraction",
+      "owner": "local_scripts",
+      "inputs": ["wiki/topics done literature notes"],
+      "outputs": [
+        "projects/research-agenda/evidence/evidence_matrix.jsonl",
+        "projects/research-agenda/evidence/paper_cards/*.md"
+      ],
+      "quality_gate": "required evidence fields plus optional source snippet anchors"
+    },
+    {
+      "id": "sidecar_context",
+      "owner": "local_scripts",
+      "inputs": ["new evidence records", "done literature notes"],
+      "outputs": [
+        "projects/research-agenda/concept-deltas/YYYY-MM-DD-concept-delta.md",
+        "projects/research-agenda/mechanism-graphs/YYYY-MM-DD/*.md"
+      ],
+      "failure_semantics": "warn_only"
+    },
+    {
+      "id": "gemini_greenhouse",
+      "owner": "Gemini CLI",
+      "inputs": ["evidence matrix", "focus keys", "source snippets", "agenda contracts"],
+      "outputs": ["projects/research-agenda/divergent/YYYY-MM-DD-gemini-raw-candidates.json"],
+      "timeout_sec": 1200,
+      "failure_semantics": "partial_preserve_existing_evidence"
+    },
+    {
+      "id": "mandatory_model_battle",
+      "owner": "OpenCode DeepSeek + Gemini CLI",
+      "inputs": ["Gemini raw candidates", "quality rubric", "provider matrix"],
+      "outputs": [
+        "projects/research-agenda/model-debates/YYYY-MM-DD-gemini-deepseek-debate-packet.json",
+        "projects/research-agenda/reviews/YYYY-MM-DD-gemini-deepseek-debate.md"
+      ],
+      "timeout_sec": 2400,
+      "failure_semantics": "partial_preserve_greenhouse_candidates"
+    },
+    {
+      "id": "codex_second_review",
+      "owner": "Codex CLI",
+      "inputs": ["Gemini raw candidates", "mandatory model battle", "formal seeds", "quality rubric", "provider matrix"],
+      "outputs": ["projects/research-agenda/reviews/YYYY-MM-DD-codex-seed-review.md"],
+      "timeout_sec": 7200,
+      "failure_semantics": "fallback_report_nonblocking_exit"
+    }
+  ],
+  "artifact_classes": {
+    "formal_knowledge": ["wiki/topics", "projects/research-agenda/evidence/evidence_matrix.jsonl"],
+    "formal_agenda": ["projects/research-agenda/daily/YYYY-MM-DD-agenda-delta.md", "projects/research-agenda/idea_bank/seed"],
+    "draft_context": ["projects/research-agenda/concept-deltas", "projects/research-agenda/mechanism-graphs", "projects/research-agenda/divergent"],
+    "review_only": ["projects/research-agenda/reviews", "projects/research-agenda/model-debates"]
+  }
+}

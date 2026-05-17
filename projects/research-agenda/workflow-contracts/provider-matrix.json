@@ -1,0 +1,87 @@
+{
+  "schema_version": "provider_matrix.v1",
+  "updated": "2026-05-14",
+  "providers": [
+    {
+      "name": "Claudian",
+      "role": "deep_reading",
+      "default_mode": "yolo",
+      "default_model": "configured_by_claudian",
+      "timeout_sec": 2700,
+      "network_allowed": true,
+      "modifies_formal_artifacts": true,
+      "formal_outputs": ["wiki/topics/*.md", "raw/readings/*-analysis.md"],
+      "rerunnable": true,
+      "failure_semantics": "per-paper timeout or failure is written to backlog; pipeline continues"
+    },
+    {
+      "name": "Gemini CLI",
+      "role": "divergent_greenhouse_ideation",
+      "auth": "OAuth CLI",
+      "default_model": "gemini-3.1-pro-preview",
+      "fallback_model": "auto",
+      "timeout_sec": 1200,
+      "network_allowed": true,
+      "modifies_formal_artifacts": false,
+      "formal_outputs": [],
+      "draft_outputs": ["projects/research-agenda/divergent/YYYY-MM-DD-gemini-raw-candidates.json"],
+      "rerunnable": true,
+      "failure_semantics": "structured failed:gemini... status; agenda may be partial but evidence remains valid"
+    },
+    {
+      "name": "Codex CLI",
+      "role": "second_pass_review",
+      "default_mode": "dangerously-bypass-approvals-and-sandbox",
+      "default_model": "configured_by_codex_cli",
+      "timeout_sec": 7200,
+      "network_allowed": true,
+      "modifies_formal_artifacts": false,
+      "review_outputs": ["projects/research-agenda/reviews/YYYY-MM-DD-codex-seed-review.md"],
+      "rerunnable": true,
+      "failure_semantics": "nonblocking raw exit can still produce fallback review; no auto promotion or deletion"
+    },
+    {
+      "name": "OpenCode DeepSeek",
+      "role": "mandatory_adversarial_model_battle",
+      "default_mode": "opencode run --format json",
+      "default_model": "deepseek/deepseek-v4-pro(max)",
+      "timeout_sec": 1200,
+      "network_allowed": true,
+      "modifies_formal_artifacts": false,
+      "formal_outputs": [],
+      "draft_outputs": [
+        "projects/research-agenda/model-debates/YYYY-MM-DD-gemini-deepseek-debate-packet.json",
+        "projects/research-agenda/model-debates/YYYY-MM-DD-gemini-deepseek-debate.md",
+        "projects/research-agenda/reviews/YYYY-MM-DD-gemini-deepseek-debate.md"
+      ],
+      "rerunnable": true,
+      "failure_semantics": "mandatory for gemini-divergent daily idea stage from 2026-05-14; failure makes agenda/daily idea status partial while preserving greenhouse artifacts"
+    },
+    {
+      "name": "Local scripts",
+      "role": "metadata_sync_evidence_gate_audit",
+      "default_model": "none",
+      "timeout_sec": null,
+      "network_allowed": false,
+      "modifies_formal_artifacts": true,
+      "formal_outputs": [
+        "projects/research-agenda/evidence/evidence_matrix.jsonl",
+        "projects/research-agenda/evidence/paper_cards/*.md",
+        "projects/research-agenda/daily/YYYY-MM-DD-agenda-delta.md"
+      ],
+      "draft_outputs": [
+        "projects/research-agenda/concept-deltas/YYYY-MM-DD-concept-delta.md",
+        "projects/research-agenda/mechanism-graphs/YYYY-MM-DD/*.md"
+      ],
+      "rerunnable": true,
+      "failure_semantics": "deterministic validation failure is explicit; sidecar context failures are warnings"
+    }
+  ],
+  "global_boundaries": {
+    "no_secret_echo": true,
+    "no_confirmed_novelty_claim": true,
+    "no_auto_paper_claim_acceptance": true,
+    "raw_candidates_preserved": true,
+    "user_is_final_reviewer": true
+  }
+}

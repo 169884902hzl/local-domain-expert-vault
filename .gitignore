@@ -2,10 +2,15 @@
 .smart-env/
 .omx/
 .sisyphus/
+.local/
 __pycache__/
 *.py[cod]
 *.tmp
 tmp_*
+*.sqlite
+*.sqlite3
+*.db
+*.log
 
 # Agent sessions, logs, backups, and local permissions
 .claude/backups/
@@ -56,6 +61,10 @@ output/*
 !output/.gitkeep
 projects/*
 !projects/.gitkeep
+!projects/research-agenda/
+projects/research-agenda/*
+!projects/research-agenda/workflow-contracts/
+!projects/research-agenda/workflow-contracts/**
 attachments/*
 !attachments/.gitkeep
 
