@@ -5,19 +5,33 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](#what-works-immediately-after-cloning)
 
-> Turn an Obsidian + Zotero literature vault into a local domain expert that updates itself daily, audits its own evidence chain, and keeps ideas under review: papers enter `wiki/`, Claudian reads them, Gemini diverges, DeepSeek attacks, Codex reviews, and the weekly review feeds the next reading and idea cycle.
+> A local-first research vault that turns an Obsidian + Zotero library into a domain expert with memory: papers become `wiki/` evidence, Claudian reads and compares them, Gemini generates hypotheses, DeepSeek attacks weak ideas, Codex reviews the evidence chain, and weekly review feeds the next reading cycle.
 
 [中文 README](README.md)
 
-This is an **Obsidian + Zotero + Claudian research vault** for researchers working with a specialized literature corpus. More precisely, it is a **local domain-expert vault**: instead of sending every question to a generic AI chat, it organizes the papers, concepts, entities, deep-reading reports, local retrieval, and research idea drafts of one field into traceable evidence.
+Most AI research workflows still behave like disposable conversations. You paste a paper, get a summary, ask for an idea, and a week later the answer is hard to trace back to a paper, a figure, a limitation, or a real gap in your own corpus.
 
-The phrase "domain expert" does not mean this repository trains a new model. It means LLM-assisted reading, comparison, brainstorming, and experiment-plan drafting are constrained by local `wiki/` evidence, Zotero sources, concept networks, and human-review boundaries. The system is meant to behave like a research colleague that has long-term memory of your literature corpus, while keeping claims traceable.
+This repository takes the opposite route. It is an **Obsidian + Zotero + Claudian research vault** for researchers who work inside a specialized literature field and want LLM assistance to stay grounded in local evidence. More precisely, it is a **local domain-expert vault**: papers, concepts, entities, deep-reading reports, retrieval results, idea seeds, reviewer attacks, and weekly reviews are organized as a traceable research memory.
+
+The phrase "domain expert" does not mean this repository trains a new model. It means every LLM-assisted reading, comparison, hypothesis, and experiment-plan draft is forced back through local `wiki/` evidence, Zotero sources, concept networks, adversarial review, and human approval boundaries. The system is designed to act less like a general chatbot and more like a research colleague that has repeatedly read the same corpus you are building.
 
 The public vault uses robotic manipulation as its example domain, especially DLO manipulation, VLM/VLA systems, RL, Sim-to-Real, and embodied AI. The workflow is portable, but the papers, concepts, entities, Claudian prompts, and arXiv filters are domain-specific and should be replaced for another field.
 
-It is useful for graduate students, PI/lab knowledge-base maintainers, and researchers who want LLM assistance to behave more like a local domain expert grounded in their own literature corpus.
+It is built for graduate students, PI/lab knowledge-base maintainers, and researchers who need long-term literature memory rather than another one-off summarizer.
 
 Current public version: `v0.1.0`. This first release covers local browsing, knowledge-base audits, `kb_search.py` retrieval, Zotero/Obsidian setup documentation, Paper Reading Workbench, arXiv mirror-first automation docs, and the Windows scheduled-task entry point. Full AI automation still requires local Zotero, Claudian / Claude Code, Gemini, OpenCode / DeepSeek, Codex, and explicit permission configuration.
+
+## Why This Exists
+
+The core problem is not that researchers lack PDFs. The problem is that PDFs, Zotero items, Obsidian notes, AI chats, arXiv alerts, and project ideas usually live in separate places. That split makes it hard to answer practical research questions:
+
+- Which papers in my own corpus actually support this claim?
+- Which concept page should this new paper update?
+- Can I jump from a polished note back to the Zotero item and PDF?
+- Is this idea new, or just an A+B combination with a weak baseline?
+- What did the system read this week, and which ideas survived review?
+
+This vault is an attempt to make those questions operational. It treats the local literature corpus as the source of truth and turns the AI layer into a set of constrained research workers.
 
 ## Closed-Loop Design
 
@@ -35,7 +49,9 @@ Zotero / arXiv
     -> revised filters, prompts, reading priorities, and next research ideas
 ```
 
-Every stage writes an artifact that the next stage can consume. Papers are not summarized once and forgotten; they become local evidence. Deep-reading reports feed the idea greenhouse. Gemini's speculative output does not become a claim until it has gone through DeepSeek's adversarial review, Codex's structured second pass, and weekly agenda review. The workflow is built to fail with clear boundaries: dry-runs, preflights, logs, `partial` states, mirror-first fallback behavior, and human review gates keep missing keys, missing mirrors, network failures, and unstable model output from contaminating the formal knowledge layer.
+Every stage writes an artifact that the next stage can consume. Papers are not summarized once and forgotten; they become local evidence. Deep-reading reports feed the idea greenhouse. Gemini's speculative output does not become a claim until it has gone through DeepSeek's adversarial review, Codex's structured second pass, and weekly agenda review.
+
+The workflow is also designed to fail cleanly. Dry-runs, preflights, logs, `partial` states, mirror-missing status, and human review gates keep missing keys, missing mirrors, network failures, and unstable model output from contaminating the formal knowledge layer.
 
 ## What this is / is not
 
@@ -59,13 +75,17 @@ This is not:
 Without Zotero, Claudian, Gemini, OpenCode / DeepSeek, or Codex, you can run:
 
 ```powershell
+git clone https://github.com/169884902hzl/local-domain-expert-vault.git
+cd local-domain-expert-vault
 python .claude/scripts/audit_kb.py
 python .claude/scripts/kb_search.py "diffusion policy DLO" --limit 5
 ```
 
-These commands validate the local knowledge structure and return evidence paths under `wiki/`. Obsidian is optional, but recommended for graph view, backlinks, dashboards, and reading notes.
+These commands validate the local knowledge structure and return evidence paths under `wiki/`. This is the smallest proof that the repository is not just a README: the public package contains a real structured literature layer and a local retrieval path.
 
-## What The Full Workflow Requires
+Obsidian is optional for this smoke test, but recommended for graph view, backlinks, dashboards, and reading notes.
+
+## What the Full Workflow Requires
 
 | Capability | Requires |
 | --- | --- |
@@ -87,7 +107,7 @@ Setup entry points:
 
 ## Running it every day on your computer
 
-The full automation is not a single `daily_arxiv_pipeline.py` call. The local cadence has three layers: daily paper discovery and reading, same-day Codex review, and weekly agenda review.
+The full automation is not a single `daily_arxiv_pipeline.py` call. The intended local cadence has three layers: daily paper discovery and reading, same-day Codex review, and weekly agenda review.
 
 | Default time | Windows task | Wrapper | Purpose |
 | --- | --- | --- | --- |
@@ -137,7 +157,7 @@ Full registration, task removal, fallback behavior, and `partial` status handlin
 
 ## Local Domain Expert Model
 
-The goal is not to replace the researcher. It is to let an LLM accumulate context inside one specialized field and make careful research habits explicit and repeatable:
+The goal is not to replace the researcher. It is to let LLMs accumulate context inside one specialized field while making careful research habits explicit and repeatable:
 
 - **Long-term memory**: papers, concepts, authors, systems, and datasets live in `wiki/`, so the system remembers a field instead of starting from a blank chat.
 - **Evidence discipline**: domain answers start from local retrieval; missing support is marked as an evidence gap rather than smoothed over.
@@ -162,9 +182,7 @@ The full loop is: `Claudian deep reading -> Gemini greenhouse -> OpenCode/DeepSe
 
 ## What Problem It Solves
 
-Modern research workflows often split knowledge across PDFs, Zotero, Obsidian, AI chats, and scattered project folders. AI assistants can produce fluent summaries, but those summaries are often hard to trace back to local evidence.
-
-This vault makes the workflow local-first:
+The working principle is **local-first answerability**: domain answers should point back to local `wiki/` notes, concept pages, entity pages, Zotero sources, or explicit evidence gaps.
 
 ```text
 Zotero / arXiv
@@ -182,11 +200,13 @@ Claudian reading     deep reading reports and finalized notes
 research-agenda      reviewable idea seeds and automation logs
 ```
 
-The core principle is **local-first answerability**: domain answers should point back to local `wiki/` notes, concept pages, entity pages, or explicit evidence gaps.
+That is why this repository separates raw material, structured knowledge, retrieved evidence, speculative ideas, adversarial review, and human approval instead of merging them into one AI chat transcript.
 
 ## Example Outputs
 
-Claudian can answer a research question by first retrieving local notes and then grounding the answer in concrete paper pages:
+The screenshots below show the intended behavior, not decorative mockups.
+
+Claudian can answer a research question by first retrieving local notes and grounding the answer in concrete paper pages:
 
 ![Claudian local-first RL Token research answer](docs/assets/claudian-rl-token-result.png)
 
@@ -200,7 +220,7 @@ The research-agenda workflow can turn local evidence into reviewable idea seeds 
 
 ![Gemini-assisted research idea seed with local evidence and review fields](docs/assets/gemini-research-idea-seed-example.png)
 
-## Adapting To Another Field
+## Adapting to Another Field
 
 Robotics is only the example domain. To migrate the workflow, keep the local-first structure and replace the domain layer:
 
@@ -230,18 +250,20 @@ The public package excludes private API keys, PDF caches, SQLite caches, logs, p
 
 ## Quick Start
 
-Run these commands from the repository root:
+If you have already cloned the repository, the fastest useful check is:
 
 ```powershell
 python .claude/scripts/audit_kb.py
 python .claude/scripts/kb_search.py "diffusion policy DLO" --limit 5
 ```
 
-Open the folder as an Obsidian vault to browse `wiki/`, backlinks, graph view, and dashboard pages.
+The first command checks the structure of the public knowledge layer. The second command proves that local retrieval can return evidence paths before any AI layer is configured.
+
+Then open the folder as an Obsidian vault to browse `wiki/`, backlinks, graph view, and dashboard pages.
 
 ## Optional Dependencies
 
-The base vault only needs Python for local audit and search. Extra integrations are opt-in:
+The base vault only needs Python for local audit and search. Extra integrations unlock deeper layers of the workflow:
 
 | Integration | Needed for |
 | --- | --- |
@@ -346,7 +368,7 @@ Windows Task Scheduler setup and dry-run examples are documented in [docs/AUTOMA
 
 ## Documentation
 
-Detailed docs are currently Chinese-first. The links below are still useful because commands, paths, and configuration keys are shown explicitly.
+Detailed docs are currently Chinese-first, because this public vault was extracted from a real Chinese-language research workflow. The English README is meant to be self-contained for the main architecture, quick start, dependency boundary, Zotero setup, and arXiv automation model. The linked docs are still useful for non-Chinese readers because commands, paths, screenshots, and configuration keys are shown explicitly.
 
 - [Getting Started](docs/GETTING_STARTED.md)
 - [Deployment Checklist](docs/DEPLOYMENT_CHECKLIST.md) (Chinese-first)
