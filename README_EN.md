@@ -152,7 +152,9 @@ Project commands include:
 
 ## Automation
 
-The daily arXiv workflow is designed as **metadata mirror first**. Start with dry-runs before enabling scheduled tasks:
+The daily arXiv workflow is **local metadata mirror first**. It incrementally harvests arXiv metadata through the official OAI-PMH endpoint into a local SQLite database, ranks recent candidates from that local mirror, and only falls back to the arXiv Search API when the mirror is missing or insufficient. The mirror stores metadata and PDF URLs, not PDF files.
+
+Start with dry-runs before enabling scheduled tasks:
 
 ```powershell
 python .claude/scripts/arxiv_metadata_sync.py --dry-run --days-back 14 --max-pages 1
@@ -160,6 +162,14 @@ python .claude/scripts/daily_arxiv_pipeline.py --dry-run --source mirror-first -
 ```
 
 Search API mode is a fallback/troubleshooting path because external services can return 429, timeout, or empty results. A Search API failure does not by itself mean the vault is broken.
+
+arXiv data layer:
+
+- OAI-PMH sync builds `projects/arxiv-daily/metadata/arxiv_metadata.sqlite`.
+- The SQLite mirror stores metadata only: title, authors, abstract, dates, categories, URL, PDF URL, DOI, journal reference, comments.
+- Default OAI-PMH sets are `cs` and `stat`; this is not a bundled all-arXiv database.
+- The public repository does not include the SQLite mirror. Use `python .claude/scripts/arxiv_metadata_sync.py --status` to inspect your local mirror.
+- Zotero import later uses selected metadata and PDF URLs to create library items; PDFs are managed by Zotero storage, WebDAV, or linked attachments.
 
 Windows Task Scheduler setup and dry-run examples are documented in [docs/AUTOMATION.md](docs/AUTOMATION.md).
 

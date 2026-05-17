@@ -119,6 +119,8 @@ python .claude/scripts/audit_kb.py
 
 ### 5. 当每日 arXiv 自动化系统用
 
+daily arXiv 工作流是 **local metadata mirror first**：先通过 arXiv 官方 OAI-PMH endpoint 增量同步 metadata 到本地 SQLite，再从本地 mirror 排序候选；Search API 只作为 mirror 缺失或候选不足时的 fallback / troubleshooting 路径。
+
 先 dry run：
 
 ```powershell
@@ -399,7 +401,15 @@ python .claude/scripts/arxiv_metadata_sync.py --dry-run --days-back 14 --max-pag
 python .claude/scripts/daily_arxiv_pipeline.py --dry-run --source mirror-first --max-candidates 30 --days-back 14 --idea-mode template --skip-read
 ```
 
-这组命令适合第一次试跑。metadata sync 的 dry-run 使用内存数据库，pipeline dry-run 会优先查本地 metadata mirror，再在需要时兜底外部 Search API。Search API 受外部限流影响，不能单独代表 vault 是否正常。
+这组命令适合第一次试跑。metadata sync 的 dry-run 使用内存数据库；pipeline dry-run 会优先查本地 SQLite metadata mirror，再在需要时兜底外部 Search API。Search API 受外部限流影响，不能单独代表 vault 是否正常。
+
+arXiv 数据层边界：
+
+- OAI-PMH sync 写入 `projects/arxiv-daily/metadata/arxiv_metadata.sqlite`。
+- SQLite mirror 只保存 metadata：title、authors、abstract、dates、categories、URL、PDF URL、DOI、journal reference、comments。
+- 默认同步 OAI-PMH sets 是 `cs` 和 `stat`，不是全 arXiv，也不是 PDF 全文。
+- 公开仓库不提交 SQLite mirror；使用者可以通过 `python .claude/scripts/arxiv_metadata_sync.py --status` 查看自己本机 mirror 的规模和更新时间。
+- Zotero 后续用选中的 metadata / PDF URL 创建 library item；PDF 同步由 Zotero 官方存储、WebDAV 或 linked attachment 负责，不由 arXiv mirror 保存。
 
 ### 2. 手动运行一次每日 pipeline
 
@@ -438,8 +448,8 @@ powershell -ExecutionPolicy Bypass -File .claude/scripts/run_daily_arxiv_task.ps
 
 包装器会：
 
-1. 同步 arXiv metadata mirror。
-2. 运行 `daily_arxiv_pipeline.py --once`。
+1. 通过 OAI-PMH 增量同步 arXiv `cs/stat` metadata mirror。
+2. 运行 `daily_arxiv_pipeline.py --once --source mirror-first`。
 3. 使用 Gemini divergent idea 生成。
 4. 写入每日日志。
 5. 运行自动化质量审计。

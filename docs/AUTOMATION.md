@@ -7,12 +7,11 @@
 | 层级 | 能力 | 必需条件 | 适合谁 |
 | --- | --- | --- | --- |
 | Level 0 | 本地检索和审计 | Python 3.10+ | 所有人 |
-| Level 1 | arXiv 候选预览 | Python + 网络 | 想看每日候选但不写库 |
-| Level 2 | Zotero 导入 | Zotero Desktop 或 Zotero Web API | 想把候选论文写入 Zotero/wiki |
-| Level 3 | Claudian 精读 | Claudian / Claude Code 可用 | 想自动生成精读笔记 |
-| Level 4 | Gemini idea 生成 | Gemini CLI 已登录 | 想做发散研究 idea |
-| Level 5 | Codex seed review | Codex CLI 已登录 | 想做每日 idea 二次审查 |
-| Level 6 | Windows 定时运行 | Windows Task Scheduler | 想每天自动跑 |
+| Level 1 | arXiv metadata mirror smoke test | Python + 网络 | 想确认 OAI-PMH metadata 同步入口可用 |
+| Level 2 | mirror-first daily pipeline dry-run | Python + metadata mirror 或 fallback 网络 | 想看每日候选但不写库 |
+| Level 3 | optional Search API fallback troubleshooting | Python + 网络 | 只在 mirror 缺失、过旧或候选不足时排错 |
+| Level 4 | Zotero + Claudian + Gemini + Codex automation | Zotero / Claudian / Gemini / Codex 按需配置 | 想导入、精读、生成 idea、二审 |
+| Level 5 | Windows 定时运行 | Windows Task Scheduler | 想每天自动跑 |
 
 建议按层级逐步启用。不要第一次使用就直接注册计划任务。
 
@@ -33,29 +32,49 @@ python .claude/scripts/kb_search.py "VLM robot manipulation" --limit 5
 
 这一步不需要 Zotero、Gemini、Codex 或 API key。
 
-## 1. arXiv 候选预览
+## 1. arXiv metadata mirror smoke test
 
-每日自动化的主叙事是 **metadata mirror first**：先同步或检查本地 arXiv metadata mirror，再让 pipeline 以 `mirror-first` 方式选候选。这样第一体验不依赖 Search API 的实时可用性，也能减少 arXiv 429、timeout 或外部服务限流造成的误判。
+每日自动化的主叙事是 **local SQLite metadata mirror first**：先通过 arXiv 官方 OAI-PMH endpoint 同步或检查本地 arXiv metadata mirror，再让 pipeline 以 `mirror-first` 方式选候选。这样第一体验不依赖 Search API 的实时可用性，也能减少 arXiv 429、timeout 或外部服务限流造成的误判。
 
-先做 mirror dry-run，不创建 SQLite 或 lock 文件：
+先做 OAI-PMH mirror dry-run，不创建 SQLite 或 lock 文件：
 
 ```powershell
 python .claude/scripts/arxiv_metadata_sync.py --dry-run --days-back 14 --max-pages 1
 ```
 
-再预览每日候选，不写 Zotero、不写 vault：
+arXiv 数据层边界：
+
+- OAI-PMH sync 写入 `projects/arxiv-daily/metadata/arxiv_metadata.sqlite`。
+- SQLite mirror 只保存 metadata：title、authors、abstract、dates、categories、URL、PDF URL、DOI、journal reference、comments。
+- 默认同步 OAI-PMH sets 是 `cs` 和 `stat`，不是全 arXiv，也不是 PDF 全文。
+- 公开仓库不提交 SQLite mirror；clone 后需要自己运行 dry-run 或 incremental sync。
+- Zotero import 后续使用选中的 metadata / PDF URL 创建 library item；PDF 由 Zotero 官方存储、WebDAV 或 linked attachment 管理，不由 arXiv mirror 保存。
+
+查看本机 mirror 状态：
+
+```powershell
+python .claude/scripts/arxiv_metadata_sync.py --status
+```
+
+## 2. mirror-first daily pipeline dry-run
+
+预览每日候选，不写 Zotero、不写 vault：
 
 ```powershell
 python .claude/scripts/daily_arxiv_pipeline.py --dry-run --source mirror-first --max-candidates 30 --days-back 14 --idea-mode template --skip-read
 ```
 
-`search-api` 只作为 fallback / troubleshooting。外部 Search API 可能因为 429、timeout 或当天结果为空而返回 0 candidates；这不能单独说明 vault 或本地知识库坏了。
+`mirror-first` 会先查本地 SQLite metadata mirror。只有 mirror 缺失、过旧或候选不足时，才会 fallback 到 Search API。
+
+## 3. optional Search API fallback troubleshooting
+
+`search-api` 只作为 fallback / troubleshooting。外部 Search API 可能因为 429、timeout 或当天结果为空而返回 0 candidates；这不能单独说明 vault 或本地知识库坏了，也不应该作为发布可靠性的主路径。
 
 ```powershell
 python .claude/scripts/daily_arxiv_pipeline.py --dry-run --source search-api --max-candidates 10 --days-back 7 --fetch-timeout 20 --fetch-retries 1
 ```
 
-## 2. 同步 arXiv metadata mirror
+## 4. 同步 arXiv metadata mirror
 
 每日包装器会自动做这一步；也可以手动运行。
 
@@ -72,9 +91,9 @@ python .claude/scripts/arxiv_metadata_sync.py --incremental --days-back 60 --ove
 python .claude/scripts/arxiv_metadata_sync.py --status
 ```
 
-非 dry-run 的 metadata 同步会写入 `projects/arxiv-daily/metadata/`，该目录内容默认不提交 Git。`--dry-run` 使用内存数据库，不创建 SQLite 或 lock 文件。
+非 dry-run 的 metadata 同步会写入 `projects/arxiv-daily/metadata/`，该目录内容默认不提交 Git。`--dry-run` 使用内存数据库，不创建 SQLite 或 lock 文件。不要在文档或 README 中写死本机 mirror 规模；如需查看规模，运行 `python .claude/scripts/arxiv_metadata_sync.py --status`。
 
-## 3. 配置 Zotero
+## 5. 配置 Zotero
 
 ### 本机 Zotero 路径
 
@@ -136,7 +155,7 @@ python .claude/scripts/zotero_import.py --preflight --json
 
 附件同步、WebDAV、linked attachment、本地附件目录迁移和 Zotero 存储扩展见 [ZOTERO_STORAGE.md](ZOTERO_STORAGE.md)。本 vault 当前使用 CSTCloud 数据胶囊 WebDAV 路线，但 WebDAV 用户名和密码只保存在 Zotero 客户端里，公开仓库不会内置个人 Zotero 存储配置。
 
-## 4. 导入单篇论文
+## 6. 导入单篇论文
 
 ```powershell
 python .claude/scripts/ingest_paper.py ZOTERO_KEY --force-overwrite-stub
@@ -156,7 +175,7 @@ python .claude/scripts/finalize_reading.py ZOTERO_KEY --analysis raw/readings/ZO
 python .claude/scripts/audit_kb.py --strict-reading
 ```
 
-## 5. 手动运行每日 pipeline
+## 7. 手动运行每日 pipeline
 
 ### 低依赖模式
 
@@ -219,7 +238,7 @@ $env:LOCAL_FIRST_VAULT_ALLOW_DANGEROUS_CLAUDE = "1"
 
 这个开关只影响本机运行，不应该写入公开仓库配置。
 
-## 6. Gemini CLI
+## 8. Gemini CLI
 
 Gemini 是可选的发散 idea 层。先确认 CLI 可用：
 
@@ -242,7 +261,7 @@ python .claude/scripts/gemini_idea_probe.py --timeout 1200
 --idea-mode template
 ```
 
-## 7. Codex seed review
+## 9. Codex seed review
 
 Codex seed review 是可选二次审查层。它会读取每日 pipeline 生成的 seed packet，并输出 review 报告。
 
@@ -266,7 +285,7 @@ codex --version
 
 注意：当前包装器默认不绕过 Codex sandbox/approval。只有在你完全理解本机 CLI 权限边界时，才手动追加 `-DangerouslyBypassSandbox`。
 
-## 8. Windows 计划任务
+## 10. Windows 计划任务
 
 所有注册脚本都支持 `-DryRun`。先 dry run，再注册。默认 dry-run 输出会把当前 Windows 用户名和本机绝对路径替换成占位符；如果你在自己机器上私下排障，可以追加 `-ShowLocalPaths`。
 
@@ -315,7 +334,7 @@ powershell -ExecutionPolicy Bypass -File .claude/scripts/register_weekly_agenda_
 
 默认任务名：`WeeklyResearchAgendaReview`
 
-## 9. 检查和删除计划任务
+## 11. 检查和删除计划任务
 
 ```powershell
 Get-ScheduledTask -TaskName DailyArxivEmbodiedAIScout
@@ -332,7 +351,7 @@ Unregister-ScheduledTask -TaskName DailyCodexSeedReview -Confirm:$false
 Unregister-ScheduledTask -TaskName WeeklyResearchAgendaReview -Confirm:$false
 ```
 
-## 10. macOS/Linux 自动化边界
+## 12. macOS/Linux 自动化边界
 
 Python 检索、审计和 arXiv dry-run 可以在 macOS/Linux 上运行，但本仓库只提供 Windows Task Scheduler 注册脚本。非 Windows 用户可以把同等命令放入 `cron`、`systemd timer` 或自己的 CI runner；注意不要把 API key 写入仓库。
 
@@ -342,7 +361,7 @@ Python 检索、审计和 arXiv dry-run 可以在 macOS/Linux 上运行，但本
 0 12 * * * cd /path/to/local-first-research-vault && python3 .claude/scripts/arxiv_metadata_sync.py --incremental --days-back 60 --overlap-days 3 && python3 .claude/scripts/daily_arxiv_pipeline.py --dry-run --source mirror-first --max-candidates 30 --days-back 14 >> projects/arxiv-daily/cron.log 2>&1
 ```
 
-## 11. 状态解释
+## 13. 状态解释
 
 | 状态 | 含义 |
 | --- | --- |
@@ -354,18 +373,19 @@ Python 检索、审计和 arXiv dry-run 可以在 macOS/Linux 上运行，但本
 
 `partial` 不一定是坏状态。先读日志里的 `ERROR:` 行，再决定是否要配置缺失能力。
 
-## 12. 推荐启用顺序
+## 14. 推荐启用顺序
 
 1. `audit_kb.py`
 2. `kb_search.py`
-3. `daily_arxiv_pipeline.py --dry-run`
-4. Zotero preflight
-5. 单篇 `ingest_paper.py`
-6. 手动 `daily_arxiv_pipeline.py --once --idea-mode template`
-7. Gemini CLI
-8. `run_daily_arxiv_task.ps1`
-9. `register_daily_arxiv_task.ps1`
-10. Codex seed review
-11. weekly agenda review
+3. `arxiv_metadata_sync.py --dry-run`
+4. `daily_arxiv_pipeline.py --dry-run --source mirror-first`
+5. Zotero preflight
+6. 单篇 `ingest_paper.py`
+7. 手动 `daily_arxiv_pipeline.py --once --source mirror-first --idea-mode template`
+8. Gemini CLI
+9. `run_daily_arxiv_task.ps1`
+10. `register_daily_arxiv_task.ps1`
+11. Codex seed review
+12. weekly agenda review
 
 这样做的好处是每一步都有明确验收，不会把 Zotero、Gemini、Codex、计划任务的问题混在一起。
