@@ -1,22 +1,25 @@
 # Local-First Research Vault
 
-> 把 Zotero、Obsidian、Claudian / Claude Code、arXiv metadata mirror 和本地检索串成一个可审计的科研工作流系统。
+> 一个面向领域研究者的本地科研助手：有长期文献记忆，能做证据检索、精读归纳、发散假设和实验设计，但始终把结论落回本地证据链。
 
 [English README](README_EN.md)
 
-这个仓库不是一堆 Markdown 论文笔记，也不是一个简单的 Zotero 导出。它更像一个 **local-first research OS**：论文从 Zotero / arXiv 进来，变成结构化 wiki、概念网络、精读报告、本地证据检索和可审阅 research idea。AI 可以参与精读、比较、综述和发散，但回答必须回到本地证据链。
+这个仓库不是一堆 Markdown 论文笔记，也不是一个简单的 Zotero 导出。它试图把 AI 从“临时聊天助手”变成一个有本地文献记忆的领域研究伙伴：论文从 Zotero / arXiv 进来，变成结构化 wiki、概念网络、精读报告、本地证据检索和可审阅 research idea。AI 可以参与精读、比较、综述、发散和实验规划，但每一步都要保留证据、边界和人工审阅位置。
 
 公开版本以仓库内置的机器人操控文献作为示例，尤其覆盖 DLO、VLM/VLA、RL、Sim-to-Real 和 embodied AI。你也可以把它迁移到其他学科：换掉论文、概念、实体和 arXiv 过滤规则，保留这套可审计的研究工作流。
 
-## 这个项目最强的地方
+## 研究助手模型
 
-- **不是聊天记录，是证据系统。** 回答问题前先跑 `kb_search.py`，把结论绑定到 `wiki/topics/`、`wiki/concepts/` 和 `wiki/entities/`。
-- **不是摘要收藏，是精读流水线。** Zotero 条目可以进入 topic note，再经过 Claudian 精读、finalize、audit，形成可复用 evidence layer。
-- **不是盲目追 arXiv，是本地 mirror-first scout。** 每日流程优先用 OAI-PMH 同步到本地 SQLite metadata mirror，再筛选候选；Search API 只是 fallback。
-- **不是“AI 说有创新”，而是 research idea seed。** idea 会带 local evidence、gap、baseline、killer experiment、risk 和人工 review 边界。
-- **不是只适合作者本人。** 公开版去掉 API key、PDF、SQLite、日志和个人路径；clone 后可以先浏览、检索、审计，再逐步接 Zotero / Claudian / automation。
+这套 vault 的目标不是替代研究者，而是把一个领域专家平时会做的几件事固定成可追踪流程：
 
-## 30 秒看懂
+- **领域记忆**：把论文、概念、作者、系统和数据集长期沉淀在 `wiki/`，而不是散落在 PDF、聊天记录和临时笔记里。
+- **证据约束**：回答问题前先跑 `kb_search.py`，结论必须能回到具体 topic note、concept page 或 entity page。
+- **精读归纳**：Zotero 条目进入 topic note 后，可以经过 Claudian 精读、finalize 和 audit，形成能被后续问答复用的 evidence layer。
+- **发散假设**：research-agenda 不直接宣布“发现创新点”，而是生成带 local evidence、gap、baseline、risk 的可审阅 idea seed。
+- **实验设计**：idea seed 会继续压到 baseline、killer experiment、no-hardware pilot、失败条件和人工 review，而不是停在灵感描述。
+- **可迁移性**：公开版去掉 API key、PDF、SQLite、日志和个人路径；clone 后可以先浏览、检索、审计，再逐步接 Zotero / Claudian / automation。
+
+## 工作流概览
 
 它解决的是一个很现实的问题：
 

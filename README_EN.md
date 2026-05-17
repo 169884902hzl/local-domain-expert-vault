@@ -1,20 +1,23 @@
 # Local-First Research Vault
 
-> A local-first research OS that connects Zotero, Obsidian, Claudian / Claude Code, an arXiv metadata mirror, and local evidence retrieval into one auditable research workflow.
+> A local research assistant for domain researchers: long-term literature memory, evidence retrieval, deep reading, divergent hypotheses, and experiment planning, all tied back to local evidence.
 
 [中文 README](README.md)
 
-This repository is not just a folder of Markdown notes or a Zotero export. It is a cloneable research workspace where papers become structured wiki pages, concept/entity networks, deep-reading reports, local retrieval evidence, and reviewable research-idea seeds. AI can help read, compare, summarize, and ideate, but the workflow is designed to keep answers tied to local evidence.
+This repository is not just a folder of Markdown notes or a Zotero export. It tries to turn AI from a temporary chat assistant into a domain research partner with local literature memory: papers enter from Zotero / arXiv, then become structured wiki pages, concept/entity networks, deep-reading reports, local retrieval evidence, and reviewable research-idea seeds. AI can help read, compare, summarize, diverge, and plan experiments, but every step keeps evidence, limitations, and human review visible.
 
 The public version starts from robotic manipulation literature, especially DLO manipulation, VLM/VLA systems, RL, Sim-to-Real, and embodied AI. The workflow itself is domain-independent: replace the papers, concepts, entities, prompts, and arXiv filters to adapt it to another research field.
 
-## Why This Is Different
+## Research Assistant Model
 
-- **It is an evidence system, not an AI chat archive.** `kb_search.py` retrieves local `wiki/topics/`, `wiki/concepts/`, and `wiki/entities/` before an answer is written.
-- **It is a reading pipeline, not a summary dump.** Zotero items can become topic notes, then Claudian reading reports, finalized notes, audits, and reusable evidence.
-- **It is arXiv mirror-first, not Search API first.** Daily scouting ranks candidates from a local SQLite metadata mirror harvested via OAI-PMH; Search API is only a fallback.
-- **It treats ideas as reviewable seeds, not proven novelty.** Research seeds carry local evidence, gaps, baselines, killer experiments, risk notes, and human-review boundaries.
-- **It is designed for public reuse.** The package excludes API keys, PDFs, SQLite caches, logs, personal paths, and machine-specific runtime state.
+The goal is not to replace the researcher. It is to make the habits of a careful domain expert explicit and repeatable:
+
+- **Domain memory**: papers, concepts, authors, systems, and datasets live in `wiki/`, not in scattered PDFs, chat logs, and temporary notes.
+- **Evidence discipline**: `kb_search.py` retrieves local topic notes, concept pages, and entity pages before an answer is written.
+- **Deep reading**: Zotero items can become topic notes, Claudian reading reports, finalized notes, audits, and reusable evidence.
+- **Divergent hypotheses**: research-agenda generates reviewable idea seeds with local evidence, gaps, baselines, and risk notes instead of claiming proven novelty.
+- **Experiment planning**: idea seeds are pushed toward baselines, killer experiments, no-hardware pilots, failure conditions, and human review.
+- **Portability**: the public package excludes API keys, PDFs, SQLite caches, logs, personal paths, and machine-specific runtime state.
 
 ## What Problem It Solves
 
