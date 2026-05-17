@@ -59,6 +59,7 @@ python .claude/scripts/kb_search.py "diffusion policy DLO" --limit 5
 
 详细配置入口：
 
+- 部署检查清单: [docs/DEPLOYMENT_CHECKLIST.md](docs/DEPLOYMENT_CHECKLIST.md)
 - Obsidian / Claudian: [docs/OBSIDIAN_CLAUDIAN_SETUP.md](docs/OBSIDIAN_CLAUDIAN_SETUP.md)
 - Zotero API、WebDAV、附件同步: [docs/ZOTERO_STORAGE.md](docs/ZOTERO_STORAGE.md)
 - 自动化、计划任务、arXiv mirror-first: [docs/AUTOMATION.md](docs/AUTOMATION.md)

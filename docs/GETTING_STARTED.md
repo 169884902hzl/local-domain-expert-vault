@@ -9,6 +9,8 @@
 - 用模板新增文献、概念和项目笔记。
 - 在可选配置完成后接入 Zotero 与 Claudian 自动流程。
 
+如果你不确定自己应该配置到哪一层，先看 [DEPLOYMENT_CHECKLIST.md](DEPLOYMENT_CHECKLIST.md)。它把浏览、检索、Zotero/PDF、arXiv mirror、计划任务、Claudian/Gemini/Codex 分成可验证层级。
+
 ## 最小可用路径
 
 ```powershell

@@ -285,6 +285,7 @@ Windows Task Scheduler setup and dry-run examples are documented in [docs/AUTOMA
 Detailed docs are currently Chinese-first. The links below are still useful because commands, paths, and configuration keys are shown explicitly.
 
 - [Getting Started](docs/GETTING_STARTED.md)
+- [Deployment Checklist](docs/DEPLOYMENT_CHECKLIST.md) (Chinese-first)
 - [Obsidian and Claudian Setup](docs/OBSIDIAN_CLAUDIAN_SETUP.md)
 - [Automation](docs/AUTOMATION.md)
 - [Zotero Storage and Attachments](docs/ZOTERO_STORAGE.md)
