@@ -1,21 +1,23 @@
 # Local-First Research Vault
 
-> 把 Zotero / arXiv 论文转成可检索、可审计、可复用的本地研究记忆；LLM 可以辅助精读、比较和假设生成，但结论必须回到 `wiki/` 证据。
+> 把 Zotero / arXiv 论文组织成一个本地领域专家：它有长期文献记忆，能按证据回答问题、精读论文、提出研究假设，并把想法推进到可审阅的实验草案。
 
 [English README](README_EN.md)
 
-这是一个面向领域研究者的 Obsidian / Zotero vault 模板。它不是普通 Markdown 论文笔记，也不是 Zotero 导出目录；它把论文、概念、实体、精读报告、本地检索和研究 idea 草案组织成一套可追踪的工作流。
+这是一个面向领域研究者的 Obsidian / Zotero vault 模板。更准确地说，它是一个 **本地领域专家 vault**：不是把所有问题丢给泛用 AI，而是把一个专业方向的论文、概念、实体、精读报告、本地检索和研究 idea 草案组织成可追踪的判断依据。
+
+这里的“领域专家”不是指仓库里训练了一个新模型，而是指 LLM 的每次精读、比较、发散和实验草案，都被本地 `wiki/` 证据、Zotero 来源、概念网络和人工 review 边界约束。它可以像一个长期读过你文献库的研究同伴一样工作，但所有结论都要能回到本地证据。
 
 公开版本以机器人操控文献为示例，覆盖 DLO、VLM/VLA、RL、Sim-to-Real 和 embodied AI。你可以把它迁移到其他学科，但需要替换论文集合、概念页、实体页、Claudian prompt 和 arXiv 过滤规则。
 
-适合对象：需要长期追踪一个专业方向的研究生、PI / 实验室知识库维护者，以及希望让 LLM 按本地证据工作的领域研究者。
+适合对象：需要长期追踪一个专业方向的研究生、PI / 实验室知识库维护者，以及希望把 LLM 变成“有本地文献记忆的领域专家”的研究者。
 
 ## 它是什么 / 不是什么
 
 这是：
 
-- 一个 **local-first research assistant vault**：长期保留本地文献记忆，而不是一次性 AI 对话。
-- 一个 **evidence-grounded workflow**：回答领域问题前先检索 `wiki/topics/`、`wiki/concepts/` 和 `wiki/entities/`。
+- 一个 **本地领域专家 vault**：长期保留本地文献记忆，而不是一次性 AI 对话。
+- 一个 **evidence-grounded workflow**：回答领域问题前先检索 `wiki/topics/`、`wiki/concepts/` 和 `wiki/entities/`，让答案从证据里长出来。
 - 一个 Zotero / Obsidian / Claudian 工作流模板：支持导入、精读、finalize、audit、比较和概念页维护。
 - 一个 research-agenda seed system：把本地证据整理成可审阅 idea seed、baseline、风险和实验方案草案。
 - 一个可脱敏发布的公开包：不包含 API key、PDF、SQLite mirror、Zotero 缓存、日志和个人路径。
@@ -55,16 +57,16 @@ python .claude/scripts/kb_search.py "diffusion policy DLO" --limit 5
 - 自动化、计划任务、arXiv mirror-first: [docs/AUTOMATION.md](docs/AUTOMATION.md)
 - Paper Reading Workbench 安全边界: [docs/SECURITY_PLUGIN_WORKBENCH.md](docs/SECURITY_PLUGIN_WORKBENCH.md)
 
-## 研究助手模型
+## 本地领域专家如何工作
 
-这套 vault 的目标不是替代研究者，而是把严谨研究者已经在做的工作固定成可检查流程：
+这套 vault 的目标不是替代研究者，而是让 LLM 在一个专业方向里持续积累上下文，并把严谨研究者已经在做的工作固定成可检查流程：
 
-- **长期记忆**：论文、概念、作者、系统和数据集沉淀在 `wiki/`，而不是散落在 PDF、聊天记录和临时笔记里。
-- **证据约束**：领域回答先跑本地检索；没有本地证据时，明确标出 evidence gap。
+- **长期记忆**：论文、概念、作者、系统和数据集沉淀在 `wiki/`，让系统记住一个方向，而不是每次从空白对话开始。
+- **证据约束**：领域回答先跑本地检索；没有本地证据时，明确标出 evidence gap，不把猜测包装成结论。
 - **精读归纳**：Zotero 条目可以进入 topic note，再经过 Claudian 精读、finalize 和 audit，形成可复用证据层。
 - **知识网络**：论文连接到概念页和实体页，后续问题可以沿论文、方法、作者、数据集和系统追踪。
 - **假设生成**：research-agenda 只生成可审阅 idea seed，不把局部证据包装成已验证创新。
-- **实验草案**：idea seed 会被展开为 baseline、关键区分实验、no-hardware pilot、失败条件和人工 review 字段。
+- **实验草案**：idea seed 会被展开为 baseline、关键区分实验、no-hardware pilot、失败条件和人工 review 字段，让发散想法继续落到可讨论的研究计划。
 
 ## 工作流概览
 

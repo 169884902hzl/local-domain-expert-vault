@@ -1,20 +1,22 @@
 # Local-First Research Vault
 
-> Turn Zotero / arXiv papers into local, searchable, auditable research memory. LLMs can assist with reading, comparison, and idea drafts, but claims must point back to local `wiki/` evidence.
+> Turn Zotero / arXiv papers into a local domain expert: long-term literature memory, evidence-grounded answers, deep reading, research hypotheses, and reviewable experiment-plan drafts.
 
 [中文 README](README.md)
 
-This is an Obsidian / Zotero vault template for researchers working with a specialized literature corpus. It is not just a folder of Markdown notes or a Zotero export. It organizes papers, concepts, entities, deep-reading reports, local retrieval, and research idea drafts into one traceable workflow.
+This is an Obsidian / Zotero vault template for researchers working with a specialized literature corpus. More precisely, it is a **local domain-expert vault**: instead of sending every question to a generic AI chat, it organizes the papers, concepts, entities, deep-reading reports, local retrieval, and research idea drafts of one field into traceable evidence.
+
+The phrase "domain expert" does not mean this repository trains a new model. It means LLM-assisted reading, comparison, brainstorming, and experiment-plan drafting are constrained by local `wiki/` evidence, Zotero sources, concept networks, and human-review boundaries. The system is meant to behave like a research colleague that has long-term memory of your literature corpus, while keeping claims traceable.
 
 The public vault uses robotic manipulation as its example domain, especially DLO manipulation, VLM/VLA systems, RL, Sim-to-Real, and embodied AI. The workflow is portable, but the papers, concepts, entities, Claudian prompts, and arXiv filters are domain-specific and should be replaced for another field.
 
-It is useful for graduate students, PI/lab knowledge-base maintainers, and researchers who want LLM assistance to stay grounded in a local literature corpus.
+It is useful for graduate students, PI/lab knowledge-base maintainers, and researchers who want LLM assistance to behave more like a local domain expert grounded in their own literature corpus.
 
 ## What this is / is not
 
 This is:
 
-- a local-first research assistant vault with long-term literature memory;
+- a local domain-expert vault with long-term literature memory;
 - an evidence-grounded workflow that searches `wiki/topics/`, `wiki/concepts/`, and `wiki/entities/` before writing domain answers;
 - a Zotero / Obsidian / Claudian workflow for import, deep reading, finalization, audits, comparison, and concept maintenance;
 - a research-agenda seed system for reviewable hypotheses, baselines, risks, and experiment-plan drafts;
@@ -55,12 +57,12 @@ Setup entry points:
 - Automation, scheduled tasks, arXiv mirror-first: [docs/AUTOMATION.md](docs/AUTOMATION.md)
 - Paper Reading Workbench security boundary: [docs/SECURITY_PLUGIN_WORKBENCH.md](docs/SECURITY_PLUGIN_WORKBENCH.md)
 
-## Research Assistant Model
+## Local Domain Expert Model
 
-The goal is not to replace the researcher. It is to make careful research habits explicit and repeatable:
+The goal is not to replace the researcher. It is to let an LLM accumulate context inside one specialized field and make careful research habits explicit and repeatable:
 
-- **Long-term memory**: papers, concepts, authors, systems, and datasets live in `wiki/`, not in scattered PDFs, chat logs, or temporary notes.
-- **Evidence discipline**: domain answers start from local retrieval; missing support is marked as an evidence gap.
+- **Long-term memory**: papers, concepts, authors, systems, and datasets live in `wiki/`, so the system remembers a field instead of starting from a blank chat.
+- **Evidence discipline**: domain answers start from local retrieval; missing support is marked as an evidence gap rather than smoothed over.
 - **Deep reading**: Zotero items can become topic notes, Claudian reading reports, finalized notes, audits, and reusable evidence.
 - **Knowledge network**: papers connect to concept pages and entity pages, so later questions can follow methods, authors, datasets, and systems.
 - **Hypothesis drafting**: research-agenda creates reviewable idea seeds; it does not treat local evidence as proven novelty.
