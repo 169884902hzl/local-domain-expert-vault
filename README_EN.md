@@ -1,23 +1,70 @@
 # Local-First Research Vault
 
-> A local research assistant for domain researchers: long-term literature memory, evidence retrieval, deep reading, divergent hypotheses, and experiment planning, all tied back to local evidence.
+> Turn Zotero / arXiv papers into local, searchable, auditable research memory. LLMs can assist with reading, comparison, and idea drafts, but claims must point back to local `wiki/` evidence.
 
 [中文 README](README.md)
 
-This repository is not just a folder of Markdown notes or a Zotero export. It tries to turn AI from a temporary chat assistant into a domain research partner with local literature memory: papers enter from Zotero / arXiv, then become structured wiki pages, concept/entity networks, deep-reading reports, local retrieval evidence, and reviewable research-idea seeds. AI can help read, compare, summarize, diverge, and plan experiments, but every step keeps evidence, limitations, and human review visible.
+This is an Obsidian / Zotero vault template for researchers working with a specialized literature corpus. It is not just a folder of Markdown notes or a Zotero export. It organizes papers, concepts, entities, deep-reading reports, local retrieval, and research idea drafts into one traceable workflow.
 
-The public version starts from robotic manipulation literature, especially DLO manipulation, VLM/VLA systems, RL, Sim-to-Real, and embodied AI. The workflow itself is domain-independent: replace the papers, concepts, entities, prompts, and arXiv filters to adapt it to another research field.
+The public vault uses robotic manipulation as its example domain, especially DLO manipulation, VLM/VLA systems, RL, Sim-to-Real, and embodied AI. The workflow is portable, but the papers, concepts, entities, Claudian prompts, and arXiv filters are domain-specific and should be replaced for another field.
+
+It is useful for graduate students, PI/lab knowledge-base maintainers, and researchers who want LLM assistance to stay grounded in a local literature corpus.
+
+## What this is / is not
+
+This is:
+
+- a local-first research assistant vault with long-term literature memory;
+- an evidence-grounded workflow that searches `wiki/topics/`, `wiki/concepts/`, and `wiki/entities/` before writing domain answers;
+- a Zotero / Obsidian / Claudian workflow for import, deep reading, finalization, audits, comparison, and concept maintenance;
+- a research-agenda seed system for reviewable hypotheses, baselines, risks, and experiment-plan drafts;
+- a sanitized public package without API keys, PDFs, SQLite mirrors, Zotero caches, logs, or personal machine paths.
+
+This is not:
+
+- a fully automated research system that works end-to-end immediately after cloning;
+- a generator of verified novelty claims or experimental results;
+- a PDF repository; PDFs remain managed by Zotero, WebDAV, or linked attachments;
+- a robotics-only project; robotics is the example corpus.
+
+## What works immediately after cloning
+
+Without Zotero, Claudian, Gemini, or Codex, you can run:
+
+```powershell
+python .claude/scripts/audit_kb.py
+python .claude/scripts/kb_search.py "diffusion policy DLO" --limit 5
+```
+
+These commands validate the local knowledge structure and return evidence paths under `wiki/`. Obsidian is optional, but recommended for graph view, backlinks, dashboards, and reading notes.
+
+## What requires additional setup
+
+| Capability | Requires |
+| --- | --- |
+| Importing Zotero metadata | Zotero API key, user ID, collection key, or local Zotero Desktop |
+| Jumping from Obsidian notes to Zotero item / PDF | Zotero Desktop, PDF attachment, Paper Reading Workbench |
+| Claudian / Claude Code reading and QA commands | Local CLI, model account, explicit permission choices |
+| Daily arXiv scouting and idea seeds | Local arXiv SQLite metadata mirror and network; full mode needs Zotero / Gemini / Codex |
+| PDF syncing | Zotero storage, WebDAV, or linked attachments; PDFs are not committed |
+
+Setup entry points:
+
+- Obsidian / Claudian: [docs/OBSIDIAN_CLAUDIAN_SETUP.md](docs/OBSIDIAN_CLAUDIAN_SETUP.md)
+- Zotero API, WebDAV, attachments: [docs/ZOTERO_STORAGE.md](docs/ZOTERO_STORAGE.md)
+- Automation, scheduled tasks, arXiv mirror-first: [docs/AUTOMATION.md](docs/AUTOMATION.md)
+- Paper Reading Workbench security boundary: [docs/SECURITY_PLUGIN_WORKBENCH.md](docs/SECURITY_PLUGIN_WORKBENCH.md)
 
 ## Research Assistant Model
 
-The goal is not to replace the researcher. It is to make the habits of a careful domain expert explicit and repeatable:
+The goal is not to replace the researcher. It is to make careful research habits explicit and repeatable:
 
-- **Domain memory**: papers, concepts, authors, systems, and datasets live in `wiki/`, not in scattered PDFs, chat logs, and temporary notes.
-- **Evidence discipline**: `kb_search.py` retrieves local topic notes, concept pages, and entity pages before an answer is written.
+- **Long-term memory**: papers, concepts, authors, systems, and datasets live in `wiki/`, not in scattered PDFs, chat logs, or temporary notes.
+- **Evidence discipline**: domain answers start from local retrieval; missing support is marked as an evidence gap.
 - **Deep reading**: Zotero items can become topic notes, Claudian reading reports, finalized notes, audits, and reusable evidence.
-- **Divergent hypotheses**: research-agenda generates reviewable idea seeds with local evidence, gaps, baselines, and risk notes instead of claiming proven novelty.
-- **Experiment planning**: idea seeds are pushed toward baselines, killer experiments, no-hardware pilots, failure conditions, and human review.
-- **Portability**: the public package excludes API keys, PDFs, SQLite caches, logs, personal paths, and machine-specific runtime state.
+- **Knowledge network**: papers connect to concept pages and entity pages, so later questions can follow methods, authors, datasets, and systems.
+- **Hypothesis drafting**: research-agenda creates reviewable idea seeds; it does not treat local evidence as proven novelty.
+- **Experiment-plan drafts**: idea seeds can be expanded into baselines, discriminating experiments, no-hardware pilots, failure conditions, and human review fields.
 
 ## What Problem It Solves
 
@@ -43,26 +90,6 @@ research-agenda      reviewable idea seeds and automation logs
 
 The core principle is **local-first answerability**: domain answers should point back to local `wiki/` notes, concept pages, entity pages, or explicit evidence gaps.
 
-## Configuration Roadmap
-
-You do not need to configure the full automation stack on day one. Enable the system in layers:
-
-| Level | What works | Required setup |
-| --- | --- | --- |
-| Level 0 | Browse `wiki/`, dashboards, graph-oriented notes, and example outputs | Obsidian optional; GitHub web view is enough |
-| Level 1 | Local search and structure audits with `kb_search.py` and `audit_kb.py` | Python 3.10+ |
-| Level 2 | Import Zotero metadata into topic notes | Zotero API key, user ID, collection key |
-| Level 3 | Jump from an Obsidian reading note back to Zotero item / PDF | Zotero Desktop, PDF attachment, Paper Reading Workbench |
-| Level 4 | Claudian / Claude Code reading, comparison, and question-answer commands | Local CLI, model account, explicit permission choices |
-| Level 5 | Daily arXiv scouting, Zotero import, idea seeds, optional review | arXiv metadata mirror, Zotero write permission, optional Gemini / Codex |
-
-Setup entry points:
-
-- Obsidian / Claudian: [docs/OBSIDIAN_CLAUDIAN_SETUP.md](docs/OBSIDIAN_CLAUDIAN_SETUP.md)
-- Zotero API, WebDAV, attachments: [docs/ZOTERO_STORAGE.md](docs/ZOTERO_STORAGE.md)
-- Automation, scheduled tasks, arXiv mirror-first: [docs/AUTOMATION.md](docs/AUTOMATION.md)
-- Paper Reading Workbench security boundary: [docs/SECURITY_PLUGIN_WORKBENCH.md](docs/SECURITY_PLUGIN_WORKBENCH.md)
-
 ## Example Outputs
 
 Claudian can answer a research question by first retrieving local notes and then grounding the answer in concrete paper pages:
@@ -75,7 +102,7 @@ Deep reading reports are the middle layer between a paper and downstream answers
 
 Full example: [docs/examples/deep-reading-report-example.md](docs/examples/deep-reading-report-example.md).
 
-The research-agenda workflow can promote evidence-backed ideas into reviewable seeds with method claims, baseline analysis, novelty pressure, and no-hardware pilot plans:
+The research-agenda workflow can turn local evidence into reviewable idea seeds with method claims, baseline analysis, novelty pressure, risk notes, and no-hardware pilot plans:
 
 ![Gemini-assisted research idea seed with local evidence and review fields](docs/assets/gemini-research-idea-seed-example.png)
 

@@ -1,29 +1,72 @@
 # Local-First Research Vault
 
-> 一个面向领域研究者的本地科研助手：有长期文献记忆，能做证据检索、精读归纳、发散假设和实验设计，但始终把结论落回本地证据链。
+> 把 Zotero / arXiv 论文转成可检索、可审计、可复用的本地研究记忆；LLM 可以辅助精读、比较和假设生成，但结论必须回到 `wiki/` 证据。
 
 [English README](README_EN.md)
 
-这个仓库不是一堆 Markdown 论文笔记，也不是一个简单的 Zotero 导出。它试图把 AI 从“临时聊天助手”变成一个有本地文献记忆的领域研究伙伴：论文从 Zotero / arXiv 进来，变成结构化 wiki、概念网络、精读报告、本地证据检索和可审阅 research idea。AI 可以参与精读、比较、综述、发散和实验规划，但每一步都要保留证据、边界和人工审阅位置。
+这是一个面向领域研究者的 Obsidian / Zotero vault 模板。它不是普通 Markdown 论文笔记，也不是 Zotero 导出目录；它把论文、概念、实体、精读报告、本地检索和研究 idea 草案组织成一套可追踪的工作流。
 
-公开版本以仓库内置的机器人操控文献作为示例，尤其覆盖 DLO、VLM/VLA、RL、Sim-to-Real 和 embodied AI。你也可以把它迁移到其他学科：换掉论文、概念、实体和 arXiv 过滤规则，保留这套可审计的研究工作流。
+公开版本以机器人操控文献为示例，覆盖 DLO、VLM/VLA、RL、Sim-to-Real 和 embodied AI。你可以把它迁移到其他学科，但需要替换论文集合、概念页、实体页、Claudian prompt 和 arXiv 过滤规则。
+
+适合对象：需要长期追踪一个专业方向的研究生、PI / 实验室知识库维护者，以及希望让 LLM 按本地证据工作的领域研究者。
+
+## 它是什么 / 不是什么
+
+这是：
+
+- 一个 **local-first research assistant vault**：长期保留本地文献记忆，而不是一次性 AI 对话。
+- 一个 **evidence-grounded workflow**：回答领域问题前先检索 `wiki/topics/`、`wiki/concepts/` 和 `wiki/entities/`。
+- 一个 Zotero / Obsidian / Claudian 工作流模板：支持导入、精读、finalize、audit、比较和概念页维护。
+- 一个 research-agenda seed system：把本地证据整理成可审阅 idea seed、baseline、风险和实验方案草案。
+- 一个可脱敏发布的公开包：不包含 API key、PDF、SQLite mirror、Zotero 缓存、日志和个人路径。
+
+这不是：
+
+- 不是 clone 后即可完整运行的全自动科研系统。
+- 不是已验证创新点或实验结果生成器。
+- 不是 PDF 全文仓库；PDF 仍由 Zotero、WebDAV 或 linked attachment 管理。
+- 不是只适用于机器人方向的代码库；机器人只是公开示例领域。
+
+## Clone 后能直接做什么
+
+无需 Zotero、Claudian、Gemini 或 Codex，你可以直接运行：
+
+```powershell
+python .claude/scripts/audit_kb.py
+python .claude/scripts/kb_search.py "diffusion policy DLO" --limit 5
+```
+
+这会验证本地知识库结构，并返回可追溯到 `wiki/` 的论文、概念和实体路径。Obsidian 是可选的，但推荐用它浏览 graph、backlinks、dashboard 和精读笔记。
+
+## 需要额外配置后才能做什么
+
+| 功能 | 需要 |
+| --- | --- |
+| 从 Zotero 导入论文 metadata | Zotero API key、user ID、collection key，或本机 Zotero Desktop |
+| 从 Obsidian 精读笔记回跳 Zotero item / PDF | Zotero Desktop、PDF 附件、Paper Reading Workbench |
+| Claudian / Claude Code 精读、比较、问答 | 本机 CLI、模型账号、权限确认 |
+| daily arXiv scout 和 idea seed | 本地 arXiv SQLite metadata mirror、网络；完整模式需要 Zotero / Gemini / Codex |
+| PDF 同步 | Zotero 官方存储、WebDAV 或 linked attachment；仓库不提交 PDF |
+
+详细配置入口：
+
+- Obsidian / Claudian: [docs/OBSIDIAN_CLAUDIAN_SETUP.md](docs/OBSIDIAN_CLAUDIAN_SETUP.md)
+- Zotero API、WebDAV、附件同步: [docs/ZOTERO_STORAGE.md](docs/ZOTERO_STORAGE.md)
+- 自动化、计划任务、arXiv mirror-first: [docs/AUTOMATION.md](docs/AUTOMATION.md)
+- Paper Reading Workbench 安全边界: [docs/SECURITY_PLUGIN_WORKBENCH.md](docs/SECURITY_PLUGIN_WORKBENCH.md)
 
 ## 研究助手模型
 
-这套 vault 的目标不是替代研究者，而是把一个领域专家平时会做的几件事固定成可追踪流程：
+这套 vault 的目标不是替代研究者，而是把严谨研究者已经在做的工作固定成可检查流程：
 
-- **领域记忆**：把论文、概念、作者、系统和数据集长期沉淀在 `wiki/`，而不是散落在 PDF、聊天记录和临时笔记里。
-- **证据约束**：回答问题前先跑 `kb_search.py`，结论必须能回到具体 topic note、concept page 或 entity page。
-- **精读归纳**：Zotero 条目进入 topic note 后，可以经过 Claudian 精读、finalize 和 audit，形成能被后续问答复用的 evidence layer。
-- **发散假设**：research-agenda 不直接宣布“发现创新点”，而是生成带 local evidence、gap、baseline、risk 的可审阅 idea seed。
-- **实验设计**：idea seed 会继续压到 baseline、killer experiment、no-hardware pilot、失败条件和人工 review，而不是停在灵感描述。
-- **可迁移性**：公开版去掉 API key、PDF、SQLite、日志和个人路径；clone 后可以先浏览、检索、审计，再逐步接 Zotero / Claudian / automation。
+- **长期记忆**：论文、概念、作者、系统和数据集沉淀在 `wiki/`，而不是散落在 PDF、聊天记录和临时笔记里。
+- **证据约束**：领域回答先跑本地检索；没有本地证据时，明确标出 evidence gap。
+- **精读归纳**：Zotero 条目可以进入 topic note，再经过 Claudian 精读、finalize 和 audit，形成可复用证据层。
+- **知识网络**：论文连接到概念页和实体页，后续问题可以沿论文、方法、作者、数据集和系统追踪。
+- **假设生成**：research-agenda 只生成可审阅 idea seed，不把局部证据包装成已验证创新。
+- **实验草案**：idea seed 会被展开为 baseline、关键区分实验、no-hardware pilot、失败条件和人工 review 字段。
 
 ## 工作流概览
-
-它解决的是一个很现实的问题：
-
-> 论文越来越多，PDF、Zotero、Obsidian、AI 对话和研究 idea 分散在不同地方；AI 很容易给出流畅但不可追溯的总结，Zotero 导入后也很难自然变成可检索、可审计、可复用的研究知识。
 
 这个仓库把流程收束成一个闭环：
 
@@ -42,26 +85,6 @@ output/ projects/   综述、比较、研究 idea、每日 arXiv 日志
 ```
 
 核心原则是 **local-first answerability**：任何领域回答都先查本地 `wiki/`，结论必须能回到具体论文、概念页或实体页；本地没有证据时，才明确说明缺口并考虑外部检索。
-
-## 配置路线图
-
-你不需要一次把所有自动化都配完。公开仓库按下面的层级逐步启用：
-
-| 层级 | 能做什么 | 需要配置什么 |
-| --- | --- | --- |
-| Level 0 | 直接浏览 `wiki/`、Dashboard、图谱和示例结果 | Obsidian 可选；GitHub 网页也能看 |
-| Level 1 | 本地检索和结构审计：`kb_search.py`、`audit_kb.py` | Python 3.10+ |
-| Level 2 | 从 Zotero 导入论文 metadata，并把条目变成 topic note | Zotero API key、user ID、collection key |
-| Level 3 | 在 Obsidian 中从精读笔记回跳 Zotero item / PDF 原文 | Zotero Desktop、PDF 附件、Paper Reading Workbench |
-| Level 4 | Claudian / Claude Code 精读、比较、问答命令 | 本机 CLI、模型账号、权限确认 |
-| Level 5 | 每日 arXiv scout、Zotero 导入、idea seed、二审 | arXiv metadata mirror、Zotero 写权限、可选 Gemini / Codex |
-
-详细配置入口：
-
-- Obsidian / Claudian: [docs/OBSIDIAN_CLAUDIAN_SETUP.md](docs/OBSIDIAN_CLAUDIAN_SETUP.md)
-- Zotero API、WebDAV、附件同步: [docs/ZOTERO_STORAGE.md](docs/ZOTERO_STORAGE.md)
-- 自动化、计划任务、arXiv mirror-first: [docs/AUTOMATION.md](docs/AUTOMATION.md)
-- Paper Reading Workbench 安全边界: [docs/SECURITY_PLUGIN_WORKBENCH.md](docs/SECURITY_PLUGIN_WORKBENCH.md)
 
 ## 工作流展示
 
@@ -85,7 +108,7 @@ Claudian 在 Obsidian 中回答“有关 RL token 的论文有哪些？怎么做
 
 ### 4. Research idea seed
 
-research-agenda 工作流会把本地证据沉淀成待审阅研究 idea seed。下面示例展示了从本地证据、方法改进主张、baseline / killer experiment、novelty pressure 到 no-hardware pilot 的结构化研究计划；这些研究主张仍需要人工审阅和实验验证。
+research-agenda 工作流会把本地证据沉淀成待审阅研究 idea seed。下面示例展示了从本地证据、方法改进主张、baseline、关键区分实验、novelty pressure 到 no-hardware pilot 的结构化研究设想草案；这些研究主张仍需要人工审阅和实验验证。
 
 ![Gemini-assisted research idea seed with local evidence and review fields](docs/assets/gemini-research-idea-seed-example.png)
 
