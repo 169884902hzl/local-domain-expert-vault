@@ -70,6 +70,7 @@ jobs:
           if (($output -join "`n") -notmatch "missing_collection_key") {
             throw "Expected missing_collection_key in public fresh clone"
           }
+          exit 0
 
       - name: Check scheduled task dry-run redaction
         shell: pwsh
