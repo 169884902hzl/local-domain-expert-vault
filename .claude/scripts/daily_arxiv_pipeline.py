@@ -1,8 +1,9 @@
-﻿"""Daily arXiv embodied-AI scout pipeline."""
+"""Daily arXiv embodied-AI scout pipeline."""
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -43,6 +44,7 @@ from zotero_import import (
 
 
 ARXIV_API = "https://export.arxiv.org/api/query"
+DANGEROUS_CLAUDE_ENV = "LOCAL_FIRST_VAULT_ALLOW_DANGEROUS_CLAUDE"
 ATOM = {"atom": "http://www.w3.org/2005/Atom", "arxiv": "http://arxiv.org/schemas/atom"}
 AUTO_IMPORT_FILL_DECISION = "auto_import_fill"
 NEW_IMPORT_STATUSES = {"created", "sync_pending"}
@@ -908,9 +910,13 @@ def read_zotero_key(
     timeout: int = 3600,
     run_date: str = "",
     attempt: int = 1,
+    allow_dangerous_claude: bool = False,
 ) -> tuple[str, str, dict[str, str]]:
     prompt = read_paper_prompt(zotero_key)
-    command = ["claude", "--dangerously-skip-permissions", "--print", prompt]
+    command = ["claude"]
+    if allow_dangerous_claude or os.environ.get(DANGEROUS_CLAUDE_ENV, "").lower() in {"1", "true", "yes", "on"}:
+        command.append("--dangerously-skip-permissions")
+    command.extend(["--print", prompt])
     heartbeat_path = ""
 
     def heartbeat(pid: int) -> None:
@@ -972,6 +978,7 @@ def read_zotero_key_timed(
     run_date: str = "",
     max_attempts: int = 1,
     retry_delay_sec: int = 60,
+    allow_dangerous_claude: bool = False,
 ) -> tuple[str, str, float, list[dict[str, str]]]:
     started = time.monotonic()
     outputs: list[str] = []
@@ -983,6 +990,7 @@ def read_zotero_key_timed(
             timeout=timeout,
             run_date=run_date,
             attempt=attempt,
+            allow_dangerous_claude=allow_dangerous_claude,
         )
         if log_paths:
             logs.append({"attempt": str(attempt), **log_paths})
@@ -1402,6 +1410,7 @@ def run_resume_backlog(args: argparse.Namespace) -> int:
                 run_date=run_date,
                 max_attempts=args.read_retries + 1,
                 retry_delay_sec=args.read_retry_delay,
+                allow_dangerous_claude=args.allow_dangerous_claude,
             )
         elif note_status == "missing_note" and ingest_status == "success" and not args.skip_read:
             read_status = "waiting_local_note"
@@ -1759,6 +1768,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
                         run_date=run_date,
                         max_attempts=args.read_retries + 1,
                         retry_delay_sec=args.read_retry_delay,
+                        allow_dangerous_claude=args.allow_dangerous_claude,
                     )
                 else:
                     read_status = "backlog"
@@ -1835,6 +1845,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
                     run_date=args.run_date,
                     max_attempts=args.read_retries + 1,
                     retry_delay_sec=args.read_retry_delay,
+                    allow_dangerous_claude=args.allow_dangerous_claude,
                 )
             elif note_status == "missing_note" and ingest_status == "success" and not args.skip_read:
                 read_status = "waiting_local_note"
@@ -2037,6 +2048,11 @@ def main() -> int:
     parser.add_argument("--read-timeout", type=int, default=2700)
     parser.add_argument("--read-retries", type=int, default=1, help="Retry failed Claudian reads this many extra times before marking failed.")
     parser.add_argument("--read-retry-delay", type=int, default=90, help="Seconds to wait between failed Claudian read attempts.")
+    parser.add_argument(
+        "--allow-dangerous-claude",
+        action="store_true",
+        help=f"Opt in to passing --dangerously-skip-permissions to Claude. The public default is safe; env {DANGEROUS_CLAUDE_ENV}=1 also opts in.",
+    )
     parser.add_argument("--idea-mode", choices=["claude", "gemini-cli", "gemini-divergent", "template"], default="gemini-divergent", help="Use Claude Code or Gemini CLI to synthesize final ideas, or keep deterministic template ideas.")
     parser.add_argument("--idea-timeout", type=int, default=1200)
     parser.add_argument("--gemini-model", default="gemini-3.1-pro-preview")

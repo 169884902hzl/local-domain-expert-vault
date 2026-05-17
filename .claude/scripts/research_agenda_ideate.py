@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import itertools
+import os
 import re
 import sqlite3
 import subprocess
@@ -33,6 +34,7 @@ from research_agenda_common import (
 MIN_MECHANISM_SOURCES = 5
 MIN_STRONG_MECHANISM_SOURCES = 2
 PLACEHOLDER_TOKENS = ["todo", "tbd", "need_to_verify", "seed_pending_review", "cross-gap between"]
+DANGEROUS_CLAUDE_ENV = "LOCAL_FIRST_VAULT_ALLOW_DANGEROUS_CLAUDE"
 STRONG_CLAIM_TYPES = {"paper_summary", "problem", "limitation", "open_question", "method"}
 SUPPORT_CLAIM_TYPES = {"metric", "sensor", "robot_setup", "task", "evidence_note"}
 SOURCE_AVAILABILITY_PATTERNS = [
@@ -1748,10 +1750,16 @@ def _extract_json_object(text: str) -> dict[str, Any] | None:
 
 
 def _refine_with_claude(
-    candidates: list[tuple[int, dict[str, Any], list[dict[str, Any]], int]], *, timeout: int
+    candidates: list[tuple[int, dict[str, Any], list[dict[str, Any]], int]],
+    *,
+    timeout: int,
+    allow_dangerous_claude: bool = False,
 ) -> tuple[list[dict[str, Any]], str]:
     prompt = _render_generation_prompt(candidates)
-    command = ["claude", "--dangerously-skip-permissions", "-p", prompt]
+    command = ["claude"]
+    if allow_dangerous_claude or os.environ.get(DANGEROUS_CLAUDE_ENV, "").lower() in {"1", "true", "yes", "on"}:
+        command.append("--dangerously-skip-permissions")
+    command.extend(["-p", prompt])
     try:
         proc = subprocess.run(command, text=True, encoding="utf-8", errors="replace", capture_output=True, timeout=timeout)
     except FileNotFoundError:
@@ -2454,6 +2462,7 @@ def generate_seed_report(
     min_raw_candidates: int = DEFAULT_MIN_RAW_CANDIDATES,
     gemini_model: str = "gemini-3.1-pro-preview",
     run_date: str | None = None,
+    allow_dangerous_claude: bool = False,
 ) -> dict[str, Any]:
     records = _merge_focus_track_records(records)
     focus = {key.upper() for key in focus_keys}
@@ -2491,7 +2500,11 @@ def generate_seed_report(
     else:
         candidates = _mechanism_candidates(records, focus_keys=focus)
         if generator == "claude" and candidates:
-            refined, generator_status = _refine_with_claude(candidates, timeout=generator_timeout)
+            refined, generator_status = _refine_with_claude(
+                candidates,
+                timeout=generator_timeout,
+                allow_dangerous_claude=allow_dangerous_claude,
+            )
             if not refined:
                 return base_report(generator_status)
             by_cluster = {axis.get("cluster_id"): (score, axis, evidence, recent) for score, axis, evidence, recent in candidates}
@@ -3150,6 +3163,11 @@ def main() -> int:
     parser.add_argument("--generator", choices=["template", "claude", "gemini-cli", "gemini-divergent", "none"], default="template")
     parser.add_argument("--generator-timeout", type=int, default=1200)
     parser.add_argument("--gemini-model", default="gemini-3.1-pro-preview")
+    parser.add_argument(
+        "--allow-dangerous-claude",
+        action="store_true",
+        help=f"Opt in to passing --dangerously-skip-permissions to Claude. The public default is safe; env {DANGEROUS_CLAUDE_ENV}=1 also opts in.",
+    )
     parser.add_argument("--run-date", default=today())
     parser.add_argument("--include-dynamic", action="store_true", help="Deprecated: also generate generic cross-domain gap candidates in curated mode.")
     parser.add_argument("--dry-run", action="store_true")
@@ -3172,6 +3190,7 @@ def main() -> int:
         min_raw_candidates=args.min_raw_candidates,
         gemini_model=args.gemini_model,
         run_date=args.run_date,
+        allow_dangerous_claude=args.allow_dangerous_claude,
     )
     if args.json:
         safe_print(json.dumps(_report_json(report), ensure_ascii=False, indent=2))

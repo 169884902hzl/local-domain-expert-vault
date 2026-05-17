@@ -55,7 +55,7 @@ Invoke-RestMethod "https://api.zotero.org/users/$env:ZOTERO_USER_ID/collections?
   ForEach-Object { "{0}`t{1}" -f $_.data.key, $_.data.name }
 ```
 
-Use the left column as `ZOTERO_COLLECTION_KEY`. This public package does not include the maintainer's private collection key.
+Use the left column as `ZOTERO_COLLECTION_KEY`. This public package does not include any preconfigured private collection key.
 
 Official Zotero API reference: [Zotero Web API v3 Basics](https://www.zotero.org/support/dev/web_api/v3/basics).
 
@@ -87,9 +87,9 @@ Use this if you want Zotero to sync stored attachments through a WebDAV provider
 
 The vault scripts do not need your WebDAV password. They only need Zotero Desktop or Zotero Web API access.
 
-### Confirmed Maintainer Route: CSTCloud Data Capsule WebDAV
+### Example Route: CSTCloud Data Capsule WebDAV
 
-The maintainer's current Zotero attachment expansion route is WebDAV through CSTCloud Data Capsule (`数据胶囊`), using an app-specific WebDAV client credential for Zotero.
+This public example uses WebDAV through CSTCloud Data Capsule (`数据胶囊`), with an app-specific WebDAV client credential for Zotero.
 
 Public, non-secret WebDAV endpoint:
 
@@ -149,23 +149,27 @@ Only document a plugin as required if your own workflow really depends on it.
 
 The public scripts are intentionally conservative:
 
-- no maintainer collection key is hardcoded;
+- no private collection key is hardcoded;
 - missing collection configuration returns `missing_collection_key`;
 - `zotero_import.py --preflight --json` redacts private collection metadata;
 - `--unsafe-json` exists only for private debugging;
 - PDF cache, SQLite metadata, and local attachment outputs are ignored by Git.
 
-## Additional Screenshots To Add
+## Public Screenshot Reference
 
-If you want the GitHub README to show your exact Zotero expansion setup, capture only the relevant route and redact private fields.
+The public package includes two screenshots for this route:
 
-| Screenshot | Must show | Redact |
+- CSTCloud Data Capsule WebDAV client management page;
+- Zotero Desktop file-sync settings using WebDAV.
+
+If you adapt the vault to another provider, use screenshots with the same disclosure boundary:
+
+| Screenshot | Useful public content | Keep private |
 | --- | --- | --- |
-| Zotero Sync | Sync enabled and account state | Email, username |
+| Zotero Sync | Sync feature and selected route | Email, username |
 | Zotero File Sync | Official storage or WebDAV selection | Server credentials |
-| CSTCloud Data Capsule WebDAV client | WebDAV address and Zotero app entry | Username, password, account name, avatar |
-| WebDAV verification | Verification success | Username, password, account name |
-| Linked attachment base | Base directory or plugin rule | Local username and private path |
-| Better BibTeX / ZotFile / Attanger | Only settings you actually use | Personal paths and library names |
+| WebDAV provider page | Public endpoint and Zotero app entry | Username, password, account name, avatar |
+| Linked attachment base | General base-directory concept | Local username and private path |
+| Better BibTeX / ZotFile / Attanger | Only settings required by your workflow | Personal paths and library names |
 
 Public examples should show only the configuration shape needed for reproduction, not credentials or machine-specific paths.

@@ -11,14 +11,15 @@
 - 你 clone 后可以直接用 Obsidian 打开仓库根目录。
 - Graph、Smart Connections 排除规则、模板路径、部分插件设置已经预置。
 - Claudian 的行为规则和 system prompt 已经预置在 `.claudian/claudian-settings.json`。
-- 你仍然需要在 Obsidian 里安装插件本体。
+- 公开包默认不启用未打包本体的社区插件，避免第一次打开 Obsidian 时出现缺 `main.js` 的插件报错。
+- 你仍然需要在 Obsidian 里安装插件本体，然后按需启用。
 - 你仍然需要在自己的机器上配置 Claude/Codex/Gemini/Zotero 登录或环境变量。
 
 ## 配置文件地图
 
 | 路径 | 作用 | 是否含个人秘密 |
 | --- | --- | --- |
-| `.obsidian/community-plugins.json` | 推荐启用的 Obsidian 插件 id 列表 | 否 |
+| `.obsidian/community-plugins.json` | 公开包默认留空；插件需用户安装后手动启用 | 否 |
 | `.obsidian/graph.json` | Graph 默认过滤为 `path:wiki` | 否 |
 | `.obsidian/templates.json` | 模板目录配置 | 否 |
 | `.obsidian/plugins/obsidian-smart-connections/data.json` | Smart Connections 排除非知识源路径 | 否 |
@@ -47,10 +48,12 @@ Settings -> Community plugins -> Browse
 | Smart Connections | 语义检索；本 vault 建议只索引 `wiki/` |
 | Templater | 使用 `templates/` 创建标准笔记 |
 | Zotero Desktop Connector | 从 Zotero 读取 metadata/fulltext |
-| Paper Reading Workbench | 阅读辅助 |
+| Paper Reading Workbench | 自定义阅读辅助；公开包只保留配置示例，不默认启用 |
 | Excalidraw | 可选绘图；公开包不含个人绘图内容 |
 
-注意：`.obsidian/community-plugins.json` 只会声明推荐启用的插件 id。如果你的 Obsidian 没有安装对应插件，仍需要手动安装。
+注意：公开包没有提交这些插件的 `main.js`，因此 `.obsidian/community-plugins.json` 默认是空数组。这样新用户第一次打开 vault 时不会看到“插件已启用但本体不存在”的失败状态。安装插件后，可以在 Obsidian UI 中手动启用；保留在 `.obsidian/plugins/*/data.json` 的配置会作为参考配置使用。
+
+`paper-reading-workbench` 是 optional/custom workflow。如果你没有对应插件本体或构建说明，把它视为本地自定义阅读辅助配置示例，不影响基础 vault、KB search、Zotero 或 arXiv dry-run。
 
 ## Smart Connections 配置
 
@@ -123,6 +126,8 @@ Claudian 的主配置在：
 公开配置默认使用 `permissionMode = normal`。这个 vault 的完整自动化流程原本可以在更高自治权限下运行，但新用户第一次打开仓库时不应该默认继承高权限写入和命令执行边界。
 
 如果你已经理解 `.claude/commands/` 和 `.claude/scripts/` 会做什么，并且愿意让 agent 自动读写 vault 文件，可以在 Claudian UI 里手动切到更高权限模式。不要把高权限配置直接提交到公开仓库。
+
+Claude CLI 的 `--dangerously-skip-permissions` 也不再是公开默认值。发布版脚本只有在你显式传入 `--allow-dangerous-claude`，或设置 `LOCAL_FIRST_VAULT_ALLOW_DANGEROUS_CLAUDE=1` 时，才会把该参数传给 Claude。这个 opt-in 只适合你完全理解本机权限边界并愿意承担自动读写风险的本地环境。
 
 不管使用什么权限模式，都不要让 agent 看到真实 API key 文本；用系统环境变量或本机 CLI 登录状态提供凭据。
 
@@ -223,7 +228,7 @@ setx ZOTERO_COLLECTION_KEY "<your-collection-key>"
 
 ### 插件列表里有 Claudian，但 Obsidian 没有显示 Claudian
 
-仓库只包含插件启用清单和配置，不包含插件本体。去 Community Plugins 安装 Claudian。
+仓库只包含插件配置示例，不包含插件本体；公开包默认也不启用未安装的社区插件。去 Community Plugins 安装 Claudian 后，再手动启用。
 
 ### Claudian 打开后没有项目命令
 
