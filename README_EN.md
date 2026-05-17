@@ -47,14 +47,16 @@ python .claude/scripts/kb_search.py "diffusion policy DLO" --limit 5
 
 These commands validate the local knowledge structure and return evidence paths under `wiki/`. Obsidian is optional, but recommended for graph view, backlinks, dashboards, and reading notes.
 
-## What requires additional setup
+## What The Full Workflow Requires
 
 | Capability | Requires |
 | --- | --- |
 | Importing Zotero metadata | Zotero API key, user ID, collection key, or local Zotero Desktop |
 | Jumping from Obsidian notes to Zotero item / PDF | Zotero Desktop, PDF attachment, Paper Reading Workbench |
-| Claudian / Claude Code reading and QA commands | Local CLI, model account, explicit permission choices |
-| Daily arXiv scouting and idea seeds | Local arXiv SQLite metadata mirror and network; full mode needs Zotero / Gemini / Codex |
+| Claudian / Claude Code reading and QA commands | Core layer of the full local domain-expert workflow; local CLI, model account, explicit permission choices |
+| Gemini idea divergence | Core idea-divergence layer; logged-in Gemini CLI |
+| Codex seed review | Core review layer; logged-in Codex CLI |
+| Daily arXiv scouting and idea seeds | Local arXiv SQLite metadata mirror and network; full mode needs Zotero / Claudian / Gemini / Codex |
 | PDF syncing | Zotero storage, WebDAV, or linked attachments; PDFs are not committed |
 
 Setup entry points:
@@ -201,7 +203,7 @@ Read [Paper Reading Workbench Security Notes](docs/SECURITY_PLUGIN_WORKBENCH.md)
 
 ## Zotero Setup
 
-Zotero is optional for browsing and local search. It is needed for import and automation.
+Zotero is not required for browsing or `kb_search.py`, but it is a core layer for full paper import, PDF cross-reading, attachment sync, and automation write-back.
 
 To use the Web API route:
 
@@ -231,13 +233,13 @@ See [docs/ZOTERO_STORAGE.md](docs/ZOTERO_STORAGE.md) for details.
 
 ## Claudian / Claude Code
 
-Claudian / Claude Code is optional. The repository can be inspected and searched without MCP servers.
+Claudian / Claude Code is not required for basic browsing or `kb_search.py`, but it is the core agent layer of the full local domain-expert workflow.
 
 Recommended public default:
 
-- Required MCP: none
-- Optional MCP: Zotero and arXiv for full automation
-- Optional tools: Gemini / Codex for divergent idea generation and review
+- Required MCP for basic browsing/search: none
+- Full automation: Zotero and arXiv access
+- Full idea/review loop: Gemini / Codex for divergent idea generation and review
 
 Project commands include:
 

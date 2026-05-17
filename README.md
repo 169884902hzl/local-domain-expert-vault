@@ -47,14 +47,16 @@ python .claude/scripts/kb_search.py "diffusion policy DLO" --limit 5
 
 这会验证本地知识库结构，并返回可追溯到 `wiki/` 的论文、概念和实体路径。Obsidian 是可选的，但推荐用它浏览 graph、backlinks、dashboard 和精读笔记。
 
-## 需要额外配置后才能做什么
+## 完整工作流需要额外配置
 
 | 功能 | 需要 |
 | --- | --- |
 | 从 Zotero 导入论文 metadata | Zotero API key、user ID、collection key，或本机 Zotero Desktop |
 | 从 Obsidian 精读笔记回跳 Zotero item / PDF | Zotero Desktop、PDF 附件、Paper Reading Workbench |
-| Claudian / Claude Code 精读、比较、问答 | 本机 CLI、模型账号、权限确认 |
-| daily arXiv scout 和 idea seed | 本地 arXiv SQLite metadata mirror、网络；完整模式需要 Zotero / Gemini / Codex |
+| Claudian / Claude Code 精读、比较、问答 | 完整本地领域专家工作流的核心层；需要本机 CLI、模型账号、权限确认 |
+| Gemini idea divergence | 完整 idea 生成链路的发散层；需要 Gemini CLI 登录 |
+| Codex seed review | 完整自动化里的二审层；需要 Codex CLI 登录 |
+| daily arXiv scout 和 idea seed | 本地 arXiv SQLite metadata mirror、网络；完整模式需要 Zotero / Claudian / Gemini / Codex |
 | PDF 同步 | Zotero 官方存储、WebDAV 或 linked attachment；仓库不提交 PDF |
 
 详细配置入口：
@@ -242,7 +244,7 @@ python .claude/scripts/daily_arxiv_pipeline.py --dry-run --source mirror-first -
 | Claudian 配置 | 已包含脱敏配置；CLI 路径和账号需用户本机配置 |
 | Zotero 导入 | 需要用户自己的 Zotero 或 Zotero API 配置 |
 | 每日 arXiv 自动化 | 需要网络；写入 Zotero 时需要 Zotero 配置 |
-| Gemini / Codex 自动化 | 可选；需要用户本机 CLI 已登录 |
+| Gemini / Codex 自动化 | 完整工作流的 idea 发散和二审层；需要用户本机 CLI 已登录 |
 | API key | 不包含在仓库中，必须由使用者自己配置 |
 
 ## 目录结构
@@ -368,7 +370,7 @@ python .claude/scripts/compare_papers.py li2025routing peters2026coordinated
 
 ## 配置 Zotero
 
-Zotero 是可选增强能力。没有 Zotero 时仍可浏览、检索和手工维护笔记。
+Zotero 不是浏览和 `kb_search.py` 的前置条件；但它是完整论文导入、PDF 对照阅读、附件同步和自动化写回的核心层。没有 Zotero 时仍可浏览、检索和手工维护笔记。
 
 ### 1. 复制配置示例
 
@@ -604,18 +606,18 @@ Unregister-ScheduledTask -TaskName DailyCodexSeedReview -Confirm:$false
 Unregister-ScheduledTask -TaskName WeeklyResearchAgendaReview -Confirm:$false
 ```
 
-## 可选 CLI 集成
+## 完整工作流 CLI 集成
 
-| 工具 | 用途 | 是否必需 |
+| 工具 | 用途 | 在完整工作流中的地位 |
 | --- | --- | --- |
-| Zotero Desktop | 本机读取 item metadata 和 fulltext | 可选 |
-| Zotero Web API | 写入 Zotero 或无桌面端时同步 | 可选 |
-| Claudian / Claude Code | 精读论文、执行项目命令 | 可选 |
-| Gemini CLI | 发散研究 idea、图谱/翻译等增强流程 | 可选 |
-| Codex CLI | 对每日 seed 做二次审查 | 可选 |
-| OpenCode/DeepSeek CLI | 模型辩论和 idea refinement 的增强项 | 可选 |
+| Zotero Desktop | 本机读取 item metadata 和 fulltext | PDF 对照阅读和本机 fulltext 路径需要 |
+| Zotero Web API | 写入 Zotero 或无桌面端时同步 | 自动导入/写回 Zotero 需要 |
+| Claudian / Claude Code | 精读论文、执行项目命令 | 核心层 |
+| Gemini CLI | 发散 research idea、图谱/翻译等流程 | 核心 idea 层 |
+| Codex CLI | 对每日 seed 做二次审查 | 核心 review 层 |
+| OpenCode/DeepSeek CLI | 模型辩论和 idea refinement 的扩展项 | 可替换/扩展 |
 
-建议先跑通基础本地检索，再逐个启用 Zotero、Claudian、Gemini、Codex。不要一开始就把所有自动化打开。
+基础浏览和本地检索可以不配置这些 CLI；但如果要复现本仓库真正的“本地领域专家”闭环，建议按 Zotero -> Claudian -> arXiv mirror -> Gemini -> Codex 的顺序逐步启用。不要一开始就把所有自动化打开。
 
 ## 常见问题
 
@@ -652,7 +654,7 @@ Get-Content -Encoding UTF8 projects/research-agenda/reviews/daily-codex-seed-rev
 
 ### 自动化返回 `partial`
 
-`partial` 通常表示某个增强步骤缺少凭据、CLI 或网络，而不是整个 vault 不可用。查看运行日志中的 `ERROR:` 行，先区分是 Zotero、Gemini、Codex、arXiv 网络还是精读步骤失败。
+`partial` 通常表示完整工作流中的某个 AI / Zotero / 网络层缺少凭据、CLI 或运行条件，而不是整个 vault 不可用。查看运行日志中的 `ERROR:` 行，先区分是 Zotero、Claudian、Gemini、Codex、arXiv 网络还是精读步骤失败。
 
 ## 安全和发布边界
 

@@ -12,7 +12,7 @@
 | Level 3 | 从 Zotero 导入论文 metadata | Zotero API key、user id、collection key，或本机 Zotero Connector API | `zotero_import.py --preflight --json` 没有 `errors` |
 | Level 4 | 使用 arXiv metadata mirror | 网络、本地 SQLite mirror | `arxiv_metadata_sync.py --status` 显示 `records_total > 0` |
 | Level 5 | 每日自动跑 | Windows Task Scheduler 或自定义 cron/systemd | dry-run 路径正确，真实任务产生日志 |
-| Level 6 | Claudian / Gemini / Codex 增强 | 本机 CLI 登录、权限确认 | Claudian 命令、Gemini idea、Codex review 分别能单独跑 |
+| Level 6 | 完整 AI 工作流：Claudian / Gemini / Codex | 本机 CLI 登录、权限确认 | Claudian 命令、Gemini idea、Codex review 分别能单独跑 |
 
 建议按层级逐步启用。不要第一次就同时配置 Zotero、Claudian、Gemini、Codex 和计划任务。
 
@@ -175,7 +175,7 @@ Get-Content -Encoding UTF8 projects/research-agenda/reviews/daily-codex-seed-rev
 
 ## 8. Claudian / Gemini / Codex
 
-这些都是增强层，不是打开仓库的前置条件。
+这些不是打开仓库和运行 `kb_search.py` 的前置条件，但它们是完整本地领域专家工作流的核心层：Claudian 负责精读和项目命令，Gemini 负责 idea 发散，Codex 负责 seed review。
 
 最小顺序：
 
@@ -186,7 +186,7 @@ Get-Content -Encoding UTF8 projects/research-agenda/reviews/daily-codex-seed-rev
 5. 先运行只读命令，例如 `/search-kb diffusion policy DLO`。
 6. 理解项目命令会读写哪些目录后，再启用更高权限。
 
-Gemini 是发散 idea 层；Codex 是可选二审层。没有它们时，基础 vault、Zotero 导入、KB 检索和 arXiv mirror smoke test 仍然可用。
+没有这些 CLI 时，基础 vault、Zotero 导入、KB 检索和 arXiv mirror smoke test 仍然可用；但这只是降级路径，不是本仓库想展示的完整研究工作流。
 
 ## 9. 什么时候算部署成功
 

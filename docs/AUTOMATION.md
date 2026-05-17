@@ -10,7 +10,7 @@
 | Level 1 | arXiv metadata mirror smoke test | Python + 网络 | 想确认 OAI-PMH metadata 同步入口可用 |
 | Level 2 | mirror-first daily pipeline dry-run | Python + metadata mirror | 想看每日候选但不写库 |
 | Level 3 | optional Search API fallback troubleshooting | Python + 网络 | 只在 mirror 缺失、过旧或候选不足时排错 |
-| Level 4 | Zotero + Claudian + Gemini + Codex automation | Zotero / Claudian / Gemini / Codex 按需配置 | 想导入、精读、生成 idea、二审 |
+| Level 4 | Zotero + Claudian + Gemini + Codex full workflow | Zotero / Claudian / Gemini / Codex 逐步配置 | 想复现完整导入、精读、idea 发散、二审 |
 | Level 5 | Windows 定时运行 | Windows Task Scheduler | 想每天自动跑 |
 
 建议按层级逐步启用。不要第一次使用就直接注册计划任务。
@@ -251,7 +251,7 @@ $env:LOCAL_FIRST_VAULT_ALLOW_DANGEROUS_CLAUDE = "1"
 
 ## 8. Gemini CLI
 
-Gemini 是可选的发散 idea 层。先确认 CLI 可用：
+Gemini 是完整 workflow 的发散 idea 层。基础 smoke test 可以用 template mode 降级运行，但要复现本 vault 的研究 idea 生成链路，应先确认 CLI 可用：
 
 ```powershell
 gemini --version
@@ -266,7 +266,7 @@ $env:GEMINI_CLI_NO_RELAUNCH = "true"
 python .claude/scripts/gemini_idea_probe.py --timeout 1200
 ```
 
-如果你不用 Gemini，把每日 pipeline 的参数改成：
+如果暂时不用 Gemini，只做降级 smoke test，可以把每日 pipeline 的参数改成：
 
 ```powershell
 --idea-mode template
@@ -274,7 +274,7 @@ python .claude/scripts/gemini_idea_probe.py --timeout 1200
 
 ## 9. Codex seed review
 
-Codex seed review 是可选二次审查层。它会读取每日 pipeline 生成的 seed packet，并输出 review 报告。
+Codex seed review 是完整 workflow 的二审层。它会读取每日 pipeline 生成的 seed packet，并输出 review 报告。没有 Codex 时可以先跳过，但这属于降级路径。
 
 先只准备 packet，不调用 Codex：
 
@@ -383,7 +383,7 @@ smoke-test cron 示例只作结构参考，不会写 Zotero 或 vault：
 | 状态 | 含义 |
 | --- | --- |
 | `success` | 本轮 pipeline 关键步骤完成 |
-| `partial` | 主流程部分完成，但有增强步骤失败或缺凭据 |
+| `partial` | 主流程部分完成，但完整 AI 层缺凭据、CLI 或网络 |
 | `missing_ZOTERO_API_KEY` | 缺 Zotero 写入凭据 |
 | `skipped_waiting_for_daily_pipeline` | Codex review 等待每日 pipeline 先产生候选 |
 | `NO_LOCAL_MATCHES` | 本地 wiki 没有检索命中 |

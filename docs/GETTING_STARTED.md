@@ -7,7 +7,7 @@
 - 用 Obsidian 浏览 `wiki/` 知识网络。
 - 用本地检索脚本回答领域问题。
 - 用模板新增文献、概念和项目笔记。
-- 在可选配置完成后接入 Zotero 与 Claudian 自动流程。
+- 在完整配置完成后接入 Zotero、Claudian、Gemini 与 Codex 自动流程。
 
 如果你不确定自己应该配置到哪一层，先看 [DEPLOYMENT_CHECKLIST.md](DEPLOYMENT_CHECKLIST.md)。它把浏览、检索、Zotero/PDF、arXiv mirror、计划任务、Claudian/Gemini/Codex 分成可验证层级。
 
@@ -21,7 +21,7 @@ python .claude/scripts/audit_kb.py
 python .claude/scripts/kb_search.py "VLM robot manipulation" --limit 5
 ```
 
-需要 Python 3.10+。核心审计和检索脚本只依赖 Python 标准库；Zotero、Gemini、Codex、Claudian 自动化是可选增强能力。
+需要 Python 3.10+。核心审计和检索脚本只依赖 Python 标准库；Zotero、Claudian、Gemini、Codex 不影响最小检索路径，但它们是完整本地领域专家工作流需要逐步配置的核心层。
 如果 `audit_kb.py` 和 `kb_search.py` 能运行，说明本地知识层和检索入口可用。
 
 ## Obsidian 设置
@@ -43,7 +43,7 @@ Claudian 的公开配置在 `.claudian/claudian-settings.json`，已经清空个
 
 ## Zotero 设置
 
-Zotero 是可选增强能力。没有 Zotero 时仍可浏览、检索和手工维护笔记。
+Zotero 不是浏览和 `kb_search.py` 的前置条件；但它是完整论文导入、PDF 对照阅读、附件同步和自动化写回的核心层。没有 Zotero 时仍可浏览、检索和手工维护笔记。
 
 启用 Zotero 自动导入时：
 
