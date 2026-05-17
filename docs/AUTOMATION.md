@@ -15,6 +15,18 @@
 
 建议按层级逐步启用。不要第一次使用就直接注册计划任务。
 
+## 默认定时节奏
+
+完整本地领域专家工作流默认拆成三个计划任务，而不是把所有事情塞进一个脚本：
+
+| 默认时间 | 任务名 | 入口脚本 | 输出位置 | 边界 |
+| --- | --- | --- | --- | --- |
+| 每天 12:00 | `DailyArxivEmbodiedAIScout` | `.claude/scripts/run_daily_arxiv_task.ps1` | `projects/arxiv-daily/scheduled-task.log` | 负责 arXiv mirror sync、daily pipeline、Gemini greenhouse、OpenCode/DeepSeek battle 和质量审计；可能因为 Zotero/CLI/网络缺失返回 `partial`。 |
+| 每天 16:30 | `DailyCodexSeedReview` | `.claude/scripts/run_daily_codex_seed_review_task.ps1` | `projects/research-agenda/reviews/daily-codex-seed-review-task.log` 和 `YYYY-MM-DD-codex-seed-review.md` | 对当天或最近 7 天未审 seed 做 Codex 二审；不删除、不晋升、不声明 novelty。 |
+| 每周日 20:00 | `WeeklyResearchAgendaReview` | `.claude/scripts/run_weekly_agenda_review_task.ps1` | `projects/research-agenda/reviews/weekly-agenda-review-task.log`、`YYYY-MM-DD-weekly-agenda-review.md`、`YYYY-MM-DD-weekly-top-tier-review.md` | 汇总一周 agenda 状态、审计结果和 top-tier pressure test；不会自动移动 idea 文件夹。 |
+
+推荐启用顺序：先完成 Level 0-4 的手动验证，再注册 12:00 每日任务；确认每天有 seed packet 后，再启用 16:30 Codex 二审；最后启用周日 20:00 周审。
+
 ## 0. 基础健康检查
 
 在仓库根目录运行：
@@ -296,7 +308,7 @@ opencode --version
 
 ## 10. Codex seed review
 
-Codex seed review 是完整 workflow 的二审层。它会读取每日 pipeline 生成的 seed packet，并输出 review 报告。没有 Codex 时可以先跳过，但这属于降级路径。
+Codex seed review 是完整 workflow 的二审层。它会读取每日 pipeline 生成的 seed packet、DeepSeek battle 报告和本地 evidence packet，并输出 review 报告。计划任务默认每天 16:30 执行；如果当天 pipeline 还没有完成，包装器会在最近 7 天内 catch up 最新未审 run。没有 Codex 时可以先跳过，但这属于降级路径。
 
 先只准备 packet，不调用 Codex：
 
@@ -321,6 +333,14 @@ codex --version
 ## 11. Windows 计划任务
 
 所有注册脚本都支持 `-DryRun`。先 dry run，再注册。默认 dry-run 输出会把当前 Windows 用户名和本机绝对路径替换成占位符；如果你在自己机器上私下排障，可以追加 `-ShowLocalPaths`。
+
+默认节奏：
+
+| 任务 | 默认触发 | 注册脚本 |
+| --- | --- | --- |
+| `DailyArxivEmbodiedAIScout` | 每天 12:00 | `register_daily_arxiv_task.ps1` |
+| `DailyCodexSeedReview` | 每天 16:30 | `register_daily_codex_seed_review_task.ps1` |
+| `WeeklyResearchAgendaReview` | 每周日 20:00 | `register_weekly_agenda_review_task.ps1` |
 
 ### 每日 arXiv scout
 
@@ -352,6 +372,12 @@ powershell -ExecutionPolicy Bypass -File .claude/scripts/register_daily_codex_se
 
 默认任务名：`DailyCodexSeedReview`
 
+手动触发：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .claude/scripts/run_daily_codex_seed_review_task.ps1
+```
+
 日志：
 
 ```powershell
@@ -366,6 +392,19 @@ powershell -ExecutionPolicy Bypass -File .claude/scripts/register_weekly_agenda_
 ```
 
 默认任务名：`WeeklyResearchAgendaReview`
+
+手动触发：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .claude/scripts/run_weekly_agenda_review_task.ps1
+```
+
+日志和周报：
+
+```powershell
+Get-Content -Encoding UTF8 projects/research-agenda/reviews/weekly-agenda-review-task.log -Tail 100
+Get-ChildItem projects/research-agenda/reviews/*weekly*review* | Sort-Object LastWriteTime -Descending | Select-Object -First 10
+```
 
 ## 12. 检查和删除计划任务
 

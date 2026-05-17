@@ -58,6 +58,14 @@ Zotero 不是浏览和 `kb_search.py` 的前置条件；但它是完整论文导
 
 daily arXiv 主路线是 local SQLite metadata mirror first：先用 arXiv OAI-PMH 同步 metadata，再用 `mirror-first` 从本地库排序候选。公开仓库不自带 SQLite mirror，也不保存 PDF 全文；Search API 只作为 fallback / troubleshooting。
 
+完整本机节奏默认是：
+
+| 时间 | 任务 | 作用 |
+| --- | --- | --- |
+| 每天 12:00 | `DailyArxivEmbodiedAIScout` | 同步 arXiv mirror，跑每日候选、Zotero/Claudian/Gemini/OpenCode-DeepSeek 和质量审计。 |
+| 每天 16:30 | `DailyCodexSeedReview` | 对当天 seed packet、DeepSeek battle 和本地 evidence 做 Codex 二审。 |
+| 每周日 20:00 | `WeeklyResearchAgendaReview` | 汇总一周 agenda、审计和 top-tier idea pressure test，生成周报。 |
+
 第一次启用自动化时建议按这个顺序：
 
 ```powershell
@@ -67,6 +75,8 @@ python .claude/scripts/arxiv_metadata_sync.py --incremental --days-back 14 --max
 python .claude/scripts/daily_arxiv_pipeline.py --dry-run --source mirror-first --max-candidates 30 --days-back 14 --idea-mode template --skip-read
 python .claude/scripts/zotero_import.py --preflight --json
 powershell -ExecutionPolicy Bypass -File .claude/scripts/register_daily_arxiv_task.ps1 -DryRun -Time "12:00"
+powershell -ExecutionPolicy Bypass -File .claude/scripts/register_daily_codex_seed_review_task.ps1 -DryRun -Time "16:30"
+powershell -ExecutionPolicy Bypass -File .claude/scripts/register_weekly_agenda_review_task.ps1 -DryRun -DayOfWeek Sunday -Time "20:00"
 ```
 
 `--status` 在 fresh clone 中可能显示 `missing=true`，这是正常的；`--incremental --max-pages 1` 会建立一个小规模本地 SQLite mirror，文件位于 `projects/arxiv-daily/metadata/` 且默认不提交 Git。确认 dry run、Zotero preflight 和计划任务路径都正确后，再注册真实任务。

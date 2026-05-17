@@ -149,6 +149,14 @@ python .claude/scripts/arxiv_metadata_sync.py --status
 
 ## 7. Windows Scheduled Tasks
 
+完整定时节奏有三个任务：
+
+| 任务 | 默认时间 | 验收信号 |
+| --- | --- | --- |
+| `DailyArxivEmbodiedAIScout` | 每天 12:00 | `projects/arxiv-daily/scheduled-task.log` 有当天 START/END；daily pipeline 没有被 Search API first-run 误导。 |
+| `DailyCodexSeedReview` | 每天 16:30 | `projects/research-agenda/reviews/daily-codex-seed-review-task.log` 有 PREP/WRAP；有 `YYYY-MM-DD-codex-seed-review.md` 或清楚的 waiting/partial 状态。 |
+| `WeeklyResearchAgendaReview` | 每周日 20:00 | `weekly-agenda-review-task.log` 有 END；生成 `YYYY-MM-DD-weekly-agenda-review.md` 和 top-tier review artifacts。 |
+
 先 dry run：
 
 ```powershell

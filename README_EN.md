@@ -69,6 +69,14 @@ Setup entry points:
 
 ## Running it every day on your computer
 
+The full automation is not a single `daily_arxiv_pipeline.py` call. The local cadence has three layers: daily paper discovery and reading, same-day Codex review, and weekly agenda review.
+
+| Default time | Windows task | Wrapper | Purpose |
+| --- | --- | --- | --- |
+| Daily 12:00 | `DailyArxivEmbodiedAIScout` | `run_daily_arxiv_task.ps1` | Refresh the arXiv OAI-PMH metadata mirror, run the mirror-first daily pipeline, trigger the Zotero / Claudian / Gemini / OpenCode-DeepSeek chain, and write the daily quality audit. |
+| Daily 16:30 | `DailyCodexSeedReview` | `run_daily_codex_seed_review_task.ps1` | Review today's seed packet, DeepSeek battle, and evidence packet with Codex. It can catch up to the newest unreviewed run from the last 7 days and does not promote ideas automatically. |
+| Sunday 20:00 | `WeeklyResearchAgendaReview` | `run_weekly_agenda_review_task.ps1` | Summarize the week's research-agenda state, quality audit, and top-tier idea pressure test. It writes review artifacts but does not move idea folders automatically. |
+
 `daily_arxiv_pipeline.py` is the daily arXiv workflow engine, but it is not the recommended Windows scheduler entry point. For a daily local run, use the wrapper and registration scripts:
 
 ```text
@@ -92,7 +100,22 @@ powershell -ExecutionPolicy Bypass -File .claude/scripts/register_daily_arxiv_ta
 Get-ScheduledTask -TaskName DailyArxivEmbodiedAIScout
 ```
 
-Codex seed review, weekly agenda review, log inspection, and task removal commands are documented in the `Windows Task Scheduler` section of [docs/AUTOMATION.md](docs/AUTOMATION.md).
+Codex review and the weekly agenda review should also be dry-run before registration:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .claude/scripts/register_daily_codex_seed_review_task.ps1 -DryRun -Time "16:30"
+powershell -ExecutionPolicy Bypass -File .claude/scripts/register_weekly_agenda_review_task.ps1 -DryRun -DayOfWeek Sunday -Time "20:00"
+```
+
+Log entry points:
+
+```powershell
+Get-Content -Encoding UTF8 projects/arxiv-daily/scheduled-task.log -Tail 80
+Get-Content -Encoding UTF8 projects/research-agenda/reviews/daily-codex-seed-review-task.log -Tail 80
+Get-Content -Encoding UTF8 projects/research-agenda/reviews/weekly-agenda-review-task.log -Tail 80
+```
+
+Full registration, task removal, fallback behavior, and `partial` status handling are documented in the `Windows Task Scheduler` section of [docs/AUTOMATION.md](docs/AUTOMATION.md).
 
 ## Local Domain Expert Model
 

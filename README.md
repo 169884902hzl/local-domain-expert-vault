@@ -70,7 +70,15 @@ python .claude/scripts/kb_search.py "diffusion policy DLO" --limit 5
 
 ## 电脑上怎么每天自动跑
 
-`daily_arxiv_pipeline.py` 是每日 arXiv 工作流的核心引擎，但它不是推荐的 Windows 定时任务入口。电脑上每天自动跑时，建议走这条链路：
+完整自动化不是只跑一次 `daily_arxiv_pipeline.py`。本机默认节奏分成三段：中午做论文发现和精读，下午做 Codex 二审，周末做一周复盘。
+
+| 默认时间 | Windows 任务名 | 包装脚本 | 做什么 |
+| --- | --- | --- | --- |
+| 每天 12:00 | `DailyArxivEmbodiedAIScout` | `run_daily_arxiv_task.ps1` | 增量同步 arXiv OAI-PMH metadata mirror，运行 mirror-first daily pipeline，触发 Zotero/Claudian/Gemini/OpenCode-DeepSeek 链路，并写每日质量审计。 |
+| 每天 16:30 | `DailyCodexSeedReview` | `run_daily_codex_seed_review_task.ps1` | 读取当天或最近 7 天未审的 seed packet、DeepSeek battle 和 evidence packet，生成 Codex 二审报告；不会自动把 idea 晋升成结论。 |
+| 每周日 20:00 | `WeeklyResearchAgendaReview` | `run_weekly_agenda_review_task.ps1` | 汇总一周 research agenda 状态、质量审计和 top-tier idea pressure test，输出周报；不会自动移动 idea 文件夹。 |
+
+`daily_arxiv_pipeline.py` 是每日 arXiv 工作流的核心引擎，但它不是推荐的 Windows 定时任务入口。电脑上每天自动跑时，建议走包装器：
 
 ```text
 Windows Task Scheduler
@@ -93,7 +101,22 @@ powershell -ExecutionPolicy Bypass -File .claude/scripts/register_daily_arxiv_ta
 Get-ScheduledTask -TaskName DailyArxivEmbodiedAIScout
 ```
 
-完整的 Codex seed review、weekly agenda review、日志查看和删除任务命令见 [docs/AUTOMATION.md](docs/AUTOMATION.md) 的 `Windows 计划任务` 小节。
+Codex 二审和每周复盘也建议先 dry-run 再注册：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .claude/scripts/register_daily_codex_seed_review_task.ps1 -DryRun -Time "16:30"
+powershell -ExecutionPolicy Bypass -File .claude/scripts/register_weekly_agenda_review_task.ps1 -DryRun -DayOfWeek Sunday -Time "20:00"
+```
+
+日志入口：
+
+```powershell
+Get-Content -Encoding UTF8 projects/arxiv-daily/scheduled-task.log -Tail 80
+Get-Content -Encoding UTF8 projects/research-agenda/reviews/daily-codex-seed-review-task.log -Tail 80
+Get-Content -Encoding UTF8 projects/research-agenda/reviews/weekly-agenda-review-task.log -Tail 80
+```
+
+完整注册、删除任务、fallback 和 `partial` 解释见 [docs/AUTOMATION.md](docs/AUTOMATION.md) 的 `Windows 计划任务` 小节。
 
 ## 本地领域专家如何工作
 
