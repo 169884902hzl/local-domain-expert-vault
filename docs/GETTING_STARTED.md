@@ -7,9 +7,9 @@
 - 用 Obsidian 浏览 `wiki/` 知识网络。
 - 用本地检索脚本回答领域问题。
 - 用模板新增文献、概念和项目笔记。
-- 在完整配置完成后接入 Zotero、Claudian、Gemini 与 Codex 自动流程。
+- 在完整配置完成后接入 Zotero、Claudian、Gemini、OpenCode/DeepSeek 与 Codex 自动流程。
 
-如果你不确定自己应该配置到哪一层，先看 [DEPLOYMENT_CHECKLIST.md](DEPLOYMENT_CHECKLIST.md)。它把浏览、检索、Zotero/PDF、arXiv mirror、计划任务、Claudian/Gemini/Codex 分成可验证层级。
+如果你不确定自己应该配置到哪一层，先看 [DEPLOYMENT_CHECKLIST.md](DEPLOYMENT_CHECKLIST.md)。它把浏览、检索、Zotero/PDF、arXiv mirror、计划任务、Claudian/Gemini/OpenCode DeepSeek/Codex 分成可验证层级。
 
 ## 最小可用路径
 
@@ -21,7 +21,7 @@ python .claude/scripts/audit_kb.py
 python .claude/scripts/kb_search.py "VLM robot manipulation" --limit 5
 ```
 
-需要 Python 3.10+。核心审计和检索脚本只依赖 Python 标准库；Zotero、Claudian、Gemini、Codex 不影响最小检索路径，但它们是完整本地领域专家工作流需要逐步配置的核心层。
+需要 Python 3.10+。核心审计和检索脚本只依赖 Python 标准库；Zotero、Claudian、Gemini、OpenCode/DeepSeek、Codex 不影响最小检索路径，但它们是完整本地领域专家工作流需要逐步配置的核心层。
 如果 `audit_kb.py` 和 `kb_search.py` 能运行，说明本地知识层和检索入口可用。
 
 ## Obsidian 设置
@@ -54,7 +54,7 @@ Zotero 不是浏览和 `kb_search.py` 的前置条件；但它是完整论文导
 
 ## 自动化设置
 
-每日 arXiv scout、Gemini idea 生成、Codex seed review 和 Windows 计划任务的完整说明见 [AUTOMATION.md](AUTOMATION.md)。
+每日 arXiv scout、Gemini idea 生成、OpenCode/DeepSeek battle、Codex seed review 和 Windows 计划任务的完整说明见 [AUTOMATION.md](AUTOMATION.md)。
 
 daily arXiv 主路线是 local SQLite metadata mirror first：先用 arXiv OAI-PMH 同步 metadata，再用 `mirror-first` 从本地库排序候选。公开仓库不自带 SQLite mirror，也不保存 PDF 全文；Search API 只作为 fallback / troubleshooting。
 

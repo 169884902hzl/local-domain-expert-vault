@@ -10,7 +10,7 @@
 | Level 1 | arXiv metadata mirror smoke test | Python + 网络 | 想确认 OAI-PMH metadata 同步入口可用 |
 | Level 2 | mirror-first daily pipeline dry-run | Python + metadata mirror | 想看每日候选但不写库 |
 | Level 3 | optional Search API fallback troubleshooting | Python + 网络 | 只在 mirror 缺失、过旧或候选不足时排错 |
-| Level 4 | Zotero + Claudian + Gemini + Codex full workflow | Zotero / Claudian / Gemini / Codex 逐步配置 | 想复现完整导入、精读、idea 发散、二审 |
+| Level 4 | Zotero + Claudian + Gemini + DeepSeek + Codex full workflow | Zotero / Claudian / Gemini / OpenCode DeepSeek / Codex 逐步配置 | 想复现完整导入、精读、idea 发散、敌对审稿、二审 |
 | Level 5 | Windows 定时运行 | Windows Task Scheduler | 想每天自动跑 |
 
 建议按层级逐步启用。不要第一次使用就直接注册计划任务。
@@ -30,7 +30,7 @@ python .claude/scripts/kb_search.py "VLM robot manipulation" --limit 5
 - `audit_kb.py` 输出 `topic_issues=0 concept_issues=0 entity_issues=0`。
 - `kb_search.py` 返回 `wiki/topics/...` 等本地路径。
 
-这一步不需要 Zotero、Gemini、Codex 或 API key。
+这一步不需要 Zotero、Gemini、OpenCode/DeepSeek、Codex 或 API key。
 
 ## 1. arXiv metadata mirror smoke test
 
@@ -251,7 +251,7 @@ $env:LOCAL_FIRST_VAULT_ALLOW_DANGEROUS_CLAUDE = "1"
 
 ## 8. Gemini CLI
 
-Gemini 是完整 workflow 的发散 idea 层。基础 smoke test 可以用 template mode 降级运行，但要复现本 vault 的研究 idea 生成链路，应先确认 CLI 可用：
+Gemini 是完整 workflow 的发散 idea 层。我们把它放在 greenhouse 位置，是为了生成高方差、跨论文、机制级的 raw candidates；这类输出更活跃，也更容易产生 hallucination 或 A+B 拼接，所以它不能直接写成结论。基础 smoke test 可以用 template mode 降级运行，但要复现本 vault 的研究 idea 生成链路，应先确认 CLI 可用：
 
 ```powershell
 gemini --version
@@ -272,7 +272,29 @@ python .claude/scripts/gemini_idea_probe.py --timeout 1200
 --idea-mode template
 ```
 
-## 9. Codex seed review
+## 9. OpenCode / DeepSeek adversarial battle
+
+OpenCode / DeepSeek 是 Gemini greenhouse 后的敌对审稿层。源码里由 `.claude/scripts/run_model_debate.py` 调用 `opencode run`，默认模型 selector 是 `deepseek/deepseek-v4-pro(max)`。
+
+它的职责不是继续发散，而是攻击：
+
+- idea 是否只是 A+B 拼接；
+- 物理失败场景是否真实；
+- interface / optimization / loss placement 是否有新机制；
+- 最强 baseline 是否会直接杀死这个 idea；
+- lab-fit 是否匹配 Franka、FlexiTac、wrist camera、DLO、本地日志等条件。
+
+从 2026-05-14 起，`gemini-divergent` 的 daily idea stage 要算 clean success，必须有 Gemini-DeepSeek battle 成功。失败时 greenhouse candidates 仍会保留，但 daily idea 状态应是 `partial`。
+
+先确认 OpenCode 可用：
+
+```powershell
+opencode --version
+```
+
+如果你没有 OpenCode / DeepSeek，完整 daily idea 链路会降级为 `partial`；这不是 KB 或 arXiv mirror 损坏。
+
+## 10. Codex seed review
 
 Codex seed review 是完整 workflow 的二审层。它会读取每日 pipeline 生成的 seed packet，并输出 review 报告。没有 Codex 时可以先跳过，但这属于降级路径。
 
@@ -296,7 +318,7 @@ codex --version
 
 注意：当前包装器默认不绕过 Codex sandbox/approval。只有在你完全理解本机 CLI 权限边界时，才手动追加 `-DangerouslyBypassSandbox`。
 
-## 10. Windows 计划任务
+## 11. Windows 计划任务
 
 所有注册脚本都支持 `-DryRun`。先 dry run，再注册。默认 dry-run 输出会把当前 Windows 用户名和本机绝对路径替换成占位符；如果你在自己机器上私下排障，可以追加 `-ShowLocalPaths`。
 
@@ -345,7 +367,7 @@ powershell -ExecutionPolicy Bypass -File .claude/scripts/register_weekly_agenda_
 
 默认任务名：`WeeklyResearchAgendaReview`
 
-## 11. 检查和删除计划任务
+## 12. 检查和删除计划任务
 
 ```powershell
 Get-ScheduledTask -TaskName DailyArxivEmbodiedAIScout
@@ -362,7 +384,7 @@ Unregister-ScheduledTask -TaskName DailyCodexSeedReview -Confirm:$false
 Unregister-ScheduledTask -TaskName WeeklyResearchAgendaReview -Confirm:$false
 ```
 
-## 12. macOS/Linux 自动化边界
+## 13. macOS/Linux 自动化边界
 
 Python 检索、审计和 arXiv dry-run 可以在 macOS/Linux 上运行，但本仓库只提供 Windows Task Scheduler 注册脚本。非 Windows 用户可以把同等命令放入 `cron`、`systemd timer` 或自己的 CI runner；注意不要把 API key 写入仓库。
 
@@ -372,13 +394,13 @@ smoke-test cron 示例只作结构参考，不会写 Zotero 或 vault：
 0 12 * * * cd /path/to/local-domain-expert-vault && python3 .claude/scripts/arxiv_metadata_sync.py --incremental --days-back 60 --overlap-days 3 && python3 .claude/scripts/daily_arxiv_pipeline.py --dry-run --source mirror-first --max-candidates 30 --days-back 14 >> projects/arxiv-daily/cron.log 2>&1
 ```
 
-真实每日任务示例会写入本地 `projects/` 运行产物，并在你配置 Zotero / Claudian / Gemini 后继续执行导入、精读和 idea 生成：
+真实每日任务示例会写入本地 `projects/` 运行产物，并在你配置 Zotero / Claudian / Gemini / OpenCode DeepSeek 后继续执行导入、精读、idea 生成和敌对审稿：
 
 ```cron
 0 12 * * * cd /path/to/local-domain-expert-vault && python3 .claude/scripts/arxiv_metadata_sync.py --incremental --days-back 60 --overlap-days 3 && python3 .claude/scripts/daily_arxiv_pipeline.py --once --source mirror-first --idea-mode template --skip-read --max-candidates 40 --days-back 14 >> projects/arxiv-daily/cron.log 2>&1
 ```
 
-## 13. 状态解释
+## 14. 状态解释
 
 | 状态 | 含义 |
 | --- | --- |
@@ -390,7 +412,7 @@ smoke-test cron 示例只作结构参考，不会写 Zotero 或 vault：
 
 `partial` 不一定是坏状态。先读日志里的 `ERROR:` 行，再决定是否要配置缺失能力。
 
-## 14. 推荐启用顺序
+## 15. 推荐启用顺序
 
 1. `audit_kb.py`
 2. `kb_search.py`
@@ -402,9 +424,10 @@ smoke-test cron 示例只作结构参考，不会写 Zotero 或 vault：
 8. 单篇 `ingest_paper.py`
 9. 手动 `daily_arxiv_pipeline.py --once --source mirror-first --idea-mode template`
 10. Gemini CLI
-11. `run_daily_arxiv_task.ps1`
-12. `register_daily_arxiv_task.ps1`
-13. Codex seed review
-14. weekly agenda review
+11. OpenCode / DeepSeek battle
+12. `run_daily_arxiv_task.ps1`
+13. `register_daily_arxiv_task.ps1`
+14. Codex seed review
+15. weekly agenda review
 
-这样做的好处是每一步都有明确验收，不会把 Zotero、Gemini、Codex、计划任务的问题混在一起。
+这样做的好处是每一步都有明确验收，不会把 Zotero、Gemini、OpenCode/DeepSeek、Codex、计划任务的问题混在一起。

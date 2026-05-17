@@ -40,7 +40,9 @@ Rules:
 - Final success requires `audit_kb.py --strict-reading --strict-concepts` and `audit_research_agenda.py --json` to pass.
 - Scheduled-task health is separate from a one-off run; use `audit_scheduled_tasks.py --json` to verify XML, wrapper paths, logs, and Task Scheduler query status.
 - Do not use external web search beyond arXiv unless the user explicitly approves.
-- Gemini is a manual divergent-thinking side channel. Generate the prompt file from the long-term agenda context, but do not call Gemini automatically.
+- Gemini is the automatic divergent greenhouse layer when `--idea-mode gemini-divergent` is used. It generates raw candidates, not validated claims.
+- OpenCode / DeepSeek battle is mandatory for a clean Gemini-divergent daily idea stage. If it is missing or fails, report the idea stage as `partial` and preserve greenhouse artifacts.
+- Codex seed review is the second-pass reviewer over greenhouse, battle, and evidence packets; it must not auto-promote paper claims.
 - The daily output is an agenda delta, not a final idea list. Long-term ideas live under `projects/research-agenda/idea_bank/`.
 - If Claude or agenda update fails, do not fabricate high-quality ideas; report `partial` and keep evidence gaps visible.
 

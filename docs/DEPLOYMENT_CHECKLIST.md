@@ -12,9 +12,9 @@
 | Level 3 | 从 Zotero 导入论文 metadata | Zotero API key、user id、collection key，或本机 Zotero Connector API | `zotero_import.py --preflight --json` 没有 `errors` |
 | Level 4 | 使用 arXiv metadata mirror | 网络、本地 SQLite mirror | `arxiv_metadata_sync.py --status` 显示 `records_total > 0` |
 | Level 5 | 每日自动跑 | Windows Task Scheduler 或自定义 cron/systemd | dry-run 路径正确，真实任务产生日志 |
-| Level 6 | 完整 AI 工作流：Claudian / Gemini / Codex | 本机 CLI 登录、权限确认 | Claudian 命令、Gemini idea、Codex review 分别能单独跑 |
+| Level 6 | 完整 AI 工作流：Claudian / Gemini / DeepSeek / Codex | 本机 CLI 登录、权限确认 | Claudian 命令、Gemini idea、OpenCode DeepSeek battle、Codex review 分别能单独跑 |
 
-建议按层级逐步启用。不要第一次就同时配置 Zotero、Claudian、Gemini、Codex 和计划任务。
+建议按层级逐步启用。不要第一次就同时配置 Zotero、Claudian、Gemini、OpenCode/DeepSeek、Codex 和计划任务。
 
 ## 1. Fresh Clone Smoke Test
 
@@ -173,9 +173,9 @@ Get-Content -Encoding UTF8 projects/research-agenda/reviews/daily-codex-seed-rev
 
 如果任务没有执行，先检查 Windows 用户权限、当前工作目录、PowerShell ExecutionPolicy 和日志路径。
 
-## 8. Claudian / Gemini / Codex
+## 8. Claudian / Gemini / DeepSeek / Codex
 
-这些不是打开仓库和运行 `kb_search.py` 的前置条件，但它们是完整本地领域专家工作流的核心层：Claudian 负责精读和项目命令，Gemini 负责 idea 发散，Codex 负责 seed review。
+这些不是打开仓库和运行 `kb_search.py` 的前置条件，但它们是完整本地领域专家工作流的核心层：Claudian 负责 Obsidian 内问答、精读和项目命令；Claude Code / Claude CLI 是底层执行 worker；Gemini 负责 idea 发散；OpenCode / DeepSeek 负责敌对审稿；Codex 负责 seed review。
 
 最小顺序：
 
@@ -183,8 +183,9 @@ Get-Content -Encoding UTF8 projects/research-agenda/reviews/daily-codex-seed-rev
 2. 安装 Obsidian Claudian 插件。
 3. 在 Claudian 设置里选择本机 Claude/Codex CLI。
 4. 用 `permissionMode = normal` 起步。
-5. 先运行只读命令，例如 `/search-kb diffusion policy DLO`。
-6. 理解项目命令会读写哪些目录后，再启用更高权限。
+5. 如果要跑完整 idea battle，确认 `opencode --version` 可运行，并且 OpenCode provider 能调用 DeepSeek。
+6. 先运行只读命令，例如 `/search-kb diffusion policy DLO`。
+7. 理解项目命令会读写哪些目录后，再启用更高权限。
 
 没有这些 CLI 时，基础 vault、Zotero 导入、KB 检索和 arXiv mirror smoke test 仍然可用；但这只是降级路径，不是本仓库想展示的完整研究工作流。
 
@@ -200,7 +201,7 @@ Get-Content -Encoding UTF8 projects/research-agenda/reviews/daily-codex-seed-rev
 | PDF 对照阅读 | Paper Reading Workbench 能打开 Zotero item/PDF |
 | arXiv 自动化 | mirror status 有记录，daily dry-run 不再是 `mirror_missing` |
 | Windows 定时 | Task Scheduler 中有任务，日志按时间更新 |
-| AI 精读/idea | Claudian/Gemini/Codex 分别能单独跑，并且失败时有日志 |
+| AI 精读/idea | Claudian/Gemini/OpenCode DeepSeek/Codex 分别能单独跑，并且失败时有日志 |
 
 ## 10. 不要提交这些东西
 

@@ -23,7 +23,7 @@ Deterministic workflow:
    - Limitations: Known weaknesses
    - Key Takeaways: Insights relevant to our research (DLO manipulation, VLM-based control)
    - Idea Fuel: Engineering Pathology, Hidden Assumption, Fragile Interface, Strongest Baseline, Baseline Failure/Win Condition, Failure-to-Opportunity, Transfer Hook, Minimum No-hardware Micro-test
-     This section is for downstream Gemini/Codex idea generation. It should extract concrete failure modes and research openings, not generic inspiration. If the paper does not support a field, write `not_evidenced`.
+     This section feeds downstream Gemini greenhouse, OpenCode/DeepSeek battle, and Codex review. It should extract concrete failure modes and research openings, not generic inspiration. If the paper does not support a field, write `not_evidenced`.
    - 结构化提取: Problem, Method, Tasks, Sensors, Robot Setup, Metrics, Limitations, Evidence Notes
    - 本地引用关系: local [[paper]] links only when supported by the text
 5. Apply the completed analysis with:

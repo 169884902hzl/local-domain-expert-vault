@@ -17,7 +17,7 @@
 
 适合对象：需要长期追踪一个专业方向的研究生、PI / 实验室知识库维护者，以及希望把 LLM 变成“有本地文献记忆的领域专家”的研究者。
 
-当前公开版本：`v0.1.0`。这是首个可发行版本，覆盖本地浏览、知识库审计、`kb_search.py` 检索、Zotero/Obsidian 配置说明、Paper Reading Workbench、arXiv mirror-first 自动化文档和 Windows 计划任务入口。完整 AI 自动化仍需要使用者在本机配置 Zotero、Claudian / Claude Code、Gemini / Codex 和权限边界。
+当前公开版本：`v0.1.0`。这是首个可发行版本，覆盖本地浏览、知识库审计、`kb_search.py` 检索、Zotero/Obsidian 配置说明、Paper Reading Workbench、arXiv mirror-first 自动化文档和 Windows 计划任务入口。完整 AI 自动化仍需要使用者在本机配置 Zotero、Claudian / Claude Code、Gemini、OpenCode / DeepSeek、Codex 和权限边界。
 
 ## 它是什么 / 不是什么
 
@@ -38,7 +38,7 @@
 
 ## Clone 后能直接做什么
 
-无需 Zotero、Claudian、Gemini 或 Codex，你可以直接运行：
+无需 Zotero、Claudian、Gemini、OpenCode / DeepSeek 或 Codex，你可以直接运行：
 
 ```powershell
 python .claude/scripts/audit_kb.py
@@ -55,8 +55,9 @@ python .claude/scripts/kb_search.py "diffusion policy DLO" --limit 5
 | 从 Obsidian 精读笔记回跳 Zotero item / PDF | Zotero Desktop、PDF 附件、Paper Reading Workbench |
 | Claudian / Claude Code 精读、比较、问答 | 完整本地领域专家工作流的核心层；需要本机 CLI、模型账号、权限确认 |
 | Gemini idea divergence | 完整 idea 生成链路的发散层；需要 Gemini CLI 登录 |
+| OpenCode / DeepSeek adversarial battle | Gemini greenhouse 后的强攻击层；需要 OpenCode CLI 和 DeepSeek provider |
 | Codex seed review | 完整自动化里的二审层；需要 Codex CLI 登录 |
-| daily arXiv scout 和 idea seed | 本地 arXiv SQLite metadata mirror、网络；完整模式需要 Zotero / Claudian / Gemini / Codex |
+| daily arXiv scout 和 idea seed | 本地 arXiv SQLite metadata mirror、网络；完整模式需要 Zotero / Claudian / Gemini / DeepSeek / Codex |
 | PDF 同步 | Zotero 官方存储、WebDAV 或 linked attachment；仓库不提交 PDF |
 
 详细配置入口：
@@ -104,6 +105,20 @@ Get-ScheduledTask -TaskName DailyArxivEmbodiedAIScout
 - **知识网络**：论文连接到概念页和实体页，后续问题可以沿论文、方法、作者、数据集和系统追踪。
 - **假设生成**：research-agenda 只生成可审阅 idea seed，不把局部证据包装成已验证创新。
 - **实验草案**：idea seed 会被展开为 baseline、关键区分实验、no-hardware pilot、失败条件和人工 review 字段，让发散想法继续落到可讨论的研究计划。
+
+## 模型分工
+
+这套 workflow 不是把同一个问题轮流丢给多个模型，而是把模型放在不同的研究角色里：
+
+| 层 | 角色 | 为什么需要 |
+| --- | --- | --- |
+| Claudian | Obsidian 里的交互层和工作流路由器 | 你在 vault 里提问、精读、比较论文时，通过 Claudian 把请求路由到 `.claude/commands/` 和本地脚本。 |
+| Claude Code / Claude CLI | 脚本执行 worker | `daily_arxiv_pipeline.py` 可以调用 Claude CLI 执行 `/read-paper` 风格的精读；公开版默认不跳过权限，高权限需要显式 opt-in。 |
+| Gemini CLI | 高方差 idea greenhouse | 我们把 Gemini 放在发散层，不是让它下结论，而是利用它更活跃、更容易跳出常规组合的输出风格生成 raw candidates。这个位置天然有更高 hallucination 风险，所以输出只进入 greenhouse，必须被证据、baseline 和 reviewer gate 约束。 |
+| OpenCode / DeepSeek | 对 Gemini idea 做敌对审稿 | `run_model_debate.py` 让 DeepSeek 扮演 hostile reviewer，专门攻击 A+B 拼接、弱机制、最强 baseline kill、lab-fit 风险；从 2026-05-14 起，Gemini divergent 日常 idea 要 clean success，必须通过这个 battle。 |
+| Codex / GPT | 结构化二审和工程化审计 | Codex 读取 greenhouse、DeepSeek battle 和本地 evidence packet，给出 accept / rewrite / park / reject-with-rescue；它不负责自由发散，也不自动把 idea 晋升成论文结论。 |
+
+所以完整链路是：`Claudian deep reading -> Gemini greenhouse -> OpenCode/DeepSeek adversarial battle -> Codex/GPT second-pass review -> human approval`。
 
 ## 工作流概览
 
@@ -231,7 +246,7 @@ python .claude/scripts/arxiv_metadata_sync.py --incremental --days-back 14 --max
 python .claude/scripts/daily_arxiv_pipeline.py --dry-run --source mirror-first --max-candidates 30 --days-back 14 --idea-mode template --skip-read
 ```
 
-再按 [docs/AUTOMATION.md](docs/AUTOMATION.md) 配置 Zotero、Gemini/Codex 和 Windows 计划任务。
+再按 [docs/AUTOMATION.md](docs/AUTOMATION.md) 配置 Zotero、Gemini、OpenCode/DeepSeek、Codex 和 Windows 计划任务。
 
 ## 仓库状态
 
@@ -244,7 +259,7 @@ python .claude/scripts/daily_arxiv_pipeline.py --dry-run --source mirror-first -
 | Claudian 配置 | 已包含脱敏配置；CLI 路径和账号需用户本机配置 |
 | Zotero 导入 | 需要用户自己的 Zotero 或 Zotero API 配置 |
 | 每日 arXiv 自动化 | 需要网络；写入 Zotero 时需要 Zotero 配置 |
-| Gemini / Codex 自动化 | 完整工作流的 idea 发散和二审层；需要用户本机 CLI 已登录 |
+| Gemini / DeepSeek / Codex 自动化 | 完整工作流的 idea 发散、敌对审稿和二审层；需要用户本机 CLI 已登录 |
 | API key | 不包含在仓库中，必须由使用者自己配置 |
 
 ## 目录结构
@@ -296,7 +311,7 @@ python3 .claude/scripts/kb_search.py "diffusion policy DLO" --limit 5
 - PowerShell 5+ 或 PowerShell 7+（Windows 自动化脚本需要）
 - Obsidian 可选，但推荐安装
 
-基础审计和检索脚本只依赖 Python 标准库。你不配置 Zotero、不安装 Gemini、不登录 Codex，也能浏览 `wiki/`、运行 `audit_kb.py` 和 `kb_search.py`。
+基础审计和检索脚本只依赖 Python 标准库。你不配置 Zotero、不安装 Gemini、不配置 OpenCode/DeepSeek、不登录 Codex，也能浏览 `wiki/`、运行 `audit_kb.py` 和 `kb_search.py`。
 
 ## Obsidian 设置
 
@@ -472,7 +487,12 @@ Zotero Desktop 里对应的文件同步设置如下，展示 WebDAV 同步方式
 
 ## Claudian / Claude Code 工作流
 
-如果你安装了 Claudian 或使用 Claude Code，可以直接调用项目命令：
+这里有一个容易混淆的边界：
+
+- **Claudian** 是 Obsidian 里的插件和交互入口。你在 Obsidian 里问答、调用 `/search-kb`、`/read-paper`、`/compare-papers`，走的是 Claudian UI 和 `.claudian/claudian-settings.json` 里的 vault 规则。
+- **Claude Code / Claude CLI** 是底层执行 worker。它可以被 Claudian 调用，也可以被 `.claude/scripts/daily_arxiv_pipeline.py` 这类自动化脚本调用，用来执行精读、文件更新和项目命令。
+
+如果你安装了 Claudian，或直接在终端使用 Claude Code，可以调用同一套项目命令：
 
 | 命令 | 用途 |
 | --- | --- |
@@ -534,7 +554,7 @@ python .claude/scripts/daily_arxiv_pipeline.py --dry-run --source mirror-first -
 python .claude/scripts/daily_arxiv_pipeline.py --once --source mirror-first --idea-mode template --skip-read --max-candidates 40 --days-back 14
 ```
 
-如果你已经配置 Zotero、Claudian 和 Gemini CLI，可以使用更完整的模式：
+如果你已经配置 Zotero、Claudian、Gemini CLI 和 OpenCode / DeepSeek，可以使用更完整的模式：
 
 ```powershell
 python .claude/scripts/daily_arxiv_pipeline.py `
@@ -565,11 +585,12 @@ powershell -ExecutionPolicy Bypass -File .claude/scripts/run_daily_arxiv_task.ps
 
 1. 通过 OAI-PMH 增量同步 arXiv `cs/stat` metadata mirror。
 2. 运行 `daily_arxiv_pipeline.py --once --source mirror-first`。
-3. 使用 Gemini divergent idea 生成。
-4. 写入每日日志。
-5. 运行自动化质量审计。
+3. 使用 Gemini divergent idea 生成 raw greenhouse candidates。
+4. 使用 OpenCode / DeepSeek 对 greenhouse candidates 做 adversarial battle。
+5. 写入每日日志。
+6. 运行自动化质量审计。
 
-注意：包装器默认会调用 Gemini CLI，并尝试 Zotero/Claudian 路径。没有相关配置时，运行结果可能是 `partial`，这不等于基础 vault 坏了。
+注意：包装器默认会调用 Gemini CLI 和 OpenCode / DeepSeek，并尝试 Zotero/Claudian 路径。没有相关配置时，运行结果可能是 `partial`，这不等于基础 vault 坏了。
 
 ### 4. 注册 Windows 计划任务
 
@@ -612,12 +633,14 @@ Unregister-ScheduledTask -TaskName WeeklyResearchAgendaReview -Confirm:$false
 | --- | --- | --- |
 | Zotero Desktop | 本机读取 item metadata 和 fulltext | PDF 对照阅读和本机 fulltext 路径需要 |
 | Zotero Web API | 写入 Zotero 或无桌面端时同步 | 自动导入/写回 Zotero 需要 |
-| Claudian / Claude Code | 精读论文、执行项目命令 | 核心层 |
+| Claudian | Obsidian 内问答、精读、比较和命令路由 | 核心交互层 |
+| Claude Code / Claude CLI | 自动化脚本中的精读和文件执行 worker | 核心执行层 |
 | Gemini CLI | 发散 research idea、图谱/翻译等流程 | 核心 idea 层 |
+| OpenCode / DeepSeek CLI | 对 Gemini greenhouse 做 mandatory adversarial battle | 核心攻击层 |
 | Codex CLI | 对每日 seed 做二次审查 | 核心 review 层 |
-| OpenCode/DeepSeek CLI | 模型辩论和 idea refinement 的扩展项 | 可替换/扩展 |
+| OpenCode/DeepSeek 之外的模型 | 额外模型辩论和 idea refinement | 可替换/扩展 |
 
-基础浏览和本地检索可以不配置这些 CLI；但如果要复现本仓库真正的“本地领域专家”闭环，建议按 Zotero -> Claudian -> arXiv mirror -> Gemini -> Codex 的顺序逐步启用。不要一开始就把所有自动化打开。
+基础浏览和本地检索可以不配置这些 CLI；但如果要复现本仓库真正的“本地领域专家”闭环，建议按 Zotero -> Claudian/Claude Code -> arXiv mirror -> Gemini -> OpenCode/DeepSeek -> Codex 的顺序逐步启用。不要一开始就把所有自动化打开。
 
 ## 常见问题
 
@@ -654,7 +677,7 @@ Get-Content -Encoding UTF8 projects/research-agenda/reviews/daily-codex-seed-rev
 
 ### 自动化返回 `partial`
 
-`partial` 通常表示完整工作流中的某个 AI / Zotero / 网络层缺少凭据、CLI 或运行条件，而不是整个 vault 不可用。查看运行日志中的 `ERROR:` 行，先区分是 Zotero、Claudian、Gemini、Codex、arXiv 网络还是精读步骤失败。
+`partial` 通常表示完整工作流中的某个 AI / Zotero / 网络层缺少凭据、CLI 或运行条件，而不是整个 vault 不可用。查看运行日志中的 `ERROR:` 行，先区分是 Zotero、Claudian、Claude Code、Gemini、OpenCode / DeepSeek、Codex、arXiv 网络还是精读步骤失败。
 
 ## 安全和发布边界
 

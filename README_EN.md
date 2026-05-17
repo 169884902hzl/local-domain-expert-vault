@@ -17,7 +17,7 @@ The public vault uses robotic manipulation as its example domain, especially DLO
 
 It is useful for graduate students, PI/lab knowledge-base maintainers, and researchers who want LLM assistance to behave more like a local domain expert grounded in their own literature corpus.
 
-Current public version: `v0.1.0`. This first release covers local browsing, knowledge-base audits, `kb_search.py` retrieval, Zotero/Obsidian setup documentation, Paper Reading Workbench, arXiv mirror-first automation docs, and the Windows scheduled-task entry point. Full AI automation still requires local Zotero, Claudian / Claude Code, Gemini / Codex, and explicit permission configuration.
+Current public version: `v0.1.0`. This first release covers local browsing, knowledge-base audits, `kb_search.py` retrieval, Zotero/Obsidian setup documentation, Paper Reading Workbench, arXiv mirror-first automation docs, and the Windows scheduled-task entry point. Full AI automation still requires local Zotero, Claudian / Claude Code, Gemini, OpenCode / DeepSeek, Codex, and explicit permission configuration.
 
 ## What this is / is not
 
@@ -38,7 +38,7 @@ This is not:
 
 ## What works immediately after cloning
 
-Without Zotero, Claudian, Gemini, or Codex, you can run:
+Without Zotero, Claudian, Gemini, OpenCode / DeepSeek, or Codex, you can run:
 
 ```powershell
 python .claude/scripts/audit_kb.py
@@ -55,8 +55,9 @@ These commands validate the local knowledge structure and return evidence paths 
 | Jumping from Obsidian notes to Zotero item / PDF | Zotero Desktop, PDF attachment, Paper Reading Workbench |
 | Claudian / Claude Code reading and QA commands | Core layer of the full local domain-expert workflow; local CLI, model account, explicit permission choices |
 | Gemini idea divergence | Core idea-divergence layer; logged-in Gemini CLI |
+| OpenCode / DeepSeek adversarial battle | Mandatory adversarial layer after Gemini greenhouse; OpenCode CLI and DeepSeek provider |
 | Codex seed review | Core review layer; logged-in Codex CLI |
-| Daily arXiv scouting and idea seeds | Local arXiv SQLite metadata mirror and network; full mode needs Zotero / Claudian / Gemini / Codex |
+| Daily arXiv scouting and idea seeds | Local arXiv SQLite metadata mirror and network; full mode needs Zotero / Claudian / Gemini / DeepSeek / Codex |
 | PDF syncing | Zotero storage, WebDAV, or linked attachments; PDFs are not committed |
 
 Setup entry points:
@@ -103,6 +104,20 @@ The goal is not to replace the researcher. It is to let an LLM accumulate contex
 - **Knowledge network**: papers connect to concept pages and entity pages, so later questions can follow methods, authors, datasets, and systems.
 - **Hypothesis drafting**: research-agenda creates reviewable idea seeds; it does not treat local evidence as proven novelty.
 - **Experiment-plan drafts**: idea seeds can be expanded into baselines, discriminating experiments, no-hardware pilots, failure conditions, and human review fields.
+
+## Model Roles
+
+The workflow does not ask several models the same question and average their answers. Each model is placed in a different research role:
+
+| Layer | Role | Why it exists |
+| --- | --- | --- |
+| Claudian | Obsidian interaction and workflow routing | The researcher asks questions, starts deep reading, and compares papers inside Obsidian. Claudian routes those requests to `.claude/commands/` and local scripts. |
+| Claude Code / Claude CLI | Script execution worker | `daily_arxiv_pipeline.py` can invoke Claude CLI for `/read-paper` style deep reading and vault edits. Public defaults do not bypass permissions; dangerous modes are explicit opt-in. |
+| Gemini CLI | High-variance idea greenhouse | Gemini is used for divergence, not validation. Its broader and more speculative style is useful for raw candidates, but the hallucination risk is contained by evidence, baseline, and reviewer gates. |
+| OpenCode / DeepSeek | Adversarial reviewer for Gemini ideas | `run_model_debate.py` makes DeepSeek attack weak mechanisms, A+B combinations, strongest baseline failures, and lab-fit risks. Since 2026-05-14, clean daily idea success requires this battle. |
+| Codex / GPT | Structured second-pass reviewer | Codex reads the greenhouse output, DeepSeek battle, and local evidence packet, then classifies candidates as accept, rewrite, park, or reject-with-rescue. It does not auto-promote paper claims. |
+
+The full loop is: `Claudian deep reading -> Gemini greenhouse -> OpenCode/DeepSeek adversarial battle -> Codex/GPT second-pass review -> human approval`.
 
 ## What Problem It Solves
 
@@ -195,7 +210,8 @@ The base vault only needs Python for local audit and search. Extra integrations 
 | CSTCloud WebDAV or another storage route | Syncing Zotero stored attachments |
 | Claudian / Claude Code | AI-assisted deep reading and project commands |
 | Gemini CLI | Divergent research idea generation |
-| Codex CLI | Optional second-pass seed review |
+| OpenCode / DeepSeek CLI | Mandatory adversarial battle for Gemini greenhouse runs |
+| Codex CLI | Second-pass seed review |
 
 Paper Reading Workbench is bundled and enabled in the public vault. Open a `wiki/topics/*.md` note with `zotero_key`, then run `Paper Reading Workbench: Open paper reading workbench for current note`. The plugin queries the local Zotero Connector API, creates a `projects/reading-workbench/<ZOTERO_KEY>-zotero-source.md` source note, and provides links back to the Zotero item, Zotero PDF attachment, and arXiv PDF fallback. Zotero Desktop must be open, and the Zotero item must already have a stored or linked PDF attachment. The plugin does not copy PDFs into the vault. It is local executable Obsidian plugin code; translation and diagram actions spawn the local Python helper scripts only when you click those actions.
 
@@ -235,11 +251,16 @@ See [docs/ZOTERO_STORAGE.md](docs/ZOTERO_STORAGE.md) for details.
 
 Claudian / Claude Code is not required for basic browsing or `kb_search.py`, but it is the core agent layer of the full local domain-expert workflow.
 
+Boundary:
+
+- **Claudian** is the Obsidian plugin and interaction layer. It routes vault questions, `/search-kb`, `/read-paper`, and `/compare-papers` through `.claudian/claudian-settings.json`, `.claude/commands/`, and local scripts.
+- **Claude Code / Claude CLI** is the execution worker. It can be called by Claudian or directly by automation scripts such as `daily_arxiv_pipeline.py`.
+
 Recommended public default:
 
 - Required MCP for basic browsing/search: none
 - Full automation: Zotero and arXiv access
-- Full idea/review loop: Gemini / Codex for divergent idea generation and review
+- Full idea/review loop: Gemini / OpenCode DeepSeek / Codex for divergent idea generation, adversarial battle, and review
 
 Project commands include:
 
