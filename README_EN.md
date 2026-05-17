@@ -1,8 +1,15 @@
 # Local-First Research Vault
 
+[![Smoke](https://github.com/169884902hzl/local-first-research-vault/actions/workflows/smoke.yml/badge.svg)](https://github.com/169884902hzl/local-first-research-vault/actions/workflows/smoke.yml)
+[![Release](https://img.shields.io/github/v/release/169884902hzl/local-first-research-vault?label=release)](https://github.com/169884902hzl/local-first-research-vault/releases)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](#what-works-immediately-after-cloning)
+
 > Turn Zotero / arXiv papers into a local domain expert: long-term literature memory, evidence-grounded answers, deep reading, research hypotheses, and reviewable experiment-plan drafts.
 
 [中文 README](README.md)
+
+Current public version: `v0.1.0`. This first release covers local browsing, knowledge-base audits, `kb_search.py` retrieval, Zotero/Obsidian setup documentation, Paper Reading Workbench, arXiv mirror-first automation docs, and the Windows scheduled-task entry point. Full AI automation still requires local Zotero, Claudian / Claude Code, Gemini / Codex, and explicit permission configuration.
 
 This is an Obsidian / Zotero vault template for researchers working with a specialized literature corpus. More precisely, it is a **local domain-expert vault**: instead of sending every question to a generic AI chat, it organizes the papers, concepts, entities, deep-reading reports, local retrieval, and research idea drafts of one field into traceable evidence.
 

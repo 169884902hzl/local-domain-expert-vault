@@ -1,8 +1,15 @@
 # Local-First Research Vault
 
+[![Smoke](https://github.com/169884902hzl/local-first-research-vault/actions/workflows/smoke.yml/badge.svg)](https://github.com/169884902hzl/local-first-research-vault/actions/workflows/smoke.yml)
+[![Release](https://img.shields.io/github/v/release/169884902hzl/local-first-research-vault?label=release)](https://github.com/169884902hzl/local-first-research-vault/releases)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](#clone-后能直接做什么)
+
 > 把 Zotero / arXiv 论文组织成一个本地领域专家：它有长期文献记忆，能按证据回答问题、精读论文、提出研究假设，并把想法推进到可审阅的实验草案。
 
 [English README](README_EN.md)
+
+当前公开版本：`v0.1.0`。这是首个可发行版本，覆盖本地浏览、知识库审计、`kb_search.py` 检索、Zotero/Obsidian 配置说明、Paper Reading Workbench、arXiv mirror-first 自动化文档和 Windows 计划任务入口。完整 AI 自动化仍需要使用者在本机配置 Zotero、Claudian / Claude Code、Gemini / Codex 和权限边界。
 
 这是一个面向领域研究者的 Obsidian / Zotero vault 模板。更准确地说，它是一个 **本地领域专家 vault**：不是把所有问题丢给泛用 AI，而是把一个专业方向的论文、概念、实体、精读报告、本地检索和研究 idea 草案组织成可追踪的判断依据。
 

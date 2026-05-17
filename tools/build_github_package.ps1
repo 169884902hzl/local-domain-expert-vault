@@ -198,6 +198,8 @@ foreach ($file in @(
     ".gitignore",
     ".gitattributes",
     "README.md",
+    "README_EN.md",
+    "CHANGELOG.md",
     "LICENSE",
     "AGENTS.md",
     "CLAUDE.md",
@@ -276,7 +278,7 @@ Source: local working copy (path omitted from public package)
 - templates/, SCHEMA.md, Dashboard.md, AGENTS.md, CLAUDE.md
 - stable workflow contracts: `projects/research-agenda/workflow-contracts/`
 - GitHub Actions smoke workflow: `.github/workflows/smoke.yml`
-- README.md, README_EN.md, LICENSE, docs/, docs/assets/, docs/examples/
+- README.md, README_EN.md, CHANGELOG.md, LICENSE, docs/, docs/assets/, docs/examples/
 - root GitHub documentation, license boundary, safety docs, and tools/build_github_package.ps1
 
 ## Excluded
