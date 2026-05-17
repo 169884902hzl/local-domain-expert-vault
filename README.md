@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](#clone-后能直接做什么)
 
-> 把 Obsidian + Zotero 文献库变成一个本地领域专家：基于 `wiki/` 证据回答问题，用 Claudian 精读论文，回跳 Zotero/PDF 原文，生成可审阅 research idea 草案，并通过 mirror-first arXiv 自动化持续补充新论文。
+> 把 Obsidian + Zotero 文献库变成一个每天自更新、可审计、会复盘的本地领域专家：论文进入 `wiki/` 证据层，Claudian 精读，Gemini 发散，DeepSeek 攻击，Codex 二审，周审再把问题推回下一轮阅读和 idea 迭代。
 
 [English README](README_EN.md)
 
@@ -18,6 +18,24 @@
 适合对象：需要长期追踪一个专业方向的研究生、PI / 实验室知识库维护者，以及希望把 LLM 变成“有本地文献记忆的领域专家”的研究者。
 
 当前公开版本：`v0.1.0`。这是首个可发行版本，覆盖本地浏览、知识库审计、`kb_search.py` 检索、Zotero/Obsidian 配置说明、Paper Reading Workbench、arXiv mirror-first 自动化文档和 Windows 计划任务入口。完整 AI 自动化仍需要使用者在本机配置 Zotero、Claudian / Claude Code、Gemini、OpenCode / DeepSeek、Codex 和权限边界。
+
+## 闭环设计
+
+核心设计不是某一个模型或某一个脚本，而是把研究工作流做成一个环环相扣的闭环：
+
+```text
+Zotero / arXiv
+    -> wiki/topics, wiki/concepts, wiki/entities
+    -> kb_search.py local evidence retrieval
+    -> Claudian deep reading and paper comparison
+    -> Gemini divergent idea greenhouse
+    -> OpenCode / DeepSeek adversarial battle
+    -> Codex second-pass review
+    -> weekly agenda review and top-tier pressure test
+    -> revised filters, prompts, reading priorities, and next research ideas
+```
+
+每一环都有明确产物和下一环消费者：论文不是只被“总结”一次，而是进入 `wiki/` 证据层；精读不是停在阅读报告，而是继续喂给 idea greenhouse；Gemini 的发散不是直接变成结论，而要经过 DeepSeek 的敌对审稿、Codex 的结构化二审和每周复盘。失败也不会把系统带偏：dry-run、preflight、日志、`partial` 状态、mirror-first fallback、人工 review gate 都是为了让自动化在缺 key、缺 mirror、网络失败或模型输出不稳定时仍然保持边界清楚。
 
 ## 它是什么 / 不是什么
 

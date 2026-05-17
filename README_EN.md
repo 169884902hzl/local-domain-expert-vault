@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](#what-works-immediately-after-cloning)
 
-> Turn an Obsidian + Zotero literature vault into a local domain expert: answer from `wiki/` evidence, run Claudian deep reading, jump back to Zotero/PDF sources, draft reviewable research ideas, and keep new papers flowing through mirror-first arXiv automation.
+> Turn an Obsidian + Zotero literature vault into a local domain expert that updates itself daily, audits its own evidence chain, and keeps ideas under review: papers enter `wiki/`, Claudian reads them, Gemini diverges, DeepSeek attacks, Codex reviews, and the weekly review feeds the next reading and idea cycle.
 
 [中文 README](README.md)
 
@@ -18,6 +18,24 @@ The public vault uses robotic manipulation as its example domain, especially DLO
 It is useful for graduate students, PI/lab knowledge-base maintainers, and researchers who want LLM assistance to behave more like a local domain expert grounded in their own literature corpus.
 
 Current public version: `v0.1.0`. This first release covers local browsing, knowledge-base audits, `kb_search.py` retrieval, Zotero/Obsidian setup documentation, Paper Reading Workbench, arXiv mirror-first automation docs, and the Windows scheduled-task entry point. Full AI automation still requires local Zotero, Claudian / Claude Code, Gemini, OpenCode / DeepSeek, Codex, and explicit permission configuration.
+
+## Closed-Loop Design
+
+The core design is not one model or one script. The repository is designed as a closed research loop:
+
+```text
+Zotero / arXiv
+    -> wiki/topics, wiki/concepts, wiki/entities
+    -> kb_search.py local evidence retrieval
+    -> Claudian deep reading and paper comparison
+    -> Gemini divergent idea greenhouse
+    -> OpenCode / DeepSeek adversarial battle
+    -> Codex second-pass review
+    -> weekly agenda review and top-tier pressure test
+    -> revised filters, prompts, reading priorities, and next research ideas
+```
+
+Every stage writes an artifact that the next stage can consume. Papers are not summarized once and forgotten; they become local evidence. Deep-reading reports feed the idea greenhouse. Gemini's speculative output does not become a claim until it has gone through DeepSeek's adversarial review, Codex's structured second pass, and weekly agenda review. The workflow is built to fail with clear boundaries: dry-runs, preflights, logs, `partial` states, mirror-first fallback behavior, and human review gates keep missing keys, missing mirrors, network failures, and unstable model output from contaminating the formal knowledge layer.
 
 ## What this is / is not
 
