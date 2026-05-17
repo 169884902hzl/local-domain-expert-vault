@@ -57,6 +57,33 @@ python .claude/scripts/kb_search.py "diffusion policy DLO" --limit 5
 - 自动化、计划任务、arXiv mirror-first: [docs/AUTOMATION.md](docs/AUTOMATION.md)
 - Paper Reading Workbench 安全边界: [docs/SECURITY_PLUGIN_WORKBENCH.md](docs/SECURITY_PLUGIN_WORKBENCH.md)
 
+## 电脑上怎么每天自动跑
+
+`daily_arxiv_pipeline.py` 是每日 arXiv 工作流的核心引擎，但它不是推荐的 Windows 定时任务入口。电脑上每天自动跑时，建议走这条链路：
+
+```text
+Windows Task Scheduler
+    -> register_daily_arxiv_task.ps1      注册计划任务
+    -> run_daily_arxiv_task.ps1           每日包装器
+    -> arxiv_metadata_sync.py             先同步本地 arXiv metadata mirror
+    -> daily_arxiv_pipeline.py            再执行 mirror-first pipeline
+```
+
+先 dry run，确认时间、路径和任务名：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .claude/scripts/register_daily_arxiv_task.ps1 -DryRun -Time "12:00"
+```
+
+确认无误后注册真实任务：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .claude/scripts/register_daily_arxiv_task.ps1 -Time "12:00"
+Get-ScheduledTask -TaskName DailyArxivEmbodiedAIScout
+```
+
+完整的 Codex seed review、weekly agenda review、日志查看和删除任务命令见 [docs/AUTOMATION.md](docs/AUTOMATION.md) 的 `Windows 计划任务` 小节。
+
 ## 本地领域专家如何工作
 
 这套 vault 的目标不是替代研究者，而是让 LLM 在一个专业方向里持续积累上下文，并把严谨研究者已经在做的工作固定成可检查流程：

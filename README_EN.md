@@ -57,6 +57,33 @@ Setup entry points:
 - Automation, scheduled tasks, arXiv mirror-first: [docs/AUTOMATION.md](docs/AUTOMATION.md)
 - Paper Reading Workbench security boundary: [docs/SECURITY_PLUGIN_WORKBENCH.md](docs/SECURITY_PLUGIN_WORKBENCH.md)
 
+## Running it every day on your computer
+
+`daily_arxiv_pipeline.py` is the daily arXiv workflow engine, but it is not the recommended Windows scheduler entry point. For a daily local run, use the wrapper and registration scripts:
+
+```text
+Windows Task Scheduler
+    -> register_daily_arxiv_task.ps1      registers the scheduled task
+    -> run_daily_arxiv_task.ps1           daily wrapper
+    -> arxiv_metadata_sync.py             refreshes the local arXiv metadata mirror first
+    -> daily_arxiv_pipeline.py            runs the mirror-first pipeline
+```
+
+Start with a dry run to inspect the task name, trigger time, and paths:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .claude/scripts/register_daily_arxiv_task.ps1 -DryRun -Time "12:00"
+```
+
+Then register the real task:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .claude/scripts/register_daily_arxiv_task.ps1 -Time "12:00"
+Get-ScheduledTask -TaskName DailyArxivEmbodiedAIScout
+```
+
+Codex seed review, weekly agenda review, log inspection, and task removal commands are documented in the `Windows Task Scheduler` section of [docs/AUTOMATION.md](docs/AUTOMATION.md).
+
 ## Local Domain Expert Model
 
 The goal is not to replace the researcher. It is to let an LLM accumulate context inside one specialized field and make careful research habits explicit and repeatable:
