@@ -457,7 +457,7 @@ python .claude/scripts/audit_kb.py
 
 Zotero 附件同步有多种路线：Zotero 官方存储、WebDAV、linked attachment、本地附件目录迁移，或配合 Better BibTeX / ZotFile / Attanger 等插件。这个公开仓库不内置任何个人存储账号、服务器地址或附件目录。
 
-本 vault 当前采用的是 **CSTCloud 数据胶囊 WebDAV + Zotero 应用专用账号** 路线，公开可写的非敏感 endpoint 是 `https://data.cstcloud.cn/dav`。可复现配置说明见 [docs/ZOTERO_STORAGE.md](docs/ZOTERO_STORAGE.md)。
+本 vault 当前采用的是 **CSTCloud 数据胶囊 WebDAV + Zotero 应用专用账号** 路线。服务入口是 `https://data.cstcloud.cn/`，Zotero WebDAV 使用的非敏感 endpoint 是 `https://data.cstcloud.cn/dav`。公开资料和当前配置说明显示，实名认证后通常可获得约 20GB 空间，并支持 WebDAV / S3；实际额度以账号页面为准。可复现配置说明见 [docs/ZOTERO_STORAGE.md](docs/ZOTERO_STORAGE.md)。
 
 ![CSTCloud 数据胶囊 WebDAV client settings for Zotero](docs/assets/cstcloud-webdav-zotero.png)
 
@@ -465,7 +465,7 @@ Zotero 附件同步有多种路线：Zotero 官方存储、WebDAV、linked attac
 
 Zotero Desktop 里对应的文件同步设置如下，展示 WebDAV 同步方式和服务器地址。
 
-![Zotero Desktop WebDAV file sync settings](docs/assets/zotero-desktop-webdav-settings.png)
+<img src="docs/assets/zotero-desktop-webdav-settings.png" alt="Zotero Desktop WebDAV file sync settings" width="720">
 
 ## Claudian / Claude Code 工作流
 

@@ -223,9 +223,9 @@ Open a new PowerShell window, then verify:
 python .claude/scripts/zotero_import.py --preflight --json
 ```
 
-For attachment syncing, this vault documents a CSTCloud Data Capsule WebDAV route:
+For attachment syncing, this vault documents a CSTCloud Data Capsule WebDAV route. The service entry is `https://data.cstcloud.cn/`, and Zotero uses the non-secret WebDAV endpoint `https://data.cstcloud.cn/dav`. Public guides and this setup route describe about 20 GB of storage after identity verification; confirm the current quota in your own account.
 
-![Zotero Desktop WebDAV file sync settings](docs/assets/zotero-desktop-webdav-settings.png)
+<img src="docs/assets/zotero-desktop-webdav-settings.png" alt="Zotero Desktop WebDAV file sync settings" width="720">
 
 See [docs/ZOTERO_STORAGE.md](docs/ZOTERO_STORAGE.md) for details.
 

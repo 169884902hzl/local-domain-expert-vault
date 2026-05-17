@@ -91,6 +91,14 @@ The vault scripts do not need your WebDAV password. They only need Zotero Deskto
 
 This public example uses WebDAV through CSTCloud Data Capsule (`数据胶囊`), with an app-specific WebDAV client credential for Zotero.
 
+Service entry:
+
+```text
+https://data.cstcloud.cn/
+```
+
+Public guides and this setup route describe about 20 GB of storage after identity verification. Treat the quota as a provider-side policy and confirm the current value in your own account.
+
 Public, non-secret WebDAV endpoint:
 
 ```text
@@ -112,9 +120,9 @@ The example below is a sanitized public screenshot. It keeps the provider, WebDA
 
 This screenshot is cropped and redacted. It keeps the WebDAV tab, public endpoint, and Zotero app entry visible, while masking the generated credential fields and removing the personal account area.
 
-In Zotero Desktop, the matching file-sync setting should use WebDAV and the same public endpoint. The screenshot shows the configuration shape without publishing credentials.
+In Zotero Desktop, the matching file-sync setting should use WebDAV and the same public endpoint. The compressed screenshot shows the configuration shape without publishing credentials.
 
-![Zotero Desktop WebDAV file sync settings](assets/zotero-desktop-webdav-settings.png)
+<img src="assets/zotero-desktop-webdav-settings.png" alt="Zotero Desktop WebDAV file sync settings" width="720">
 
 ## Option C: Linked Attachments
 
