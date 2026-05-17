@@ -5,19 +5,19 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](#clone-后能直接做什么)
 
-> 一个 Obsidian + Zotero 本地领域专家 vault：把 Zotero / arXiv 论文组织成长期文献记忆，支持本地证据问答、Claudian 精读、研究假设草案、Zotero/PDF 回跳和 mirror-first arXiv 自动化。
+> 把 Obsidian + Zotero 文献库变成一个本地领域专家：基于 `wiki/` 证据回答问题，用 Claudian 精读论文，回跳 Zotero/PDF 原文，生成可审阅 research idea 草案，并通过 mirror-first arXiv 自动化持续补充新论文。
 
 [English README](README_EN.md)
 
-当前公开版本：`v0.1.0`。这是首个可发行版本，覆盖本地浏览、知识库审计、`kb_search.py` 检索、Zotero/Obsidian 配置说明、Paper Reading Workbench、arXiv mirror-first 自动化文档和 Windows 计划任务入口。完整 AI 自动化仍需要使用者在本机配置 Zotero、Claudian / Claude Code、Gemini / Codex 和权限边界。
-
-这是一个面向领域研究者的 **Obsidian + Zotero research vault**。更准确地说，它是一个 **本地领域专家 vault**：不是把所有问题丢给泛用 AI，而是把一个专业方向的论文、概念、实体、精读报告、本地检索和研究 idea 草案组织成可追踪的判断依据。
+这是一个面向领域研究者的 **Obsidian + Zotero + Claudian research vault**。更准确地说，它是一个 **本地领域专家 vault**：不是把所有问题丢给泛用 AI，而是把一个专业方向的论文、概念、实体、精读报告、本地检索和研究 idea 草案组织成可追踪的判断依据。
 
 这里的“领域专家”不是指仓库里训练了一个新模型，而是指 LLM 的每次精读、比较、发散和实验草案，都被本地 `wiki/` 证据、Zotero 来源、概念网络和人工 review 边界约束。它可以像一个长期读过你文献库的研究同伴一样工作，但所有结论都要能回到本地证据。
 
 公开版本以机器人操控文献为示例，覆盖 DLO、VLM/VLA、RL、Sim-to-Real 和 embodied AI。你可以把它迁移到其他学科，但需要替换论文集合、概念页、实体页、Claudian prompt 和 arXiv 过滤规则。
 
 适合对象：需要长期追踪一个专业方向的研究生、PI / 实验室知识库维护者，以及希望把 LLM 变成“有本地文献记忆的领域专家”的研究者。
+
+当前公开版本：`v0.1.0`。这是首个可发行版本，覆盖本地浏览、知识库审计、`kb_search.py` 检索、Zotero/Obsidian 配置说明、Paper Reading Workbench、arXiv mirror-first 自动化文档和 Windows 计划任务入口。完整 AI 自动化仍需要使用者在本机配置 Zotero、Claudian / Claude Code、Gemini / Codex 和权限边界。
 
 ## 它是什么 / 不是什么
 

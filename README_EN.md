@@ -5,19 +5,19 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](#what-works-immediately-after-cloning)
 
-> An Obsidian + Zotero local domain-expert vault that turns Zotero / arXiv papers into long-term literature memory, evidence-grounded answers, Claudian deep reading, research hypothesis drafts, Zotero/PDF back-links, and mirror-first arXiv automation.
+> Turn an Obsidian + Zotero literature vault into a local domain expert: answer from `wiki/` evidence, run Claudian deep reading, jump back to Zotero/PDF sources, draft reviewable research ideas, and keep new papers flowing through mirror-first arXiv automation.
 
 [中文 README](README.md)
 
-Current public version: `v0.1.0`. This first release covers local browsing, knowledge-base audits, `kb_search.py` retrieval, Zotero/Obsidian setup documentation, Paper Reading Workbench, arXiv mirror-first automation docs, and the Windows scheduled-task entry point. Full AI automation still requires local Zotero, Claudian / Claude Code, Gemini / Codex, and explicit permission configuration.
-
-This is an **Obsidian + Zotero research vault** for researchers working with a specialized literature corpus. More precisely, it is a **local domain-expert vault**: instead of sending every question to a generic AI chat, it organizes the papers, concepts, entities, deep-reading reports, local retrieval, and research idea drafts of one field into traceable evidence.
+This is an **Obsidian + Zotero + Claudian research vault** for researchers working with a specialized literature corpus. More precisely, it is a **local domain-expert vault**: instead of sending every question to a generic AI chat, it organizes the papers, concepts, entities, deep-reading reports, local retrieval, and research idea drafts of one field into traceable evidence.
 
 The phrase "domain expert" does not mean this repository trains a new model. It means LLM-assisted reading, comparison, brainstorming, and experiment-plan drafting are constrained by local `wiki/` evidence, Zotero sources, concept networks, and human-review boundaries. The system is meant to behave like a research colleague that has long-term memory of your literature corpus, while keeping claims traceable.
 
 The public vault uses robotic manipulation as its example domain, especially DLO manipulation, VLM/VLA systems, RL, Sim-to-Real, and embodied AI. The workflow is portable, but the papers, concepts, entities, Claudian prompts, and arXiv filters are domain-specific and should be replaced for another field.
 
 It is useful for graduate students, PI/lab knowledge-base maintainers, and researchers who want LLM assistance to behave more like a local domain expert grounded in their own literature corpus.
+
+Current public version: `v0.1.0`. This first release covers local browsing, knowledge-base audits, `kb_search.py` retrieval, Zotero/Obsidian setup documentation, Paper Reading Workbench, arXiv mirror-first automation docs, and the Windows scheduled-task entry point. Full AI automation still requires local Zotero, Claudian / Claude Code, Gemini / Codex, and explicit permission configuration.
 
 ## What this is / is not
 
