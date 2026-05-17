@@ -12,8 +12,8 @@
 ## 最小可用路径
 
 ```powershell
-git clone https://github.com/169884902hzl/local-first-research-vault.git
-cd local-first-research-vault
+git clone https://github.com/169884902hzl/local-domain-expert-vault.git
+cd local-domain-expert-vault
 python --version
 python .claude/scripts/audit_kb.py
 python .claude/scripts/kb_search.py "VLM robot manipulation" --limit 5

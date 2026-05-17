@@ -1,7 +1,7 @@
-# Local-First Research Vault
+# Local Domain Expert Vault
 
-[![Smoke](https://github.com/169884902hzl/local-first-research-vault/actions/workflows/smoke.yml/badge.svg)](https://github.com/169884902hzl/local-first-research-vault/actions/workflows/smoke.yml)
-[![Release](https://img.shields.io/github/v/release/169884902hzl/local-first-research-vault?label=release)](https://github.com/169884902hzl/local-first-research-vault/releases)
+[![Smoke](https://github.com/169884902hzl/local-domain-expert-vault/actions/workflows/smoke.yml/badge.svg)](https://github.com/169884902hzl/local-domain-expert-vault/actions/workflows/smoke.yml)
+[![Release](https://img.shields.io/github/v/release/169884902hzl/local-domain-expert-vault?label=release)](https://github.com/169884902hzl/local-domain-expert-vault/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](#what-works-immediately-after-cloning)
 

@@ -2,7 +2,7 @@
 
 ## v0.1.0 - 2026-05-17
 
-Initial public release of the local-first research vault.
+Initial public release of Local Domain Expert Vault.
 
 ### Included
 

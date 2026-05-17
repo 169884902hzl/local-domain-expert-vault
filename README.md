@@ -1,7 +1,7 @@
-# Local-First Research Vault
+# Local Domain Expert Vault
 
-[![Smoke](https://github.com/169884902hzl/local-first-research-vault/actions/workflows/smoke.yml/badge.svg)](https://github.com/169884902hzl/local-first-research-vault/actions/workflows/smoke.yml)
-[![Release](https://img.shields.io/github/v/release/169884902hzl/local-first-research-vault?label=release)](https://github.com/169884902hzl/local-first-research-vault/releases)
+[![Smoke](https://github.com/169884902hzl/local-domain-expert-vault/actions/workflows/smoke.yml/badge.svg)](https://github.com/169884902hzl/local-domain-expert-vault/actions/workflows/smoke.yml)
+[![Release](https://img.shields.io/github/v/release/169884902hzl/local-domain-expert-vault?label=release)](https://github.com/169884902hzl/local-domain-expert-vault/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](#clone-后能直接做什么)
 
@@ -270,8 +270,8 @@ docs/                         # 使用、自动化、安全说明
 如果你是从 GitHub clone 这个仓库，仓库根目录就是可打开的 Obsidian vault。
 
 ```powershell
-git clone https://github.com/169884902hzl/local-first-research-vault.git
-cd local-first-research-vault
+git clone https://github.com/169884902hzl/local-domain-expert-vault.git
+cd local-domain-expert-vault
 python --version
 python .claude/scripts/audit_kb.py
 python .claude/scripts/kb_search.py "diffusion policy DLO" --limit 5
@@ -280,8 +280,8 @@ python .claude/scripts/kb_search.py "diffusion policy DLO" --limit 5
 macOS/Linux 可用同样的 Python 命令：
 
 ```bash
-git clone https://github.com/169884902hzl/local-first-research-vault.git
-cd local-first-research-vault
+git clone https://github.com/169884902hzl/local-domain-expert-vault.git
+cd local-domain-expert-vault
 python3 --version
 python3 .claude/scripts/audit_kb.py
 python3 .claude/scripts/kb_search.py "diffusion policy DLO" --limit 5
