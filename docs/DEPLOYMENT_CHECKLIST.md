@@ -16,6 +16,8 @@
 
 建议按层级逐步启用。不要第一次就同时配置 Zotero、Claudian、Gemini、OpenCode/DeepSeek、Codex 和计划任务。
 
+如果你希望用 UI 逐步配置，可以使用源码级桌面适配器：[DESKTOP_ADAPTER.md](DESKTOP_ADAPTER.md)。它把下面的检查、Zotero 环境变量、arXiv mirror、AI CLI 检测、计划任务 dry-run / register 和日志查看做成 Windows-first Tauri 界面。适配器不会替你安装第三方软件，也不会把 API key 写入仓库文件。
+
 ## 1. Fresh Clone Smoke Test
 
 ```powershell
