@@ -14,6 +14,7 @@ Source: local working copy (path omitted from public package)
 - stable workflow contracts: `projects/research-agenda/workflow-contracts/`
 - GitHub Actions smoke workflow: `.github/workflows/smoke.yml`
 - `pyproject.toml` and minimal `tests/` smoke/regression checks
+- desktop deployment adapter source: `apps/desktop-adapter/`
 - README.md, README_EN.md, CHANGELOG.md, LICENSE, docs/, docs/assets/, docs/examples/
 - root GitHub documentation, license boundary, safety docs, `tools/build_github_package.ps1`, and `tools/scan_public_package.py`
 
@@ -29,10 +30,13 @@ Source: local working copy (path omitted from public package)
 - projects/ contents, except stable `projects/research-agenda/workflow-contracts/`
 - daily/, archive/, exports/, projectsideas/, Excalidraw/
 - PDFs, SQLite databases, local caches, and machine-specific credentials
+- `node_modules/`, frontend `dist/`, Rust `target/`, and `.local/desktop-adapter/` runtime config/diagnostics
 
 ## Verify
 
     python -m pytest
+    cd apps/desktop-adapter && npm ci && npm run build
+    cargo test --manifest-path apps/desktop-adapter/src-tauri/Cargo.toml
     python tools/scan_public_package.py
     python .claude/scripts/audit_kb.py
     python .claude/scripts/audit_kb.py --strict-reading --strict-concepts

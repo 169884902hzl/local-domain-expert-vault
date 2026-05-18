@@ -1,0 +1,23 @@
+[package]
+name = "local-domain-expert-vault-adapter"
+version = "0.1.0"
+description = "Desktop deployment adapter for Local Domain Expert Vault"
+authors = ["Local Domain Expert Vault Contributors"]
+edition = "2021"
+
+[lib]
+name = "local_domain_expert_vault_adapter_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", features = [] }
+urlencoding = "2"
+
+[features]
+default = []
