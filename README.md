@@ -17,7 +17,7 @@
 
 适合对象：需要长期追踪一个专业方向的研究生、PI / 实验室知识库维护者，以及希望把 LLM 变成“有本地文献记忆的领域专家”的研究者。
 
-当前公开版本：`v0.1.0`。这是首个可发行版本，覆盖本地浏览、知识库审计、`kb_search.py` 检索、Zotero/Obsidian 配置说明、Paper Reading Workbench、arXiv mirror-first 自动化文档和 Windows 计划任务入口。完整 AI 自动化仍需要使用者在本机配置 Zotero、Claudian / Claude Code、Gemini、OpenCode / DeepSeek、Codex 和权限边界。
+当前公开版本：`v0.1.0`。这是首个可发行版本，覆盖本地浏览、知识库审计、`kb_search.py` 检索、Zotero/Obsidian 配置说明、Paper Reading Workbench、arXiv mirror-first 自动化文档、Windows 计划任务入口，以及源码级桌面配置向导。完整 AI 自动化仍需要使用者在本机配置 Zotero、Claudian / Claude Code、Gemini、OpenCode / DeepSeek、Codex 和权限边界。
 
 ## 闭环设计
 
@@ -84,7 +84,10 @@ python .claude/scripts/kb_search.py "diffusion policy DLO" --limit 5
 - Obsidian / Claudian: [docs/OBSIDIAN_CLAUDIAN_SETUP.md](docs/OBSIDIAN_CLAUDIAN_SETUP.md)
 - Zotero API、WebDAV、附件同步: [docs/ZOTERO_STORAGE.md](docs/ZOTERO_STORAGE.md)
 - 自动化、计划任务、arXiv mirror-first: [docs/AUTOMATION.md](docs/AUTOMATION.md)
+- 桌面配置向导: [docs/DESKTOP_ADAPTER.md](docs/DESKTOP_ADAPTER.md)
 - Paper Reading Workbench 安全边界: [docs/SECURITY_PLUGIN_WORKBENCH.md](docs/SECURITY_PLUGIN_WORKBENCH.md)
+
+如果你不想一条条复制命令，可以从 `apps/desktop-adapter/` 启动 Windows-first 桌面适配器。它提供 vault 选择、Zotero 环境变量、arXiv mirror、AI CLI 检查、计划任务 dry-run / register、日志和脱敏诊断导出。它不会替你安装第三方模型 CLI，不会把 API key 写进仓库文件，也不会在没有 dry-run 的情况下注册计划任务。
 
 ## 电脑上怎么每天自动跑
 

@@ -11,6 +11,8 @@
 
 如果你不确定自己应该配置到哪一层，先看 [DEPLOYMENT_CHECKLIST.md](DEPLOYMENT_CHECKLIST.md)。它把浏览、检索、Zotero/PDF、arXiv mirror、计划任务、Claudian/Gemini/OpenCode DeepSeek/Codex 分成可验证层级。
 
+如果你更希望点开一个界面逐步配置，可以看 [DESKTOP_ADAPTER.md](DESKTOP_ADAPTER.md)。源码级桌面适配器位于 `apps/desktop-adapter/`，用于选择 vault、运行预检、配置 Zotero 环境变量、检查 arXiv mirror、dry-run / 注册计划任务和导出脱敏诊断。它不会替你安装第三方软件，也不会把 API key 写入仓库文件。
+
 ## 最小可用路径
 
 ```powershell
