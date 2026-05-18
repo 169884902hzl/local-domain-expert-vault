@@ -728,7 +728,7 @@ fn redact(input: &str) -> String {
         (r"sk-[A-Za-z0-9_-]{20,}", "<redacted-token>"),
         (r"gh[pousr]_[A-Za-z0-9_]{20,}", "<redacted-token>"),
         (r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", "<redacted-email>"),
-        (r#"[A-Za-z]:\\[^\r\n\t`"']+"#, "<local-path>"),
+        (r#"[A-Za-z]:\\[^\s\r\n\t`"']+"#, "<local-path>"),
         (r"[A-Za-z0-9_.-]+\\[A-Za-z0-9_.-]+", "<current-user>"),
     ];
     for (pattern, replacement) in patterns {
