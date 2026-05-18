@@ -24,30 +24,9 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: apps/desktop-adapter/package-lock.json
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-
       - name: Install test dependencies
         shell: pwsh
         run: python -m pip install --upgrade pip pytest
-
-      - name: Check desktop adapter frontend
-        shell: pwsh
-        working-directory: apps/desktop-adapter
-        run: |
-          npm ci --ignore-scripts --no-audit
-          npm run build
-
-      - name: Check desktop adapter command runner
-        shell: pwsh
-        run: cargo test --manifest-path apps/desktop-adapter/src-tauri/Cargo.toml
 
       - name: Compile scripts
         shell: pwsh

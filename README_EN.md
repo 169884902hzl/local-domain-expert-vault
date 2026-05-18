@@ -19,7 +19,7 @@ The public vault uses robotic manipulation as its example domain, especially DLO
 
 It is built for graduate students, PI/lab knowledge-base maintainers, and researchers who need long-term literature memory rather than another one-off summarizer.
 
-Current public version: `v0.1.0`. This first release covers local browsing, knowledge-base audits, `kb_search.py` retrieval, Zotero/Obsidian setup documentation, Paper Reading Workbench, arXiv mirror-first automation docs, the Windows scheduled-task entry point, and a source-level desktop configuration wizard. Full AI automation still requires local Zotero, Claudian / Claude Code, Gemini, OpenCode / DeepSeek, Codex, and explicit permission configuration.
+Current public version: `v0.1.0`. This first release covers local browsing, knowledge-base audits, `kb_search.py` retrieval, Zotero/Obsidian setup documentation, Paper Reading Workbench, arXiv mirror-first automation docs, and the Windows scheduled-task entry point. Full AI automation still requires local Zotero, Claudian / Claude Code, Gemini, OpenCode / DeepSeek, Codex, and explicit permission configuration.
 
 ## Why This Exists
 
@@ -103,10 +103,7 @@ Setup entry points:
 - Obsidian / Claudian: [docs/OBSIDIAN_CLAUDIAN_SETUP.md](docs/OBSIDIAN_CLAUDIAN_SETUP.md)
 - Zotero API, WebDAV, attachments: [docs/ZOTERO_STORAGE.md](docs/ZOTERO_STORAGE.md)
 - Automation, scheduled tasks, arXiv mirror-first: [docs/AUTOMATION.md](docs/AUTOMATION.md)
-- Desktop configuration wizard: [docs/DESKTOP_ADAPTER.md](docs/DESKTOP_ADAPTER.md)
 - Paper Reading Workbench security boundary: [docs/SECURITY_PLUGIN_WORKBENCH.md](docs/SECURITY_PLUGIN_WORKBENCH.md)
-
-If you do not want to copy commands one by one, start the Windows-first adapter in `apps/desktop-adapter/`. It gives you a vault picker, Zotero environment-variable setup, arXiv mirror checks, AI CLI checks, scheduled-task dry-run / registration buttons, log tails, and redacted diagnostics export. It does not install third-party model CLIs, does not write API keys into repository files, and keeps registration behind an explicit dry-run step.
 
 ## Running it every day on your computer
 

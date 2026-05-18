@@ -1,6 +1,0 @@
-{
-  "identifier": "default",
-  "description": "Default capability for the desktop deployment adapter.",
-  "windows": ["main"],
-  "permissions": ["core:default"]
-}
