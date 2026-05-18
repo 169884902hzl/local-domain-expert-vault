@@ -13,8 +13,9 @@ Source: local working copy (path omitted from public package)
 - templates/, SCHEMA.md, Dashboard.md, AGENTS.md, CLAUDE.md
 - stable workflow contracts: `projects/research-agenda/workflow-contracts/`
 - GitHub Actions smoke workflow: `.github/workflows/smoke.yml`
+- `pyproject.toml` and minimal `tests/` smoke/regression checks
 - README.md, README_EN.md, CHANGELOG.md, LICENSE, docs/, docs/assets/, docs/examples/
-- root GitHub documentation, license boundary, safety docs, and tools/build_github_package.ps1
+- root GitHub documentation, license boundary, safety docs, `tools/build_github_package.ps1`, and `tools/scan_public_package.py`
 
 ## Excluded
 
@@ -31,6 +32,8 @@ Source: local working copy (path omitted from public package)
 
 ## Verify
 
+    python -m pytest
+    python tools/scan_public_package.py
     python .claude/scripts/audit_kb.py
     python .claude/scripts/audit_kb.py --strict-reading --strict-concepts
     python .claude/scripts/kb_search.py "diffusion policy DLO" --limit 5

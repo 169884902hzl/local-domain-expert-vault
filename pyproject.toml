@@ -1,0 +1,17 @@
+[project]
+name = "local-domain-expert-vault"
+version = "0.1.0"
+description = "Local-first Obsidian/Zotero research vault with evidence-grounded reading and automation workflows."
+requires-python = ">=3.10"
+readme = "README_EN.md"
+license = { file = "LICENSE" }
+
+[project.optional-dependencies]
+test = [
+  "pytest>=8.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".claude/scripts"]
+addopts = "-q"

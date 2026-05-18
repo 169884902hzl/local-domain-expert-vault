@@ -24,9 +24,17 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Install test dependencies
+        shell: pwsh
+        run: python -m pip install --upgrade pip pytest
+
       - name: Compile scripts
         shell: pwsh
         run: python -m compileall -q .claude/scripts
+
+      - name: Run pytest smoke tests
+        shell: pwsh
+        run: python -m pytest
 
       - name: Audit local knowledge base
         shell: pwsh
@@ -78,57 +86,4 @@ jobs:
 
       - name: Check tracked artifacts and secrets
         shell: pwsh
-        run: |
-          $script = @'
-          import pathlib
-          import re
-          import subprocess
-          import sys
-
-          files = subprocess.check_output(["git", "ls-files"], text=True).splitlines()
-          artifact_re = re.compile(r"(?i)(\.pdf$|\.sqlite$|\.sqlite3$|\.db$|\.log$|\.pyc$|__pycache__/|\.env$|settings\.local\.json$|workspace\.json$)")
-          artifacts = [path for path in files if artifact_re.search(path)]
-          if artifacts:
-              print("Tracked private/runtime artifacts:")
-              print("\n".join(artifacts))
-              sys.exit(1)
-
-          sensitive_patterns = [
-              r"sk-[A-Za-z0-9_-]{20,}",
-              r"ghp_[A-Za-z0-9_]{20,}",
-              r"github_pat_[A-Za-z0-9_]{20,}",
-              r"AIza[A-Za-z0-9_-]{20,}",
-              "PRIVATE " + "KEY",
-              "BEGIN " + "RSA",
-              "ANTHROPIC_AUTH_TOKEN" + r"=[^<]",
-              "OPENAI_API_KEY" + r"=[^<]",
-              "GEMINI_API_KEY" + r"=[^<]",
-              "ZOTERO_API_KEY" + r"=[^<]",
-              "H:" + r"\\",
-              "C:" + r"\\Users\\Administrator",
-              "hazel" + "666",
-              "169884902hzl" + "@" + r"gmail\.com",
-          ]
-          secret_re = re.compile("|".join(sensitive_patterns))
-          skip_prefixes = ("wiki/topics/",)
-          hits = []
-          for path in files:
-              if path.startswith(skip_prefixes):
-                  continue
-              p = pathlib.Path(path)
-              try:
-                  text = p.read_text(encoding="utf-8")
-              except UnicodeDecodeError:
-                  continue
-              except OSError:
-                  continue
-              if secret_re.search(text):
-                  hits.append(path)
-          if hits:
-              print("Potential secret/private path hits:")
-              print("\n".join(hits))
-              sys.exit(1)
-          print("artifact and secret scan ok")
-          '@
-          Set-Content -Path "$env:RUNNER_TEMP/scan_public.py" -Value $script -Encoding UTF8
-          python "$env:RUNNER_TEMP/scan_public.py"
+        run: python tools/scan_public_package.py
