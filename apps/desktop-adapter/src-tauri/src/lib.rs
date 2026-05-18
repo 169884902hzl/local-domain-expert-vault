@@ -79,8 +79,9 @@ struct AdapterConfig {
     enabled_modules: Vec<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct EnvWriteRequest {
+    vault_path: Option<String>,
     zotero_user_id: Option<String>,
     zotero_api_key: Option<String>,
     zotero_collection_key: Option<String>,
@@ -189,6 +190,23 @@ fn get_env_status() -> EnvStatus {
 
 #[tauri::command]
 fn set_zotero_env(request: EnvWriteRequest) -> Result<EnvStatus, String> {
+    if test_mode_enabled() {
+        let status = EnvStatus {
+            zotero_user_id: has_value(request.zotero_user_id.as_deref()),
+            zotero_api_key: has_value(request.zotero_api_key.as_deref()),
+            zotero_collection_key: has_value(request.zotero_collection_key.as_deref()),
+        };
+        let root = match request.vault_path.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
+            Some(path) => normalize_vault_path(path)?,
+            None => std::env::current_dir().map_err(|err| format!("read current dir failed: {err}"))?,
+        };
+        ensure_adapter_dir(&root)?;
+        let path = root.join(".local").join("desktop-adapter").join("test-env.json");
+        let text = serde_json::to_string_pretty(&status).map_err(|err| format!("serialize test env failed: {err}"))?;
+        fs::write(path, text).map_err(|err| format!("write test env failed: {err}"))?;
+        return Ok(status);
+    }
+
     let pairs = [
         ("ZOTERO_USER_ID", request.zotero_user_id),
         ("ZOTERO_API_KEY", request.zotero_api_key),
@@ -388,6 +406,10 @@ fn build_command_spec(
     command_id: &str,
     options: Option<&HashMap<String, String>>,
 ) -> Result<CommandSpec, String> {
+    if test_mode_enabled() && is_blocked_in_test_mode(command_id) {
+        return Err(format!("blocked in ADAPTER_TEST_MODE: {command_id}"));
+    }
+
     let opt = |key: &str, default_value: &str| -> String {
         options
             .and_then(|items| items.get(key))
@@ -440,6 +462,36 @@ fn build_command_spec(
         _ => return Err(format!("command is not whitelisted: {command_id}")),
     };
     Ok(spec)
+}
+
+fn test_mode_enabled() -> bool {
+    matches!(
+        std::env::var("ADAPTER_TEST_MODE").unwrap_or_default().to_ascii_lowercase().as_str(),
+        "1" | "true" | "yes" | "on"
+    )
+}
+
+fn is_blocked_in_test_mode(command_id: &str) -> bool {
+    matches!(
+        command_id,
+        "arxiv_incremental"
+            | "zotero_collections"
+            | "codex_prepare_only"
+            | "codex_skip_codex"
+            | "task_daily_register"
+            | "task_daily_run_now"
+            | "task_daily_unregister"
+            | "task_codex_register"
+            | "task_codex_run_now"
+            | "task_codex_unregister"
+            | "task_weekly_register"
+            | "task_weekly_run_now"
+            | "task_weekly_unregister"
+    )
+}
+
+fn has_value(value: Option<&str>) -> bool {
+    value.map(str::trim).is_some_and(|item| !item.is_empty())
 }
 
 fn python<const N: usize>(root: &Path, label: &str, args: [&str; N]) -> CommandSpec {
@@ -734,5 +786,16 @@ mod tests {
         assert!(normalize_time("99:00").is_err());
         assert_eq!(normalize_day("sunday").unwrap(), "Sunday");
         assert!(normalize_day("Funday").is_err());
+    }
+
+    #[test]
+    fn test_mode_blocks_state_changing_commands() {
+        assert!(is_blocked_in_test_mode("task_daily_register"));
+        assert!(is_blocked_in_test_mode("task_daily_run_now"));
+        assert!(is_blocked_in_test_mode("task_daily_unregister"));
+        assert!(is_blocked_in_test_mode("arxiv_incremental"));
+        assert!(is_blocked_in_test_mode("zotero_collections"));
+        assert!(!is_blocked_in_test_mode("task_daily_dry_run"));
+        assert!(!is_blocked_in_test_mode("audit_kb"));
     }
 }

@@ -45,6 +45,26 @@ Secrets follow the existing vault convention:
 
 The diagnostics exporter redacts common API key names, tokens, email addresses, Windows absolute paths, and user-domain strings. Screenshot privacy is still the user's responsibility.
 
+## Safe Test Mode
+
+Before testing the adapter on a machine that already runs the real daily workflow, start it with:
+
+```powershell
+$env:ADAPTER_TEST_MODE = "1"
+cd apps/desktop-adapter
+npm run tauri dev
+```
+
+In test mode:
+
+- Zotero credential forms do not call `setx`; the adapter writes only boolean configured/not-configured status to `.local/desktop-adapter/test-env.json`.
+- real scheduled-task registration, run-now, and unregister commands are blocked.
+- arXiv incremental sync is blocked.
+- Zotero Web API collection listing is blocked.
+- dry-run commands, base vault checks, CLI version checks, log tails, and diagnostics remain available.
+
+This mode is for adapter validation only. It does not prove that the full production automation has been registered correctly.
+
 ## Development
 
 The adapter lives in:

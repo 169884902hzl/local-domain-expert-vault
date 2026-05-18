@@ -206,10 +206,12 @@ function App() {
 
   async function saveZoteroEnv() {
     try {
-      const result = await invoke<EnvStatus>("set_zotero_env", { request: zoteroInputs });
+      const result = await invoke<EnvStatus>("set_zotero_env", {
+        request: { ...zoteroInputs, vault_path: vaultPath }
+      });
       setEnvStatus(result);
       setZoteroInputs({ zotero_user_id: "", zotero_api_key: "", zotero_collection_key: "" });
-      appendSystem("Saved Zotero environment variables with setx. Reopen shells before running scripts manually.");
+      appendSystem("Saved Zotero environment variables, or test-env status when ADAPTER_TEST_MODE=1.");
     } catch (error) {
       appendSystem(String(error));
     }
