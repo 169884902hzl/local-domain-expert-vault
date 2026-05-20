@@ -9,6 +9,7 @@
 - Novelty scan artifacts now record `verification_scope`, `external_providers_used`, `formal_promotion_allowed`, and formal publish risk markers.
 - Formal seed publish now has explicit lock, duplicate-review, no-overwrite staging, and quarantine invariants.
 - Promotion-critical v2 artifacts now have deeper JSON Schema validation and cross-artifact candidate alignment checks.
+- Scheduled daily wrappers now expose explicit provider rehearsal parameters while defaulting to provider-free execution.
 
 ### Changed
 
@@ -16,11 +17,13 @@
 - Legacy `min_new_imports=10` no longer forces v2 import/read back to 10 papers unless `--legacy-import-fill` is explicitly set.
 - Formal mode requires DeepSeek provider mode `opencode` and Codex execution provider mode `codex-cli` by default.
 - `provider=json` remains available for seed-candidates-only fixtures and manual review, but formal mode blocks it unless `--allow-test-provider-for-formal` is explicitly passed and risk is recorded.
+- CI now installs `jsonschema` explicitly and verifies the Draft 2020-12 validation path.
 
 ### Safety
 
 - Scheduled daily automation remains on `seed-candidates-only`; it still does not publish formal seeds automatically.
-- Formal publish rejects local-only `likely_open` novelty. v0.2.1's minimum external scope is `local_plus_arxiv_api`, which records `formal_publish_risk=external_scope_arxiv_only_not_full_prior_art`.
+- Scheduled daily automation remains provider-free by default. DeepSeek/Codex provider-backed gates complete only with explicit provider configuration; otherwise the v2 path fails closed / `partial`.
+- Formal publish rejects local-only `likely_open` novelty. v0.2.1's minimum external scope is `local_plus_arxiv_api`, which records `formal_publish_risk=external_scope_arxiv_only_not_full_prior_art`; this is only a minimum arXiv API probe, not full prior-art verification.
 - Scheduled wrappers must not pass `--v2-publish-policy formal`, `--allow-formal-seed-publish`, or `--allow-test-provider-for-formal`.
 - Backfill remains ingest-only by default and cannot generate production formal seeds.
 

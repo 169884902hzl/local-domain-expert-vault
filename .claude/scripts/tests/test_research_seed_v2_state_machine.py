@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -11,6 +12,7 @@ from unittest.mock import patch
 
 
 SCRIPTS_DIR = Path(__file__).resolve().parents[1]
+REPO_ROOT = SCRIPTS_DIR.parents[1]
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
@@ -30,7 +32,9 @@ from research_seed_v2_common import (
     init_manifest,
     read_json,
     run_dir,
+    schema_validator_available,
     validate_json_file,
+    validate_payload,
     write_json,
     write_run_artifact,
 )
@@ -76,6 +80,27 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
             "supporting_nodes": ["claim-1"],
             "evidence_links": ["wiki/topics/example.md#claim-1"],
         }
+
+    def register_daily_arxiv_dry_run(self, *args: str) -> str:
+        result = subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(SCRIPTS_DIR / "register_daily_arxiv_task.ps1"),
+                "-DryRun",
+                *args,
+            ],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        output = result.stdout + result.stderr
+        self.assertEqual(result.returncode, 0, output)
+        return output
 
     def write_bom_json(self, path: Path, payload: dict[str, object]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -1099,6 +1124,88 @@ def bad(source, recommended):
         self.assertNotIn("--allow-formal-seed-publish", text)
         self.assertNotIn("--allow-test-provider-for-formal", text)
         self.assertNotRegex(text, r"--v2-publish-policy\s+['\"]?formal\b")
+
+    def test_register_daily_default_dry_run_has_no_provider_or_formal_flags(self) -> None:
+        text = self.register_daily_arxiv_dry_run()
+        self.assertIn("ActionArguments:", text)
+        self.assertIn("run_daily_arxiv_task.ps1", text)
+        self.assertNotIn("-DeepSeekProvider", text)
+        self.assertNotIn("-CodexExecutionProvider", text)
+        self.assertNotIn("--v2-publish-policy formal", text)
+        self.assertNotIn("--allow-formal-seed-publish", text)
+        self.assertNotIn("--allow-test-provider-for-formal", text)
+
+    def test_register_daily_explicit_provider_dry_run_has_only_safe_wrapper_flags(self) -> None:
+        text = self.register_daily_arxiv_dry_run(
+            "-DeepSeekProvider",
+            "opencode",
+            "-CodexExecutionProvider",
+            "codex-cli",
+        )
+        self.assertIn("ActionArguments:", text)
+        self.assertIn("-DeepSeekProvider opencode", text)
+        self.assertIn("-CodexExecutionProvider codex-cli", text)
+        self.assertNotIn("--v2-publish-policy formal", text)
+        self.assertNotIn("--allow-formal-seed-publish", text)
+        self.assertNotIn("--allow-test-provider-for-formal", text)
+
+    def test_run_daily_explicit_provider_params_translate_to_pipeline_flags(self) -> None:
+        wrapper = SCRIPTS_DIR / "run_daily_arxiv_task.ps1"
+        text = wrapper.read_text(encoding="utf-8")
+        self.assertIn('[string]$DeepSeekProvider = "none"', text)
+        self.assertIn('[string]$CodexExecutionProvider = "none"', text)
+        self.assertIn('if ($DeepSeekProvider -ne "none")', text)
+        self.assertIn('$PipelineArgs += @("--deepseek-provider", $DeepSeekProvider)', text)
+        self.assertIn('if ($CodexExecutionProvider -ne "none")', text)
+        self.assertIn('$PipelineArgs += @("--codex-execution-provider", $CodexExecutionProvider)', text)
+        self.assertNotIn('"--deepseek-provider", "none"', text)
+        self.assertNotIn('"--codex-execution-provider", "none"', text)
+
+    def test_jsonschema_draft202012_validator_path_is_active(self) -> None:
+        self.assertTrue(schema_validator_available())
+        bad_payload = {
+            "schema_version": "deepseek_review.v1",
+            "run_date": RUN_DATE,
+            "status": "not_a_valid_status",
+            "reviews": [
+                {
+                    "candidate_id": "",
+                    "status": "not_a_valid_review_status",
+                    "novelty_attack": "",
+                    "baseline_attack": "",
+                    "mechanism_attack": "",
+                    "evaluation_attack": "",
+                    "scope_attack": "",
+                    "a_plus_b_risk": "invalid",
+                    "fatal_flaw": False,
+                    "rescue_mutation": "",
+                    "survivability_label": "invalid",
+                    "allowed_next_stage": "invalid",
+                }
+            ],
+            "provider_status": {"provider": "json", "provider_backed": "yes"},
+        }
+        errors = validate_payload(bad_payload, "deepseek_review.v1")
+        self.assertTrue(any(error.startswith("jsonschema:") for error in errors), errors)
+        self.assertFalse(any(error.startswith(("enum_mismatch:", "type_mismatch:")) for error in errors), errors)
+
+    def test_docs_describe_provider_free_scheduled_fail_closed_boundary(self) -> None:
+        docs = "\n".join(
+            (REPO_ROOT / path).read_text(encoding="utf-8")
+            for path in ["README.md", "README_EN.md", "docs/AUTOMATION.md"]
+        )
+        normalized = docs.lower()
+        for phrase in [
+            "provider-free",
+            "explicit provider",
+            "fail-closed",
+            "partial",
+            "seed-candidates-only",
+            "formal seed",
+        ]:
+            self.assertIn(phrase, normalized)
+        self.assertIn("local_plus_arxiv_api", docs)
+        self.assertIn("external_scope_arxiv_only_not_full_prior_art", docs)
 
     def test_audit_catches_policy_manifest_mismatch(self) -> None:
         manifest = read_json(run_dir(RUN_DATE) / "manifest.json")

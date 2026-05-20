@@ -1,4 +1,10 @@
-param()
+param(
+  [ValidateSet("none", "opencode")]
+  [string]$DeepSeekProvider = "none",
+
+  [ValidateSet("none", "codex-cli")]
+  [string]$CodexExecutionProvider = "none"
+)
 
 $ErrorActionPreference = "Stop"
 
@@ -150,6 +156,12 @@ try {
     "--read-retry-delay",
     "90"
   )
+  if ($DeepSeekProvider -ne "none") {
+    $PipelineArgs += @("--deepseek-provider", $DeepSeekProvider)
+  }
+  if ($CodexExecutionProvider -ne "none") {
+    $PipelineArgs += @("--codex-execution-provider", $CodexExecutionProvider)
+  }
   & $Python @PipelineArgs 2>&1 |
     ForEach-Object { $_ | Out-File -FilePath $LogPath -Append -Encoding utf8 }
   $ExitCode = $LASTEXITCODE

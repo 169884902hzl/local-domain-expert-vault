@@ -94,14 +94,14 @@ v0.2.0 improves state control, review ordering, auditability, and rollout safety
 
 ## v0.2.1: Formal Publish Hardening Rehearsal
 
-v0.2.1 is a hardening release, not a formal-publish enablement release. Scheduled daily automation still defaults to `seed-candidates-only` and does not automatically write to `projects/research-agenda/idea_bank/seed/`.
+v0.2.1 is a hardening release, not a formal-publish enablement release. Scheduled daily automation still defaults to provider-free `seed-candidates-only` and does not automatically write to `projects/research-agenda/idea_bank/seed/`. The default wrapper enters the v2 state machine, but DeepSeek/Codex provider-backed gates complete only when explicit provider parameters are configured. Without those parameters, the review gates fail-closed / `partial`; this is expected safe behavior.
 
 Key changes:
 
 - v2 daily intake is now controlled by `paper_intake_triage.py` and its `selected_for_deep_read` output for both Zotero import attempts and Claudian deep-read attempts. The default daily target is 3 papers and the daily hard cap is 4 papers; the legacy `min_new_imports=10` floor no longer forces v2 deep reading back to 10 papers.
 - `paper_intake_triage.py` supports both flat JSONL and nested `RankedPaper.to_dict()` JSONL, with stable `arxiv_id` and original candidate index tracking.
-- Formal publish now requires novelty verification beyond `local_only`. In v0.2.1, the minimum accepted external scope is `local_plus_arxiv_api`, and the publish artifacts record `formal_publish_risk=external_scope_arxiv_only_not_full_prior_art` because this is not a full prior-art review.
-- Formal mode requires DeepSeek provider mode `opencode` and Codex execution provider mode `codex-cli` by default. `provider=json` is allowed only with an explicit manual test override, and that path records `test_provider_not_production_provenance`.
+- Formal publish now requires novelty verification beyond `local_only`. In v0.2.1, the minimum accepted external scope is `local_plus_arxiv_api`, and the publish artifacts record `formal_publish_risk=external_scope_arxiv_only_not_full_prior_art`; this is only a minimum arXiv API probe, not full prior-art verification.
+- Formal mode requires DeepSeek provider mode `opencode` and Codex execution provider mode `codex-cli` by default. The scheduled wrapper must be registered with `-DeepSeekProvider opencode` and `-CodexExecutionProvider codex-cli`, or the pipeline must be invoked manually with `--deepseek-provider opencode` and `--codex-execution-provider codex-cli`, before provider-backed review can complete. `provider=json` is allowed only with an explicit manual test override, and that path records `test_provider_not_production_provenance`.
 - v2 artifacts now use deeper JSON Schema validation for promotion-critical nested fields, enum values, `candidate_id`, and cross-artifact alignment.
 - Formal seed publish adds a lock, duplicate guard, no-overwrite staging, and quarantine invariant; scheduled wrappers still must not include formal publish flags.
 
@@ -165,7 +165,7 @@ The full automation is not a single `daily_arxiv_pipeline.py` call. The intended
 
 | Default time | Windows task | Wrapper | Purpose |
 | --- | --- | --- | --- |
-| Daily 12:00 | `DailyArxivEmbodiedAIScout` | `run_daily_arxiv_task.ps1` | Refresh the arXiv OAI-PMH metadata mirror, run the mirror-first daily pipeline, trigger Zotero / Claudian / Gemini / DeepSeek / Codex v2 gates, and write the daily quality audit. The default rollout policy is `seed-candidates-only`; it does not publish formal seeds automatically. |
+| Daily 12:00 | `DailyArxivEmbodiedAIScout` | `run_daily_arxiv_task.ps1` | Refresh the arXiv OAI-PMH metadata mirror, run the mirror-first daily pipeline, enter the Zotero / Claudian / Gemini / DeepSeek / Codex v2 state machine, and write the daily quality audit. The default is provider-free `seed-candidates-only`; it does not publish formal seeds automatically. DeepSeek/Codex provider-backed gates complete only after explicit provider configuration. |
 | Daily 16:30 | `DailyCodexSeedReview` | `run_daily_codex_seed_review_task.ps1` | Review today's seed packet, DeepSeek scientific review, and evidence packet with Codex execution review. It can catch up to the newest unreviewed run from the last 7 days and does not promote ideas into formal seeds automatically. |
 | Sunday 20:00 | `WeeklyResearchAgendaReview` | `run_weekly_agenda_review_task.ps1` | Summarize the week's research-agenda state, quality audit, and top-tier idea pressure test. It writes review artifacts but does not move idea folders automatically. |
 
@@ -379,7 +379,7 @@ Recommended public default:
 
 - Required MCP for basic browsing/search: none
 - Full automation: Zotero and arXiv access
-- Full idea/review loop: Gemini / OpenCode DeepSeek / Codex for raw candidate generation, provider-backed scientific review, and execution review
+- Full idea/review loop: Gemini / OpenCode DeepSeek / Codex for raw candidate generation, provider-backed scientific review, and execution review. Scheduled provider-backed gates require explicit provider parameters; the provider-free default fails closed / `partial` instead of silently succeeding.
 
 Project commands include:
 

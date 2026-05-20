@@ -21,7 +21,7 @@
 
 | 默认时间 | 任务名 | 入口脚本 | 输出位置 | 边界 |
 | --- | --- | --- | --- | --- |
-| 每天 12:00 | `DailyArxivEmbodiedAIScout` | `.claude/scripts/run_daily_arxiv_task.ps1` | `projects/arxiv-daily/scheduled-task.log` | 负责 arXiv mirror sync、daily pipeline、Gemini raw candidates、DeepSeek scientific review、novelty/baseline scan、Codex execution review、survival decision、默认 `seed-candidates-only` publish gate 和质量审计；可能因为 Zotero/CLI/网络缺失返回 `partial`。 |
+| 每天 12:00 | `DailyArxivEmbodiedAIScout` | `.claude/scripts/run_daily_arxiv_task.ps1` | `projects/arxiv-daily/scheduled-task.log` | 负责 arXiv mirror sync、daily pipeline、Gemini raw candidates、novelty/baseline scan、survival decision、默认 `seed-candidates-only` publish gate 和质量审计；默认 provider-free。DeepSeek/Codex provider-backed gates 只有显式 provider 参数后才完成；否则会 fail-closed / `partial`，不写 formal seed。 |
 | 每天 16:30 | `DailyCodexSeedReview` | `.claude/scripts/run_daily_codex_seed_review_task.ps1` | `projects/research-agenda/reviews/daily-codex-seed-review-task.log` 和 `YYYY-MM-DD-codex-seed-review.md` | 对当天或最近 7 天未审 seed packet 做 Codex execution review；不删除、不晋升、不声明 novelty，也不自动发布 formal seed。 |
 | 每周日 20:00 | `WeeklyResearchAgendaReview` | `.claude/scripts/run_weekly_agenda_review_task.ps1` | `projects/research-agenda/reviews/weekly-agenda-review-task.log`、`YYYY-MM-DD-weekly-agenda-review.md`、`YYYY-MM-DD-weekly-top-tier-review.md` | 汇总一周 agenda 状态、审计结果和 top-tier pressure test；不会自动移动 idea 文件夹。 |
 
@@ -300,6 +300,15 @@ v2 相关 CLI flags：
 | `--legacy-import-fill` | flag | 手动恢复旧的 import fill 行为。默认关闭，所以 `min_new_imports=10` 不会强制 v2 import/read 10 篇。 |
 | `--allow-test-provider-for-formal` | flag | 仅限手动测试。允许 formal mode 使用 JSON provider fixture，并记录 test-provider risk；scheduled wrappers 不得设置。 |
 
+Scheduled daily wrapper 另有 PowerShell 参数：
+
+| Wrapper 参数 | 取值 | 用途 |
+| --- | --- | --- |
+| `-DeepSeekProvider` | `none`, `opencode` | 默认为 `none`。只有显式设为 `opencode` 时，wrapper 才向 pipeline 传 `--deepseek-provider opencode`。 |
+| `-CodexExecutionProvider` | `none`, `codex-cli` | 默认为 `none`。只有显式设为 `codex-cli` 时，wrapper 才向 pipeline 传 `--codex-execution-provider codex-cli`。 |
+
+默认 scheduled wrapper 不传 provider 参数，因此 provider-backed DeepSeek/Codex gates 不会被误报为完成。没有 provider 参数时，v2 fail-closed / `partial` 是预期安全行为，不是 silent success。
+
 默认 publish policy 是 `seed-candidates-only`：通过 pre-publish gates 的候选写入 `projects/research-agenda/seed-candidates/`，不会写入 `projects/research-agenda/idea_bank/seed/`。formal seed publish 默认关闭，必须同时满足：
 
 - `--v2-publish-policy formal`
@@ -310,7 +319,7 @@ v2 相关 CLI flags：
 
 v0.2.1 里，`paper_intake_triage.py` 会输出 `selected_for_deep_read`，daily pipeline 用这些 stable `arxiv_id` 同时控制 Zotero import attempts 和 Claudian deep-read attempts。默认 target 是 3 篇，hard cap 是 4 篇；除非显式启用 `--legacy-import-fill`，旧的 `min_new_imports=10` 不再把 v2 import/read 数量拉回 10。
 
-Formal novelty verification 不能只依赖 local claim graph 或 local arXiv mirror。`novelty_scan.v1` 会记录 `verification_scope`、`external_providers_used` 和 `formal_promotion_allowed`。v0.2.1 的最低外部 scope 是 `local_plus_arxiv_api`；如果只用了 arXiv API，会记录 `formal_publish_risk=external_scope_arxiv_only_not_full_prior_art`，表示这不是完整 prior-art review。
+Formal novelty verification 不能只依赖 local claim graph 或 local arXiv mirror。`novelty_scan.v1` 会记录 `verification_scope`、`external_providers_used` 和 `formal_promotion_allowed`。v0.2.1 的最低外部 scope 是 `local_plus_arxiv_api`；如果只用了 arXiv API，会记录 `formal_publish_risk=external_scope_arxiv_only_not_full_prior_art`。这只是最低 external arXiv probe，不是完整 prior-art verification。无人值守 scheduled formal publish 仍应要求更广的 prior-art artifact，例如 Semantic Scholar、OpenAlex 或人工 prior-art review。
 
 Formal provider provenance 也更严格：`provider=json` 可以继续用于 seed-candidates-only fixture 和 CI，但 formal mode 默认拒绝它。只有手动传入 `--allow-test-provider-for-formal` 才能继续测试 formal path，并且 manifest / publish result / audit 会记录 `test_provider_used_for_formal=true` 和 `formal_publish_risk=test_provider_not_production_provenance`。
 
@@ -445,6 +454,12 @@ powershell -ExecutionPolicy Bypass -File .claude/scripts/register_daily_arxiv_ta
 powershell -ExecutionPolicy Bypass -File .claude/scripts/run_daily_arxiv_task.ps1
 ```
 
+默认手动触发也是 provider-free，只会进入 v2 state machine，不会把 DeepSeek/Codex provider-backed gates 当成已完成。要做显式 provider-backed rehearsal：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .claude/scripts/run_daily_arxiv_task.ps1 -DeepSeekProvider opencode -CodexExecutionProvider codex-cli
+```
+
 日志：
 
 ```powershell
@@ -521,10 +536,16 @@ smoke-test cron 示例只作结构参考，不会写 Zotero 或 vault：
 0 12 * * * cd /path/to/local-domain-expert-vault && python3 .claude/scripts/arxiv_metadata_sync.py --incremental --days-back 60 --overlap-days 3 && python3 .claude/scripts/daily_arxiv_pipeline.py --dry-run --source mirror-first --max-candidates 30 --days-back 14 >> projects/arxiv-daily/cron.log 2>&1
 ```
 
-真实每日任务示例会写入本地 `projects/` 运行产物，并在你配置 Zotero / Claudian / Gemini / OpenCode DeepSeek / Codex 后继续执行导入、精读、raw candidate 生成和 v0.2 pre-publish gates。默认仍是 `seed-candidates-only`，不会发布 formal seed：
+真实每日任务示例会写入本地 `projects/` 运行产物，并继续执行导入、精读、raw candidate 生成和 v0.2 pre-publish gates。默认仍是 provider-free `seed-candidates-only`，不会发布 formal seed；没有 explicit provider flags 时会 fail-closed / `partial`：
 
 ```cron
 0 12 * * * cd /path/to/local-domain-expert-vault && python3 .claude/scripts/arxiv_metadata_sync.py --incremental --days-back 60 --overlap-days 3 && python3 .claude/scripts/daily_arxiv_pipeline.py --once --source mirror-first --idea-mode template --skip-read --max-candidates 40 --days-back 14 --v2-publish-policy seed-candidates-only >> projects/arxiv-daily/cron.log 2>&1
+```
+
+如果要手动 provider-backed rehearsal，pipeline 需要显式追加：
+
+```bash
+--deepseek-provider opencode --codex-execution-provider codex-cli
 ```
 
 ## 14. 状态解释

@@ -2,7 +2,13 @@ param(
   [switch]$DryRun,
   [switch]$ShowLocalPaths,
   [string]$TaskName = "DailyArxivEmbodiedAIScout",
-  [string]$Time = "12:00"
+  [string]$Time = "12:00",
+
+  [ValidateSet("none", "opencode")]
+  [string]$DeepSeekProvider = "none",
+
+  [ValidateSet("none", "codex-cli")]
+  [string]$CodexExecutionProvider = "none"
 )
 
 $ErrorActionPreference = "Stop"
@@ -12,7 +18,15 @@ $VaultRoot = Resolve-Path (Join-Path $ScriptPath "..\..")
 $LogDir = Join-Path $VaultRoot "projects\arxiv-daily"
 $WrapperPath = Join-Path $ScriptPath "run_daily_arxiv_task.ps1"
 
-$TaskArguments = "-NoProfile -ExecutionPolicy Bypass -File `"$WrapperPath`""
+$WrapperArguments = @()
+if ($DeepSeekProvider -ne "none") {
+  $WrapperArguments += @("-DeepSeekProvider", $DeepSeekProvider)
+}
+if ($CodexExecutionProvider -ne "none") {
+  $WrapperArguments += @("-CodexExecutionProvider", $CodexExecutionProvider)
+}
+$WrapperArgumentText = if ($WrapperArguments.Count -gt 0) { " " + ($WrapperArguments -join " ") } else { "" }
+$TaskArguments = "-NoProfile -ExecutionPolicy Bypass -File `"$WrapperPath`"$WrapperArgumentText"
 $CurrentUser = "$env:USERDOMAIN\$env:USERNAME"
 $TimeParts = $Time.Split(":")
 if ($TimeParts.Count -ne 2) {
@@ -24,7 +38,7 @@ if ($DryRun) {
   $DisplayUser = if ($ShowLocalPaths) { $CurrentUser } else { "<current-user>" }
   $DisplayVaultRoot = if ($ShowLocalPaths) { $VaultRoot } else { "<vault-root>" }
   $DisplayWrapperPath = if ($ShowLocalPaths) { $WrapperPath } else { "<vault-root>\.claude\scripts\run_daily_arxiv_task.ps1" }
-  $DisplayTaskArguments = if ($ShowLocalPaths) { $TaskArguments } else { "-NoProfile -ExecutionPolicy Bypass -File `"<vault-root>\.claude\scripts\run_daily_arxiv_task.ps1`"" }
+  $DisplayTaskArguments = if ($ShowLocalPaths) { $TaskArguments } else { "-NoProfile -ExecutionPolicy Bypass -File `"<vault-root>\.claude\scripts\run_daily_arxiv_task.ps1`"$WrapperArgumentText" }
   $DisplayLogDir = if ($ShowLocalPaths) { $LogDir } else { "<vault-root>\projects\arxiv-daily" }
   Write-Host "DRY-RUN Register-ScheduledTask -TaskName $TaskName -UserId $DisplayUser -DailyAt $Time"
   Write-Host "VaultRoot: $DisplayVaultRoot"
@@ -54,7 +68,7 @@ try {
 catch {
   Write-Warning "Register-ScheduledTask failed: $($_.Exception.Message)"
   Write-Host "Falling back to schtasks.exe /Create for the current user."
-  $LaunchScript = "& `"$WrapperPath`""
+  $LaunchScript = "& `"$WrapperPath`"$WrapperArgumentText"
   $EncodedLaunchScript = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($LaunchScript))
   $TaskRun = "powershell.exe -NoProfile -ExecutionPolicy Bypass -EncodedCommand $EncodedLaunchScript"
   $Result = & schtasks.exe /Create /TN $TaskName /SC DAILY /ST $Time /TR $TaskRun /F 2>&1

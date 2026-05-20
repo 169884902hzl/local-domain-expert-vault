@@ -78,14 +78,14 @@ v0.2.0 improves state control, review ordering, auditability, and rollout safety
 
 ## v0.2.1: Formal Publish Hardening Rehearsal
 
-v0.2.1 是 hardening release，不是 formal publish enablement。Scheduled daily automation 仍默认走 `seed-candidates-only`，不会自动写入 `projects/research-agenda/idea_bank/seed/`。
+v0.2.1 是 hardening release，不是 formal publish enablement。Scheduled daily automation 仍默认 provider-free、`seed-candidates-only`，不会自动写入 `projects/research-agenda/idea_bank/seed/`。默认包装器会进入 v2 state machine，但 DeepSeek/Codex provider-backed gates 只有在显式配置 provider 参数后才会完成；没有这些参数时，review gates 会 fail-closed / `partial`，这是预期安全行为。
 
 关键变化：
 
 - v2 daily intake 由 `paper_intake_triage.py` 的 `selected_for_deep_read` 控制 Zotero import 和 Claudian deep-read；默认 target 是 3 篇，日常 hard cap 是 4 篇，旧的 `min_new_imports=10` 不再把 v2 deep read 拉回 10 篇。
 - `paper_intake_triage.py` 同时支持 flat JSONL 和 nested `RankedPaper.to_dict()` JSONL，并记录稳定 `arxiv_id` 和 original candidate index。
-- Formal publish 要求 novelty verification 不是 `local_only`。v0.2.1 最低接受 `local_plus_arxiv_api`，并记录 `formal_publish_risk=external_scope_arxiv_only_not_full_prior_art`，表示这不是完整 prior-art review。
-- Formal mode 默认要求 DeepSeek provider mode 是 `opencode`，Codex execution provider mode 是 `codex-cli`。`provider=json` 只允许显式手动测试覆盖，并会记录 `test_provider_not_production_provenance` 风险。
+- Formal publish 要求 novelty verification 不是 `local_only`。v0.2.1 最低接受 `local_plus_arxiv_api`，并记录 `formal_publish_risk=external_scope_arxiv_only_not_full_prior_art`；这只是最低 arXiv API probe，不是完整 prior-art verification。
+- Formal mode 默认要求 DeepSeek provider mode 是 `opencode`，Codex execution provider mode 是 `codex-cli`。scheduled wrapper 必须显式注册 `-DeepSeekProvider opencode` 和 `-CodexExecutionProvider codex-cli`，或手动调用 pipeline 时传入 `--deepseek-provider opencode` 和 `--codex-execution-provider codex-cli`，才会完成 provider-backed review。`provider=json` 只允许显式手动测试覆盖，并会记录 `test_provider_not_production_provenance` 风险。
 - v2 artifacts 使用更深的 JSON Schema validation；promotion-critical nested fields、enum、`candidate_id` 和 cross-artifact alignment 会被校验。
 - Formal seed publish 增加 lock、duplicate guard、no-overwrite staging 和 quarantine invariant；scheduled wrappers 仍不得包含 formal publish flags。
 
@@ -146,7 +146,7 @@ python .claude/scripts/kb_search.py "diffusion policy DLO" --limit 5
 
 | 默认时间 | Windows 任务名 | 包装脚本 | 做什么 |
 | --- | --- | --- | --- |
-| 每天 12:00 | `DailyArxivEmbodiedAIScout` | `run_daily_arxiv_task.ps1` | 增量同步 arXiv OAI-PMH metadata mirror，运行 mirror-first daily pipeline，触发 Zotero/Claudian/Gemini/DeepSeek/Codex v2 gates，并写每日质量审计；默认只走 `seed-candidates-only` rollout，不自动发布 formal seed。 |
+| 每天 12:00 | `DailyArxivEmbodiedAIScout` | `run_daily_arxiv_task.ps1` | 增量同步 arXiv OAI-PMH metadata mirror，运行 mirror-first daily pipeline，进入 Zotero/Claudian/Gemini/DeepSeek/Codex v2 state machine，并写每日质量审计；默认 provider-free、只走 `seed-candidates-only` rollout，不自动发布 formal seed。DeepSeek/Codex provider-backed gates 只有显式 provider 配置后才完成。 |
 | 每天 16:30 | `DailyCodexSeedReview` | `run_daily_codex_seed_review_task.ps1` | 读取当天或最近 7 天未审的 seed packet、DeepSeek scientific review 和 evidence packet，生成 Codex execution review；不会自动把 idea 晋升成 formal seed。 |
 | 每周日 20:00 | `WeeklyResearchAgendaReview` | `run_weekly_agenda_review_task.ps1` | 汇总一周 research agenda 状态、质量审计和 top-tier idea pressure test，输出周报；不会自动移动 idea 文件夹。 |
 
@@ -683,12 +683,24 @@ powershell -ExecutionPolicy Bypass -File .claude/scripts/run_daily_arxiv_task.ps
 1. 通过 OAI-PMH 增量同步 arXiv `cs/stat` metadata mirror。
 2. 运行 `daily_arxiv_pipeline.py --once --source mirror-first`。
 3. 使用 Gemini divergent idea 生成 raw candidates。
-4. 运行 portfolio selection、DeepSeek scientific review、novelty/baseline scan、Codex execution review 和 survival decision。
+4. 运行 portfolio selection、novelty/baseline scan、survival decision，并进入 DeepSeek scientific review / Codex execution review gates。
 5. 通过 `publish_research_run.py` 按默认 `seed-candidates-only` policy 写入候选桶；不会自动写 formal seed。
 6. 写入每日日志。
 7. 运行自动化质量审计。
 
-注意：包装器默认会调用 Gemini CLI 和 OpenCode / DeepSeek，并尝试 Zotero/Claudian 路径。没有相关配置时，运行结果可能是 `partial`，这不等于基础 vault 坏了。
+默认每日包装器不传 DeepSeek/Codex provider 参数。要做 provider-backed rehearsal，显式运行：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .claude/scripts/run_daily_arxiv_task.ps1 -DeepSeekProvider opencode -CodexExecutionProvider codex-cli
+```
+
+或手动调用 pipeline：
+
+```powershell
+python .claude/scripts/daily_arxiv_pipeline.py --once --source mirror-first --deepseek-provider opencode --codex-execution-provider codex-cli
+```
+
+没有 provider 参数时，v2 review gates 会 fail-closed / `partial`，不会写 formal seed。这是安全默认值，不是 silent success，也不表示基础 vault 坏了。即使使用 `local_plus_arxiv_api`，它也只是最低外部 arXiv probe，不是完整 prior-art verification；无人值守 formal publish 需要更广的 prior-art artifact，例如 Semantic Scholar、OpenAlex 或人工 prior-art review。
 
 ### 4. 注册 Windows 计划任务
 
