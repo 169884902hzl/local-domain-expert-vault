@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Research Seed v2 PDF Evidence Anchors",
+  "type": "object",
+  "required": ["schema_version", "run_date", "records"],
+  "properties": {
+    "schema_version": {"type": "string", "const": "pdf_evidence_anchors.v1"},
+    "run_date": {"type": "string"},
+    "records": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/paper_anchor_record"}
+    },
+    "artifact_hashes": {"type": "object"},
+    "boundary": {"type": "string"}
+  },
+  "$defs": {
+    "paper_anchor_record": {
+      "type": "object",
+      "required": ["schema_version", "run_date", "paper_id", "source_pdf", "source_note", "anchors"],
+      "properties": {
+        "schema_version": {"type": "string", "const": "pdf_evidence_anchors.v1"},
+        "run_date": {"type": "string"},
+        "paper_id": {"type": "string", "minLength": 1},
+        "source_pdf": {"type": "string"},
+        "source_note": {"type": "string"},
+        "anchors": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/anchor"}
+        }
+      },
+      "additionalProperties": true
+    },
+    "anchor": {
+      "type": "object",
+      "required": [
+        "anchor_id",
+        "anchor_type",
+        "anchor_source",
+        "extraction_method",
+        "confidence",
+        "requires_human_check"
+      ],
+      "properties": {
+        "anchor_id": {"type": "string", "minLength": 1},
+        "anchor_type": {
+          "type": "string",
+          "enum": ["section", "figure", "table", "caption", "result_row", "snippet"]
+        },
+        "anchor_source": {
+          "type": "string",
+          "enum": ["note_section", "pdf_text", "pdf_table", "pdf_figure_caption", "manual_pdf_locator", "result_row"]
+        },
+        "section": {"type": "string"},
+        "figure": {"type": "string"},
+        "table": {"type": "string"},
+        "page": {"type": ["integer", "null"], "minimum": 1},
+        "snippet": {"type": "string"},
+        "row_index": {"type": ["integer", "null"], "minimum": 0},
+        "row_text": {"type": "string"},
+        "row_cells": {"type": "array", "items": {"type": "string"}},
+        "metric_name": {"type": "string"},
+        "baseline_name": {"type": "string"},
+        "reported_value": {"type": "string"},
+        "task_or_dataset": {"type": "string"},
+        "extraction_method": {
+          "type": "string",
+          "enum": ["note_section", "pdfplumber", "pdf_text", "pdf_table", "manual"]
+        },
+        "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+        "requires_human_check": {"type": "boolean"}
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"anchor_type": {"const": "result_row"}},
+            "required": ["anchor_type"]
+          },
+          "then": {
+            "required": ["page", "row_index", "row_text", "metric_name", "baseline_name", "reported_value", "task_or_dataset"]
+          }
+        }
+      ],
+      "additionalProperties": true
+    }
+  }
+}

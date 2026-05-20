@@ -28,7 +28,7 @@ from research_agenda_common import (
     split_csv,
     today,
 )
-from research_seed_v2_common import artifact_hashes, candidate_id, ensure_v2_dirs, write_run_artifact
+from research_seed_v2_common import artifact_dir, artifact_hashes, candidate_id, ensure_v2_dirs, read_json, write_run_artifact
 
 
 MIN_MECHANISM_SOURCES = 5
@@ -45,6 +45,12 @@ SOURCE_AVAILABILITY_PATTERNS = [
     "full text",
     "candidate 记录",
 ]
+HIGH_VALUE_TENSION_RELATIONS = {
+    "contradicts",
+    "baseline_for",
+    "limits",
+    "exposes_gap",
+}
 QUANT_OR_MECHANISM_MARKERS = [
     "%",
     " vs ",
@@ -1804,6 +1810,38 @@ def _sidecar_context(run_date: str) -> dict[str, Any]:
     }
 
 
+def _cross_paper_tension_priorities(run_date: str, *, limit: int = 12) -> list[dict[str, Any]]:
+    path = artifact_dir(run_date) / "tension-map.json"
+    if not path.exists():
+        return []
+    payload = read_json(path)
+    priorities: list[dict[str, Any]] = []
+    for item in payload.get("tensions", []):
+        if not isinstance(item, dict):
+            continue
+        if item.get("tension_scope") != "cross_paper":
+            continue
+        if item.get("do_not_use_as_seed_evidence") is True:
+            continue
+        relation = str(item.get("relation") or "")
+        tension_type = str(item.get("tension_type") or "")
+        if relation not in HIGH_VALUE_TENSION_RELATIONS and "gap" not in tension_type:
+            continue
+        priorities.append(
+            {
+                "tension_id": item.get("tension_id", ""),
+                "tension_type": tension_type,
+                "relation": relation,
+                "confidence": item.get("confidence", ""),
+                "supporting_edges": item.get("supporting_edges", []),
+                "supporting_nodes": item.get("supporting_nodes", []),
+                "summary": item.get("summary", ""),
+                "boundary": "candidate_generation_input_only_not_seed_evidence",
+            }
+        )
+    return priorities[:limit]
+
+
 def _render_divergent_prompt(
     candidates: list[tuple[int, dict[str, Any], list[dict[str, Any]], int]],
     *,
@@ -1852,6 +1890,7 @@ def _render_divergent_prompt(
             "risk_class must be one of grounded, mechanism, breakthrough. world_model_role must be none unless research_claim_type is world_model_simulation.",
             "Generate both groups: about half evidence_bound candidates tightly grounded in today's papers, and about half wild_engineering candidates that make a larger engineering, architecture, control-interface, or evaluation leap while still naming evidence and falsification.",
             "Before generating candidates, privately extract paper-level research primitives: central claim, hidden assumption, strongest baseline, unmodeled latent variable, evaluation blind spot, interface boundary, transfer failure, reusable primitive. Do not output this primitive table unless it is embedded compactly in candidate fields.",
+            "Prioritize provided cross-paper contradiction, baseline, and benchmark-gap tensions as candidate-generation inputs, but do not treat them as seed evidence unless downstream gates preserve anchored support.",
             "Before final candidates, privately build a tension map: assumption conflicts, evaluation gaps, missing latent variables, interface boundary mismatches, strong baselines that kill naive drafts, benchmark opportunities, representation/action-abstraction opportunities, and anti-roadmap bets.",
             "Generate 16 private drafts across grounded, mechanism, measurement/data, world-model, transfer/embodiment, and breakthrough passes, then output only the best 6-8 as a balanced portfolio.",
             "Treat the daily set as a research portfolio, not a single theme. Target this mix: 2 grounded engineering ideas, 2 mechanism ideas, 1 measurement/data idea, 1 world-model idea, 1 transfer/embodiment idea, and 1 breakthrough/anti-roadmap bet. Overlap is allowed, but portfolio_slot must say the primary slot.",
@@ -1985,6 +2024,7 @@ def _render_divergent_prompt(
         "retry_context": retry_context,
         "newly_read_evidence": [_record_packet(record) for record in _dedupe_sources(focus_records, limit=28)],
         "sidecar_context": _sidecar_context(run_date or today()),
+        "cross_paper_tension_priorities": _cross_paper_tension_priorities(run_date or today()),
         "matrix_clusters": [
             _jsonable_candidate(axis, evidence, recent)
             for _, axis, evidence, recent in candidates[:8]

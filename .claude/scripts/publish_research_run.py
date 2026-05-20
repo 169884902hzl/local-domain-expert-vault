@@ -117,7 +117,14 @@ def _write_seed_stage(run_date: str, slug: str, candidate: dict[str, Any], decis
     if not dry_run:
         staging.mkdir(parents=True, exist_ok=True)
     write_text(staging / "idea.md", _render_idea(candidate, decision, run_date), dry_run=dry_run)
-    for name in ["survival-decision.json", "deepseek-review.json", "novelty-scan.json", "codex-execution-review.json"]:
+    for name in [
+        "survival-decision.json",
+        "deepseek-review.json",
+        "novelty-scan.json",
+        "codex-execution-review.json",
+        "manual-prior-art-review.json",
+        "baseline-table.json",
+    ]:
         copy_json_artifact(artifact_dir(run_date) / name, staging / name, dry_run=dry_run)
     write_json(
         staging / "artifact-hashes.json",
@@ -209,6 +216,7 @@ def _result(
         "formal_seed_publish_allowed": bool(allow_formal_seed_publish),
         "scheduled_daily_switched": bool(manifest.get("scheduled_daily_switched", False)),
         "formal_seed_written": any(item.get("status") == "seed_written" for item in (published or [])),
+        "formal_rehearsal_written": any("formal-rehearsal" in item.get("target", "") for item in (bucketed or [])),
         "test_provider_used_for_formal": test_provider_used,
         "formal_publish_risk": risk,
         "published": published or [],
@@ -257,7 +265,14 @@ def _formal_publish_risk(run_date: str, *, allow_test_provider_for_formal: bool)
             if not isinstance(item, dict):
                 continue
             for risk in item.get("risks", []):
-                if risk in {"anchorless_core_evidence_risk", "speculative_tension_not_formal_seed_evidence"}:
+                if risk in {
+                    "anchorless_core_evidence_risk",
+                    "speculative_tension_not_formal_seed_evidence",
+                    "manual_prior_art_review_missing",
+                    "stale_external_novelty_cache",
+                    "strongest_baseline_unknown",
+                    "active_seed_without_pilot_plan",
+                }:
                     risks.append(str(risk))
     return ";".join(dict.fromkeys(risks))
 
@@ -327,6 +342,8 @@ def _formal_novelty_errors(run_date: str) -> list[str]:
             errors.append(f"formal_novelty_missing_external_provider:{cid}")
         if not (providers & BROAD_EXTERNAL_NOVELTY_PROVIDERS):
             errors.append(f"formal_novelty_missing_broad_external_provider:{cid}")
+        if item.get("stale_external_novelty_cache") is True:
+            errors.append(f"formal_novelty_stale_external_cache:{cid}")
     return errors
 
 
@@ -422,7 +439,18 @@ def publish(
         (agenda_root() / "idea_bank" / "seed").mkdir(parents=True, exist_ok=True)
     survival = read_json(artifact_dir(run_date) / "survival-decision.json")
     candidates = _load_final_candidates(run_date)
-    hashes = artifact_hashes(run_date, ["selected-candidates.json", "deepseek-review.json", "novelty-scan.json", "codex-execution-review.json", "survival-decision.json"])
+    hashes = artifact_hashes(
+        run_date,
+        [
+            "selected-candidates.json",
+            "deepseek-review.json",
+            "novelty-scan.json",
+            "codex-execution-review.json",
+            "manual-prior-art-review.json",
+            "baseline-table.json",
+            "survival-decision.json",
+        ],
+    )
     plan = {"schema_version": "seed_write_plan.v1", "run_date": run_date, "items": []}
     published: list[dict[str, str]] = []
     bucketed: list[dict[str, str]] = []
@@ -452,17 +480,21 @@ def publish(
             continue
         slug = slugify(str(candidate.get("title") or decision.get("candidate_title") or decision.get("candidate_id")))
         if target_policy == "seed-candidates-only":
+            target_bucket = "seed-candidates/formal-rehearsal" if decision.get("publish_target") == "formal-rehearsal" else "seed-candidates/accepted"
             bucketed.append(
                 _write_bucket_item(
                     run_date=run_date,
-                    bucket="seed-candidates",
+                    bucket=target_bucket,
                     slug=slug,
                     candidate=candidate,
-                    decision={**decision, "publish_target": "seed-candidates"},
+                    decision={**decision, "publish_target": decision.get("publish_target") or target_bucket},
                     hashes=hashes,
                     dry_run=dry_run,
                 )
             )
+            continue
+        if target_policy == "formal" and decision.get("active_seed_allowed") is not True:
+            blocked.append(f"active_seed_not_allowed:{decision.get('candidate_id')}")
             continue
         target = agenda_root() / "idea_bank" / "seed" / slug
         _assert_under_root(target)

@@ -1,5 +1,32 @@
 # Changelog
 
+## v0.3.0 - Supervised Research-Validity Hardening
+
+### Added
+
+- `manual_prior_art_review.py` and `manual_prior_art_review.v1` for human prior-art review templates, completion validation, and active-seed gating.
+- `pdf_evidence_extract.py` and `pdf_evidence_anchors.v1` for best-effort PDF/text/table evidence anchors without modifying `raw/`.
+- `baseline_table.py` and `baseline_table.v1` to separate nearest works, candidate baseline guesses, Codex feasibility baselines, manual strongest baseline, and final strongest baseline.
+- Cross-paper claim graph edges with explicit relation rules, overlap evidence, bounded confidence, and supporting node references.
+- Cross-paper tension fields, weekly resurrection review queues, pilot plan/result/strategy feedback files, and redacted research run packet export.
+
+### Changed
+
+- `formal_rehearsal_candidate` writes only to the seed-candidates formal-rehearsal bucket and never to `idea_bank/seed/`.
+- `--v2-publish-policy formal` writes formal seeds only when `active_seed_allowed=true`.
+- Active seed now requires completed human manual prior-art review, known strongest baseline, fresh broad external novelty, anchored core evidence, DeepSeek survival, Codex acceptance, and a minimal pilot plan.
+- `note_section` anchors are no longer treated as PDF/table verified evidence; `result_row` anchors require page/table/row/metric/baseline/reported value fields.
+- Novelty provider cache metadata now records TTL, expiry, provider status, normalized result fields, and provider health; stale cache is a risk marker only and cannot support active/formal promotion.
+
+### Safety
+
+- Scheduled formal publish remains disabled, and scheduled wrappers still must not pass formal/active publish flags.
+- v0.2.2 external novelty gates and v0.2.3 anchored evidence gates are not relaxed.
+- Manual prior-art review cannot bypass DeepSeek fatal flaws, Codex reject/rewrite, external novelty failure, stale cache, anchorless evidence, speculative tension, or missing survival decision.
+- OpenAlex, Semantic Scholar, and arXiv remain external probes, not complete human prior-art review.
+- Pilot feedback is a calibration signal, not publication proof.
+- Generated candidates remain review artifacts, not proven doctoral-level novelty, publishability, or experimental results.
+
 ## v0.2.3 - Evidence Graph Hardening
 
 ### Added

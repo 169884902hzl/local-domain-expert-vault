@@ -26,7 +26,10 @@
           "codex_action": {"type": "string"},
           "human_override_used": {"type": "boolean"},
           "risks": {"type": "array", "items": {"type": "string"}},
-          "publish_target": {"type": "string", "enum": ["seed", "seed-candidates", "killed", "parked", "rescue"]}
+          "formal_rehearsal_allowed": {"type": "boolean"},
+          "active_seed_allowed": {"type": "boolean"},
+          "pilot_ready_allowed": {"type": "boolean"},
+          "publish_target": {"type": "string", "enum": ["seed", "seed-candidates", "formal-rehearsal", "killed", "parked", "rescue"]}
         }
       }
     },

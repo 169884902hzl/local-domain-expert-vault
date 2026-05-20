@@ -56,6 +56,17 @@ VALID_CONTRIBUTION_SHAPES = {
     "failure_model",
     "dataset",
 }
+V03_RISK_MARKERS = {
+    "test_provider_not_production_provenance",
+    "manual_prior_art_review_missing",
+    "anchorless_core_evidence_risk",
+    "external_scope_arxiv_only_not_full_prior_art",
+    "stale_external_novelty_cache",
+    "strongest_baseline_unknown",
+    "speculative_tension_not_formal_seed_evidence",
+    "active_seed_without_manual_prior_art_review",
+    "active_seed_without_pilot_plan",
+}
 
 
 def _read(path: Path) -> str:
@@ -387,6 +398,7 @@ def _scan_text_for_seed_writer(path: Path, text: str) -> list[dict[str, str]]:
 
 def _audit_v2_state_machine(run_date: str) -> tuple[dict[str, Any], list[dict[str, str]]]:
     issues: list[dict[str, str]] = []
+    risk_markers: Counter[str] = Counter()
     run_path = run_dir(run_date)
     artifacts_path = artifact_dir(run_date)
     publish_result = run_path / "publish" / "publish-result.json"
@@ -442,6 +454,87 @@ def _audit_v2_state_machine(run_date: str) -> tuple[dict[str, Any], list[dict[st
             issues.append(_issue("FAIL", "v2_publish_result_manifest_seed_written_mismatch", "Publish result says formal seed written but manifest disagrees.", _rel(publish_result)))
         if manifest.get("scheduled_daily_switched") and publish_data.get("test_provider_used_for_formal"):
             issues.append(_issue("FAIL", "v2_scheduled_formal_test_provider_used", "Scheduled formal publish cannot use test provider override.", _rel(publish_result)))
+        if publish_data.get("test_provider_used_for_formal"):
+            risk_markers["test_provider_not_production_provenance"] += 1
+            issues.append(
+                _issue(
+                    "WARN",
+                    "test_provider_not_production_provenance",
+                    "Formal-provider test provenance is present; this is not production provenance.",
+                    _rel(publish_result),
+                )
+            )
+
+    survival_path = artifacts_path / "survival-decision.json"
+    survival_data = _json_read(survival_path)
+    if survival_data and not survival_data.get("_read_error"):
+        for decision in survival_data.get("decisions", []):
+            if not isinstance(decision, dict):
+                continue
+            cid = str(decision.get("candidate_id") or "unknown_candidate")
+            decision_risks = set()
+            for field in ["risks", "blocks"]:
+                values = decision.get(field, [])
+                if isinstance(values, list):
+                    decision_risks.update(str(value) for value in values)
+            for marker in sorted(decision_risks & V03_RISK_MARKERS):
+                risk_markers[marker] += 1
+                level = "WARN"
+                if marker in {"active_seed_without_pilot_plan"} and decision.get("active_seed_allowed") is True:
+                    level = "FAIL"
+                issues.append(_issue(level, marker, f"{cid}: {marker}", _rel(survival_path)))
+            if decision.get("active_seed_allowed") is True and "manual_prior_art_review_missing" in decision_risks:
+                risk_markers["active_seed_without_manual_prior_art_review"] += 1
+                issues.append(
+                    _issue(
+                        "FAIL",
+                        "active_seed_without_manual_prior_art_review",
+                        f"{cid}: active seed is marked allowed without completed manual prior-art review.",
+                        _rel(survival_path),
+                    )
+                )
+            if decision.get("active_seed_allowed") is True and "active_seed_without_pilot_plan" in decision_risks:
+                risk_markers["active_seed_without_pilot_plan"] += 1
+                issues.append(
+                    _issue(
+                        "FAIL",
+                        "active_seed_without_pilot_plan",
+                        f"{cid}: active seed is marked allowed without minimal pilot plan.",
+                        _rel(survival_path),
+                    )
+                )
+    elif survival_path.exists():
+        issues.append(_issue("FAIL", "v2_survival_decision_invalid", str(survival_data.get("_read_error")), _rel(survival_path)))
+
+    novelty_path = artifacts_path / "novelty-scan.json"
+    novelty_data = _json_read(novelty_path)
+    if novelty_data and not novelty_data.get("_read_error"):
+        for scan in novelty_data.get("scans", []):
+            if not isinstance(scan, dict):
+                continue
+            cid = str(scan.get("candidate_id") or "unknown_candidate")
+            risk_text = str(scan.get("formal_publish_risk") or "")
+            for marker in ["external_scope_arxiv_only_not_full_prior_art", "stale_external_novelty_cache"]:
+                if marker in risk_text or scan.get(marker) is True:
+                    risk_markers[marker] += 1
+                    issues.append(_issue("WARN", marker, f"{cid}: {marker}", _rel(novelty_path)))
+
+    tension_path = artifacts_path / "tension-map.json"
+    tension_data = _json_read(tension_path)
+    if tension_data and not tension_data.get("_read_error"):
+        for tension in tension_data.get("tensions", []):
+            if not isinstance(tension, dict):
+                continue
+            if tension.get("do_not_use_as_seed_evidence") is True or tension.get("tension_scope") == "speculative":
+                risk_markers["speculative_tension_not_formal_seed_evidence"] += 1
+                issues.append(
+                    _issue(
+                        "WARN",
+                        "speculative_tension_not_formal_seed_evidence",
+                        f"{tension.get('tension_id', 'unknown_tension')}: speculative tension cannot support formal/active seed evidence.",
+                        _rel(tension_path),
+                    )
+                )
 
     seed_root = vault_path("projects", "research-agenda", "idea_bank", "seed")
     v2_seed_count = 0
@@ -488,6 +581,7 @@ def _audit_v2_state_machine(run_date: str) -> tuple[dict[str, Any], list[dict[st
             "v2_seed_count": v2_seed_count,
             "legacy_seed_count": legacy_seed_count,
             "human_override_count": override_count,
+            "risk_markers": dict(sorted(risk_markers.items())),
             "boundary": "Only publish_research_run.py may create or modify formal seed folders.",
         },
         issues,
@@ -877,6 +971,7 @@ def render_markdown(report: dict[str, Any]) -> str:
             f"- v2_seed_count: {v2_state.get('v2_seed_count', 0)}",
             f"- legacy_seed_count: {v2_state.get('legacy_seed_count', 0)}",
             f"- human_override_count: {v2_state.get('human_override_count', 0)}",
+            f"- risk_markers: {json.dumps(v2_state.get('risk_markers', {}), ensure_ascii=False, sort_keys=True)}",
             f"- boundary: {v2_state.get('boundary', '')}",
         ]
     )

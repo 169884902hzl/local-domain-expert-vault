@@ -825,6 +825,7 @@ def build_v2_review_stages(args: argparse.Namespace, run_date: str) -> list[tupl
         ("gemini_rescue_mutation", [sys.executable, ".claude/scripts/gemini_rescue_mutation.py", "--run-date", run_date], max(600, args.idea_timeout)),
         ("novelty_scan", novelty_cmd, 600),
         ("codex_execution_review", codex_cmd, max(600, codex_timeout)),
+        ("baseline_table", [sys.executable, ".claude/scripts/baseline_table.py", "--run-date", run_date], 240),
         ("survival_decision", survival_cmd, 300),
     ]
     if args.allow_human_override:
@@ -934,6 +935,7 @@ def run_research_seed_v2(
 
     for stage, command, timeout in [
         ("claim_graph", [sys.executable, ".claude/scripts/research_claim_graph.py", "--run-date", run_date], 240),
+        ("pdf_evidence_anchors", [sys.executable, ".claude/scripts/pdf_evidence_extract.py", "--run-date", run_date], 240),
         ("tension_map", [sys.executable, ".claude/scripts/tension_map.py", "--run-date", run_date], 240),
     ]:
         if not _v2_stage(stage, command, timeout=timeout, result=result, errors=errors):

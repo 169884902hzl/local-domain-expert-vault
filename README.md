@@ -17,7 +17,7 @@
 
 适合对象：需要长期追踪一个专业方向的研究生、PI / 实验室知识库维护者，以及希望把 LLM 变成“有本地文献记忆的领域专家”的研究者。
 
-当前公开版本：`v0.2.3`。`v0.1.0` 是首个可发行 local-first vault 版本，覆盖本地浏览、知识库审计、`kb_search.py` 检索、Zotero/Obsidian 配置说明、Paper Reading Workbench、arXiv mirror-first 自动化文档和 Windows 计划任务入口。`v0.2.0` 在此基础上加入 research-seed v2 状态机；`v0.2.1` 继续加固 scheduled formal publish 前的安全闸门；`v0.2.2` 把 external novelty scan 从 arXiv-only probe 升级为 OpenAlex / optional Semantic Scholar 的 multi-provider prior-art probe；`v0.2.3` 加固 anchored evidence graph，但仍不启用 scheduled formal publish。
+当前公开版本：`v0.3.0`。`v0.1.0` 是首个可发行 local-first vault 版本，覆盖本地浏览、知识库审计、`kb_search.py` 检索、Zotero/Obsidian 配置说明、Paper Reading Workbench、arXiv mirror-first 自动化文档和 Windows 计划任务入口。`v0.2.0` 在此基础上加入 research-seed v2 状态机；`v0.2.1` 继续加固 scheduled formal publish 前的安全闸门；`v0.2.2` 把 external novelty scan 从 arXiv-only probe 升级为 OpenAlex / optional Semantic Scholar 的 multi-provider prior-art probe；`v0.2.3` 加固 anchored evidence graph；`v0.3.0` 加入 supervised research-validity hardening，但仍不启用 scheduled formal publish。
 
 `v0.2.0` 是一次 workflow architecture upgrade：从 Gemini greenhouse + 后置审查 scaffold，升级为 transactional research-seed state machine。它改进的是状态控制、审查顺序、审计性和 rollout safety，不是声明系统已经能稳定产生已验证创新点。
 
@@ -117,6 +117,26 @@ v0.2.3 加固的是 evidence graph 质量，不是 formal publish enablement。`
 - formal target 下，如果核心 claim graph evidence 全是 low / note_only / requires_human_check，会被 `formal_core_evidence_not_anchored` 阻断；默认 `seed-candidates-only` 只记录 `anchorless_core_evidence_risk`。
 - Scheduled formal publish 仍保持禁用，v0.2.2 external novelty gate 没有放宽。
 - 生成的 candidates 仍不是已证明 doctoral-level novelty、publishability 或实验有效性。
+
+## v0.3.0: Supervised Research-Validity Hardening
+
+v0.3.0 不是 scheduled formal publish enablement，也不是 doctoral-level idea generator。它把 v0.2.3 的 anchored evidence graph 继续推进为人工监督下更可信的 formal rehearsal / active research seed pipeline：manual prior-art review、PDF/table/figure evidence anchors、baseline table、cross-paper claim edges、weekly resurrection、pilot feedback 和 exportable run packet 都成为显式 artifact。
+
+状态语义被拆开：
+
+- `formal_rehearsal_candidate` 只能写 `projects/research-agenda/seed-candidates/formal-rehearsal/`，不写 `projects/research-agenda/idea_bank/seed/`。
+- `active_seed` 只有在 `active_seed_allowed=true` 时，才允许手动 `--v2-publish-policy formal` 路径写 formal seed。
+- `pilot_ready` 不等同于 active seed；它还需要可执行 pilot plan、metric automation、baseline implementation path 和 resource budget。
+
+新的有效性边界：
+
+- active seed / pilot-ready 需要 completed `manual-prior-art-review.json`，且 human decision 必须是 `allow_active_seed`。
+- OpenAlex / Semantic Scholar / arXiv 仍只是 external probes，不是完整人工 prior-art review，也不是 novelty proof。
+- `baseline-table.json` 区分 nearest work、candidate baseline guess、Codex feasibility baseline、manual strongest baseline 和 final strongest baseline；nearest work 不等于 strongest baseline。
+- evidence graph 支持 PDF/table/figure anchors、`result_row` 和 cross-paper edges；`note_section` 仍不等价于 PDF/table verified evidence。
+- speculative tension、anchorless core evidence、stale novelty cache、Codex reject/rewrite、DeepSeek fatal flaw 和 external novelty failure 都不能被 manual artifact 绕过。
+- pilot feedback 是 strategy calibration signal，不是 publication proof。
+- generated candidates 仍不是已证明 doctoral-level novelty、publishability 或实验有效性。
 
 ## 它是什么 / 不是什么
 

@@ -35,6 +35,9 @@ ARTIFACT_SCHEMAS: dict[str, str] = {
     "gemini-mutations.json": "gemini_mutations.v1",
     "novelty-scan.json": "novelty_scan.v1",
     "codex-execution-review.json": "codex_execution_review.v1",
+    "manual-prior-art-review.json": "manual_prior_art_review.v1",
+    "pdf-evidence-anchors.json": "pdf_evidence_anchors.v1",
+    "baseline-table.json": "baseline_table.v1",
     "survival-decision.json": "survival_decision.v1",
     "publish-result.json": "publish_result.v1",
 }
@@ -53,6 +56,8 @@ FORMAL_SEED_REQUIRED_FILES = [
     "deepseek-review.json",
     "novelty-scan.json",
     "codex-execution-review.json",
+    "manual-prior-art-review.json",
+    "baseline-table.json",
     "artifact-hashes.json",
 ]
 
@@ -61,6 +66,9 @@ HARD_GATE_FIELDS = {
     "allow_deepseek_fatal_flaw": False,
     "allow_codex_reject": False,
     "allow_anchorless_core_evidence": False,
+    "allow_stale_external_cache": False,
+    "allow_manual_prior_art_bypass": False,
+    "allow_unknown_strongest_baseline": False,
 }
 V2_PUBLISH_POLICIES = {"disabled", "seed-candidates-only", "formal"}
 DEFAULT_V2_PUBLISH_POLICY = "seed-candidates-only"
@@ -118,6 +126,12 @@ def ensure_v2_dirs(run_date: str | None = None) -> None:
         root / "tensions",
         root / "greenhouse",
         root / "seed-candidates",
+        root / "seed-candidates" / "accepted",
+        root / "seed-candidates" / "formal-rehearsal",
+        root / "seed-candidates" / "needs-manual-prior-art",
+        root / "seed-candidates" / "needs-baseline-table",
+        root / "seed-candidates" / "needs-pdf-evidence",
+        root / "seed-candidates" / "needs-pilot-plan",
         root / "parked",
         root / "rescue",
         root / "overrides" / "human-overrides",

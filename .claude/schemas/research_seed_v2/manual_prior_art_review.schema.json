@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Research Seed v2 Manual Prior-Art Review",
+  "type": "object",
+  "required": ["schema_version", "run_date", "reviews"],
+  "properties": {
+    "schema_version": {"type": "string", "const": "manual_prior_art_review.v1"},
+    "run_date": {"type": "string"},
+    "reviews": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/review"}
+    },
+    "artifact_hashes": {"type": "object"},
+    "boundary": {"type": "string"}
+  },
+  "$defs": {
+    "review": {
+      "type": "object",
+      "required": [
+        "candidate_id",
+        "review_status",
+        "reviewer",
+        "decision",
+        "searched_sources",
+        "search_queries",
+        "nearest_works",
+        "strongest_baseline_judgment",
+        "remaining_delta",
+        "risk_acceptance",
+        "cannot_weaken"
+      ],
+      "properties": {
+        "candidate_id": {"type": "string", "minLength": 1},
+        "review_status": {"type": "string", "enum": ["template", "completed"]},
+        "reviewer": {"type": "string", "enum": ["human"]},
+        "reviewed_at": {"type": "string"},
+        "decision": {
+          "type": "string",
+          "enum": ["allow_active_seed", "park", "reject", "needs_more_search"]
+        },
+        "searched_sources": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "search_queries": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "nearest_works": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/nearest_work"}
+        },
+        "explicit_no_near_work_reason": {"type": "string"},
+        "strongest_baseline_judgment": {"$ref": "#/$defs/strongest_baseline_judgment"},
+        "known_overlap_risk": {"type": "string", "enum": ["low", "medium", "high", "unknown"]},
+        "remaining_delta": {"type": "string"},
+        "reason": {"type": "string"},
+        "limitations": {"type": "string"},
+        "risk_acceptance": {"type": "string"},
+        "cannot_weaken": {
+          "type": "array",
+          "items": {"type": "string"},
+          "contains": {"const": "deepseek_success_required"}
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"review_status": {"const": "completed"}},
+            "required": ["review_status"]
+          },
+          "then": {
+            "properties": {
+              "searched_sources": {"minItems": 1},
+              "search_queries": {"minItems": 1},
+              "remaining_delta": {"minLength": 1},
+              "risk_acceptance": {"minLength": 1},
+              "reason": {"minLength": 1}
+            }
+          }
+        }
+      ],
+      "additionalProperties": true
+    },
+    "nearest_work": {
+      "type": "object",
+      "required": ["title", "source", "overlap_type", "what_is_already_done", "remaining_delta"],
+      "properties": {
+        "title": {"type": "string"},
+        "source": {"type": "string"},
+        "url": {"type": "string"},
+        "overlap_type": {
+          "type": "string",
+          "enum": ["same_problem", "same_mechanism", "same_baseline", "adjacent", "weak"]
+        },
+        "what_is_already_done": {"type": "string"},
+        "remaining_delta": {"type": "string"}
+      },
+      "additionalProperties": true
+    },
+    "strongest_baseline_judgment": {
+      "type": "object",
+      "required": ["status", "baseline_name", "source_work_id", "why_strongest", "kill_condition", "implementation_feasibility"],
+      "properties": {
+        "status": {"type": "string", "enum": ["known", "unknown", "contested"]},
+        "baseline_name": {"type": "string"},
+        "source_work_id": {"type": "string"},
+        "source": {"type": "string"},
+        "why_strongest": {"type": "string"},
+        "kill_condition": {"type": "string"},
+        "metric_or_task": {"type": "string"},
+        "implementation_feasibility": {
+          "type": "string",
+          "enum": ["available", "needs_reimplementation", "unknown", "prohibitive"]
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}

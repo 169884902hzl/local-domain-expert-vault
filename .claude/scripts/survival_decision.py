@@ -7,7 +7,11 @@ from pathlib import Path
 from typing import Any
 
 from kb_common import safe_print
+from baseline_table import baseline_allows_active_seed, load_baseline_tables
+from manual_prior_art_review import active_seed_review_allowed, completed_review_by_candidate
+from research_agenda_common import slugify
 from research_seed_v2_common import (
+    agenda_v2_path,
     artifact_dir,
     artifact_hashes,
     candidate_id,
@@ -24,6 +28,7 @@ from research_seed_v2_common import (
 BROAD_EXTERNAL_NOVELTY_PROVIDERS = {"openalex", "semantic_scholar"}
 WEAK_CORE_CONFIDENCE = {"low", "unusable"}
 UNANCHORED_TYPES = {"note_only", "abstract", ""}
+PDF_VERIFIED_ANCHOR_TYPES = {"section", "snippet", "table", "figure", "result_row"}
 
 
 def _has_broad_external_provider(providers: list[str]) -> bool:
@@ -123,6 +128,30 @@ def _node_is_weak_or_unanchored(node: dict[str, Any]) -> bool:
     )
 
 
+def _pilot_plan(run_date: str, item: dict[str, Any]) -> dict[str, Any] | None:
+    slug = slugify(str(item.get("title") or candidate_id(item)))
+    path = agenda_v2_path("pilots", slug, "pilot-plan.json")
+    if not path.exists():
+        return None
+    try:
+        return read_json(path)
+    except Exception:
+        return None
+
+
+def _pilot_plan_allows_active_seed(plan: dict[str, Any] | None) -> bool:
+    if not plan:
+        return False
+    required = ["metric", "baseline_implementation_path", "resource_budget"]
+    return all(str(plan.get(field, "")).strip() for field in required)
+
+
+def _pilot_plan_allows_pilot_ready(plan: dict[str, Any] | None) -> bool:
+    if not _pilot_plan_allows_active_seed(plan):
+        return False
+    return bool(plan.get("executable") is True and str(plan.get("metric_automation", "")).strip())
+
+
 def _core_evidence_risks(
     item: dict[str, Any],
     claim_nodes: dict[str, dict[str, Any]],
@@ -158,6 +187,9 @@ def decide(
     input_errors: list[str] = []
     for artifact_name in ["selected-candidates.json", "deepseek-review.json", "novelty-scan.json", "codex-execution-review.json"]:
         input_errors.extend(f"{artifact_name}:{error}" for error in validate_artifact(run_date, artifact_name))
+    for artifact_name in ["manual-prior-art-review.json", "pdf-evidence-anchors.json", "baseline-table.json"]:
+        if (artifact_dir(run_date) / artifact_name).exists():
+            input_errors.extend(f"{artifact_name}:{error}" for error in validate_artifact(run_date, artifact_name))
     if input_errors:
         return {
             "schema_version": "survival_decision.v1",
@@ -188,6 +220,8 @@ def decide(
     codex_provider = codex_payload.get("provider_status", {})
     claim_nodes = _load_claim_nodes(run_date)
     tensions = _load_speculative_tensions(run_date)
+    manual_reviews = completed_review_by_candidate(run_date)
+    baseline_tables = load_baseline_tables(run_date)
     decisions: list[dict[str, Any]] = []
     for item in _final_candidates(selected_payload.get("selected", []), mutation_payload.get("mutations", [])):
         cid = candidate_id(item)
@@ -196,6 +230,9 @@ def decide(
         novelty = novelty_by_id.get(cid, {})
         codex = codex_by_id.get(cid, {})
         override = overrides.get(cid)
+        manual_review = manual_reviews.get(cid)
+        baseline_table = baseline_tables.get(cid)
+        pilot_plan = _pilot_plan(run_date, item)
         blocks: list[str] = []
         if deepseek_payload.get("status") != "success" or not deepseek_provider.get("provider_backed"):
             blocks.append("deepseek_not_provider_backed_success")
@@ -214,6 +251,11 @@ def decide(
             blocks.append("novelty_promotion_not_allowed")
         verification_scope = str(novelty.get("verification_scope") or "local_only")
         external_providers_used = [str(value) for value in novelty.get("external_providers_used", []) if value]
+        stale_external_cache = bool(novelty.get("stale_external_novelty_cache")) or any(
+            isinstance(summary, dict) and summary.get("cache_status") == "stale"
+            for provider, summary in novelty.get("provider_results", {}).items()
+            if provider in BROAD_EXTERNAL_NOVELTY_PROVIDERS
+        )
         if target_policy == "formal":
             if novelty.get("formal_promotion_allowed") is not True:
                 blocks.append("formal_novelty_promotion_not_allowed")
@@ -225,6 +267,8 @@ def decide(
                 blocks.append("formal_novelty_requires_external_provider")
             if not _has_broad_external_provider(external_providers_used):
                 blocks.append("formal_novelty_requires_openalex_or_semantic_scholar")
+            if stale_external_cache:
+                blocks.append("stale_external_novelty_cache")
         if novelty_class == "unknown" and not override:
             blocks.append("unknown_novelty_without_human_override")
         if novelty_class not in {"likely_open", "partial_overlap", "unknown"}:
@@ -238,6 +282,18 @@ def decide(
         if codex.get("action") != "accept_for_user_review":
             blocks.append(f"codex_action_not_accept:{codex.get('action', 'missing')}")
         risks = _core_evidence_risks(item, claim_nodes, tensions)
+        if not manual_review:
+            risks.append("manual_prior_art_review_missing")
+        elif manual_review.get("decision") in {"park", "reject", "needs_more_search"}:
+            risks.append(f"manual_prior_art_review_{manual_review.get('decision')}")
+        if not baseline_table:
+            risks.append("baseline_table_missing")
+        elif not baseline_allows_active_seed(baseline_table):
+            risks.append("strongest_baseline_unknown")
+        if stale_external_cache:
+            risks.append("stale_external_novelty_cache")
+        if not _pilot_plan_allows_active_seed(pilot_plan):
+            risks.append("active_seed_without_pilot_plan")
         if "fabricated_core_evidence" in risks:
             blocks.append("fabricated_or_anchorless_core_evidence")
         if target_policy == "formal":
@@ -255,6 +311,19 @@ def decide(
             ]
         ):
             blocks.append("human_override_cannot_bypass_hard_block")
+
+        base_blocks = list(blocks)
+        formal_rehearsal_allowed = bool(not base_blocks and manual_review and manual_review.get("decision") == "allow_active_seed" and baseline_table)
+        active_seed_allowed = bool(
+            not base_blocks
+            and active_seed_review_allowed(manual_review)
+            and baseline_allows_active_seed(baseline_table)
+            and not stale_external_cache
+            and _pilot_plan_allows_active_seed(pilot_plan)
+        )
+        pilot_ready_allowed = bool(active_seed_allowed and _pilot_plan_allows_pilot_ready(pilot_plan))
+        if target_policy == "formal" and not active_seed_allowed:
+            blocks.append("active_seed_not_allowed")
 
         action = "accept_for_user_review" if not blocks else "killed"
         if blocks and any(block.startswith("codex_action_not_accept:park") or block == "duplicate_guard_block" for block in blocks):
@@ -275,7 +344,16 @@ def decide(
                 "codex_action": codex.get("action", ""),
                 "human_override_used": bool(override),
                 "risks": risks,
-                "publish_target": ("seed" if target_policy == "formal" else "seed-candidates") if action == "accept_for_user_review" else action,
+                "formal_rehearsal_allowed": formal_rehearsal_allowed,
+                "active_seed_allowed": active_seed_allowed,
+                "pilot_ready_allowed": pilot_ready_allowed,
+                "publish_target": (
+                    "seed"
+                    if target_policy == "formal" and active_seed_allowed
+                    else ("formal-rehearsal" if formal_rehearsal_allowed else "seed-candidates")
+                )
+                if action == "accept_for_user_review"
+                else action,
             }
         )
     status = "success" if not override_errors else "partial_schema_blocked"
@@ -295,6 +373,8 @@ def decide(
                 "gemini-mutations.json",
                 "novelty-scan.json",
                 "codex-execution-review.json",
+                "manual-prior-art-review.json",
+                "baseline-table.json",
             ],
         ),
         "boundary": "This is the only promotion brain; publish_research_run.py must follow these decisions and re-check hashes.",

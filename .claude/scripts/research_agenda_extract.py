@@ -62,8 +62,8 @@ TRANSFER_DOMAINS = {
     "VLA": "transfer_to_VLA",
     "sim-to-real": "transfer_to_sim_to_real",
 }
-ANCHOR_TYPES = {"section", "figure", "table", "snippet", "abstract", "note_only"}
-STRICT_ANCHOR_TYPES = {"section", "figure", "table", "snippet"}
+ANCHOR_TYPES = {"section", "figure", "table", "result_row", "snippet", "abstract", "note_only"}
+STRICT_ANCHOR_TYPES = {"section", "figure", "table", "result_row", "snippet"}
 PAPER_PRIMITIVE_CLAIMS = [
     "central_claim",
     "method_assumption",
@@ -421,10 +421,19 @@ def _record_anchor(source_note: str, record: dict[str, Any] | None) -> dict[str,
         "evidence_anchor": record.get("evidence_anchor", ""),
         "anchor": record.get("evidence_anchor", ""),
         "anchor_type": anchor_type,
+        "anchor_source": record.get("anchor_source", "note_section"),
         "section": record.get("evidence_section", ""),
         "snippet": record.get("source_snippet", ""),
         "snippet_type": record.get("source_snippet_type", "note_only"),
         "pdf_page": record.get("pdf_page", None),
+        "page": record.get("page", record.get("pdf_page", None)),
+        "table_id": record.get("table_id", ""),
+        "row_index": record.get("row_index", None),
+        "row_text": record.get("row_text", ""),
+        "metric_name": record.get("metric_name", ""),
+        "baseline_name": record.get("baseline_name", ""),
+        "reported_value": record.get("reported_value", ""),
+        "task_or_dataset": record.get("task_or_dataset", ""),
     }
 
 
@@ -481,6 +490,7 @@ def _claim_from_record(
         "statement": statement,
         "evidence_anchor": anchor.get("evidence_anchor", ""),
         "anchor_type": anchor.get("anchor_type", "note_only"),
+        "anchor_source": anchor.get("anchor_source", "note_section"),
         "anchor": anchor,
         "confidence": confidence,
         "confidence_reason": confidence_reason,

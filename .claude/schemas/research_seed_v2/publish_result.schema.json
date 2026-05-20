@@ -13,6 +13,7 @@
     "formal_seed_written": {"type": "boolean"},
     "test_provider_used_for_formal": {"type": "boolean"},
     "formal_publish_risk": {"type": "string"},
+    "formal_rehearsal_written": {"type": "boolean"},
     "published": {"type": "array"},
     "bucketed": {"type": "array"},
     "blocked": {"type": "array"},

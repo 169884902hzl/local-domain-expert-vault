@@ -19,7 +19,7 @@ The public vault uses robotic manipulation as its example domain, especially DLO
 
 It is built for graduate students, PI/lab knowledge-base maintainers, and researchers who need long-term literature memory rather than another one-off summarizer.
 
-Current public version: `v0.2.3`. `v0.1.0` was the first releasable local-first vault: local browsing, knowledge-base audits, `kb_search.py` retrieval, Zotero/Obsidian setup documentation, Paper Reading Workbench, arXiv mirror-first automation docs, and the Windows scheduled-task entry point. `v0.2.0` adds the research-seed v2 state machine on top of that base; `v0.2.1` hardens the gates needed before any future scheduled formal publish; `v0.2.2` upgrades the external novelty scan from an arXiv-only probe to OpenAlex plus optional Semantic Scholar prior-art probes; `v0.2.3` hardens the anchored evidence graph, while still not enabling scheduled formal publish.
+Current public version: `v0.3.0`. `v0.1.0` was the first releasable local-first vault: local browsing, knowledge-base audits, `kb_search.py` retrieval, Zotero/Obsidian setup documentation, Paper Reading Workbench, arXiv mirror-first automation docs, and the Windows scheduled-task entry point. `v0.2.0` adds the research-seed v2 state machine on top of that base; `v0.2.1` hardens the gates needed before any future scheduled formal publish; `v0.2.2` upgrades the external novelty scan from an arXiv-only probe to OpenAlex plus optional Semantic Scholar prior-art probes; `v0.2.3` hardens the anchored evidence graph; `v0.3.0` adds supervised research-validity hardening, while still not enabling scheduled formal publish.
 
 `v0.2.0` is a major workflow architecture upgrade: the old Gemini greenhouse plus downstream-review scaffold is now a transactional research-seed state machine. It improves state control, review ordering, auditability, and rollout safety; it does not claim that generated ideas are automatically novel or publishable.
 
@@ -133,6 +133,26 @@ Key boundaries:
 - Under formal target policy, candidates whose core claim graph evidence is entirely low / note_only / requires_human_check are blocked by `formal_core_evidence_not_anchored`. The default `seed-candidates-only` policy records `anchorless_core_evidence_risk` instead of writing a formal seed.
 - Scheduled formal publish remains disabled, and the v0.2.2 external novelty gate is not relaxed.
 - Generated candidates are still not proven doctoral-level novelty, publishability, or experimental results.
+
+## v0.3.0: Supervised Research-Validity Hardening
+
+v0.3.0 is not scheduled formal publish enablement, and it is not a doctoral-level idea generator. It extends the v0.2.3 anchored evidence graph into a more supervised formal rehearsal / active research seed pipeline by adding explicit artifacts for manual prior-art review, PDF/table/figure evidence anchors, baseline tables, cross-paper claim edges, weekly resurrection, pilot feedback, and exportable run packets.
+
+State semantics are now explicit:
+
+- `formal_rehearsal_candidate` may only write under `projects/research-agenda/seed-candidates/formal-rehearsal/`; it never writes `projects/research-agenda/idea_bank/seed/`.
+- `active_seed` may write through the manual `--v2-publish-policy formal` path only when `active_seed_allowed=true`.
+- `pilot_ready` is not the same as active seed; it additionally requires an executable pilot plan, metric automation, baseline implementation path, and resource budget.
+
+Research-validity boundaries:
+
+- Active seed / pilot-ready requires completed `manual-prior-art-review.json` with a human `allow_active_seed` decision.
+- OpenAlex, Semantic Scholar, and arXiv remain external probes, not complete human prior-art review and not novelty proof.
+- `baseline-table.json` separates nearest work, candidate baseline guess, Codex feasibility baseline, manual strongest baseline, and final strongest baseline; nearest work is not the strongest baseline.
+- The evidence graph now supports PDF/table/figure anchors, `result_row`, and cross-paper edges; `note_section` is still not PDF/table verified evidence.
+- Speculative tension, anchorless core evidence, stale novelty cache, Codex reject/rewrite, DeepSeek fatal flaw, and external novelty failure cannot be bypassed by a manual artifact.
+- Pilot feedback is a strategy calibration signal, not publication proof.
+- Generated candidates remain unproven with respect to doctoral-level novelty, publishability, and experimental validity.
 
 ## What this is / is not
 

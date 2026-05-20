@@ -6,7 +6,9 @@ import hashlib
 import json
 import os
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+import urllib.error
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -43,6 +45,7 @@ ATOM = {"atom": "http://www.w3.org/2005/Atom"}
 ARXIV_ONLY_RISK = "external_scope_arxiv_only_not_full_prior_art"
 BROAD_EXTERNAL_PROVIDERS = {"openalex", "semantic_scholar"}
 FORMAL_VERIFICATION_SCOPES = {"local_plus_s2_or_openalex", "strict_multi_provider"}
+NOVELTY_CACHE_TTL_DAYS = 14
 _RATE_LIMIT_LAST: dict[str, float] = {}
 
 
@@ -90,6 +93,18 @@ def _cache_rel(path: Path) -> str:
         return path.name
 
 
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc).replace(microsecond=0)
+
+
+def _iso(value: datetime) -> str:
+    return value.isoformat()
+
+
+def _query_hash(query: str) -> str:
+    return hashlib.sha256(query.encode("utf-8")).hexdigest()
+
+
 def _rate_limit(provider: str, delay_sec: float) -> None:
     delay_sec = max(0.0, delay_sec)
     if delay_sec <= 0:
@@ -111,15 +126,27 @@ def _fetch_url_cached(
     delay_sec: float,
     headers: dict[str, str] | None = None,
     response_type: str = "json",
+    query: str = "",
+    ttl_days: int = NOVELTY_CACHE_TTL_DAYS,
 ) -> tuple[Any, dict[str, Any]]:
     cache_path = _cache_file(provider, url)
+    now = _utc_now()
+    expires_at = now + timedelta(days=ttl_days)
     summary: dict[str, Any] = {
         "provider": provider,
         "status": "provider_unavailable",
         "cached": False,
+        "cache_status": "missing",
         "cache_key": cache_path.stem,
         "cache_path": _cache_rel(cache_path),
+        "query": query or url,
+        "query_hash": _query_hash(query or url),
+        "created_at": "",
+        "expires_at": "",
+        "ttl_days": ttl_days,
         "records_scanned": 0,
+        "result_count": 0,
+        "rate_limit_observed": "",
         "timeout_sec": timeout,
         "rate_limit_delay_sec": delay_sec,
     }
@@ -128,6 +155,21 @@ def _fetch_url_cached(
             cached = json.loads(cache_path.read_text(encoding="utf-8-sig"))
             summary["status"] = "success"
             summary["cached"] = True
+            summary["created_at"] = str(cached.get("created_at") or cached.get("cached_at") or "")
+            summary["expires_at"] = str(cached.get("expires_at") or "")
+            summary["result_count"] = int(cached.get("result_count", 0) or 0)
+            expired = False
+            if cached.get("expires_at"):
+                try:
+                    expired = datetime.fromisoformat(str(cached["expires_at"])) <= now
+                except ValueError:
+                    expired = True
+            elif cached.get("cached_at_unix"):
+                expired = int(time.time()) - int(cached["cached_at_unix"]) > ttl_days * 86400
+            if expired:
+                summary["cache_status"] = "stale"
+            else:
+                summary["cache_status"] = "fresh"
             return cached.get("payload"), summary
         except Exception as exc:
             summary["cache_error"] = f"{type(exc).__name__}:{exc}"
@@ -136,12 +178,22 @@ def _fetch_url_cached(
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             raw = response.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as exc:
+        summary["status"] = "rate_limited" if exc.code == 429 else "provider_unavailable"
+        summary["rate_limit_observed"] = str(exc.code)
+        summary["error"] = f"{type(exc).__name__}:{exc}"
+        return None, summary
+    except TimeoutError as exc:
+        summary["status"] = "timeout"
+        summary["error"] = f"{type(exc).__name__}:{exc}"
+        return None, summary
     except Exception as exc:
         summary["error"] = f"{type(exc).__name__}:{exc}"
         return None, summary
     try:
         payload = json.loads(raw) if response_type == "json" else raw
     except Exception as exc:
+        summary["status"] = "invalid_response"
         summary["error"] = f"invalid_{response_type}:{type(exc).__name__}:{exc}"
         return None, summary
     try:
@@ -150,6 +202,12 @@ def _fetch_url_cached(
             json.dumps(
                 {
                     "provider": provider,
+                    "created_at": _iso(now),
+                    "expires_at": _iso(expires_at),
+                    "ttl_days": ttl_days,
+                    "query": query or url,
+                    "query_hash": _query_hash(query or url),
+                    "result_count": len(payload.get("results", payload.get("data", []))) if isinstance(payload, dict) else 0,
                     "cached_at_unix": int(time.time()),
                     "url_sha256": hashlib.sha256(url.encode("utf-8")).hexdigest(),
                     "response_type": response_type,
@@ -164,6 +222,9 @@ def _fetch_url_cached(
     except Exception as exc:
         summary["cache_write_error"] = f"{type(exc).__name__}:{exc}"
     summary["status"] = "success"
+    summary["cache_status"] = "fresh"
+    summary["created_at"] = _iso(now)
+    summary["expires_at"] = _iso(expires_at)
     return payload, summary
 
 
@@ -194,6 +255,39 @@ def _provider_error(provider: str, summary: dict[str, Any]) -> dict[str, str] | 
 
 def _has_broad_external_provider(providers: list[str]) -> bool:
     return bool(BROAD_EXTERNAL_PROVIDERS & set(providers))
+
+
+def _normalized_work(
+    *,
+    source: str,
+    score: float,
+    title: str,
+    work_id: str = "",
+    year: Any = None,
+    url: str = "",
+    abstract: str = "",
+    authors: list[str] | None = None,
+    venue: str = "",
+    evidence: str = "",
+) -> dict[str, Any]:
+    evidence_text = evidence or abstract[:360]
+    return {
+        "source": source,
+        "score": score,
+        "work_id": work_id,
+        "title": title,
+        "year": year,
+        "url": url,
+        "abstract": abstract,
+        "authors": authors or [],
+        "venue": venue,
+        "overlap_score": score,
+        "overlap_type": "same_problem" if score >= 0.35 else "adjacent",
+        "what_is_already_done": evidence_text,
+        "remaining_delta": "",
+        "locator": work_id,
+        "evidence": evidence_text,
+    }
 
 
 def _verification_scope(external_providers_used: list[str]) -> str:
@@ -316,6 +410,7 @@ def _scan_arxiv_api(item: dict[str, Any], *, max_queries: int, timeout: int, del
     scanned = 0
     errors: list[str] = []
     cached = False
+    cache_statuses: list[str] = []
     for index, query in enumerate(queries):
         params = urllib.parse.urlencode({"search_query": query, "start": 0, "max_results": 5})
         raw, request_summary = _fetch_url_cached(
@@ -324,8 +419,10 @@ def _scan_arxiv_api(item: dict[str, Any], *, max_queries: int, timeout: int, del
             timeout=timeout,
             delay_sec=delay_sec if index else 0.0,
             response_type="text",
+            query=query,
         )
         cached = cached or bool(request_summary.get("cached"))
+        cache_statuses.append(str(request_summary.get("cache_status") or "missing"))
         if request_summary.get("error") or not isinstance(raw, str):
             errors.append(str(request_summary.get("error") or "arxiv_api_empty_response"))
             break
@@ -342,15 +439,25 @@ def _scan_arxiv_api(item: dict[str, Any], *, max_queries: int, timeout: int, del
             score = _overlap_score(query_text, f"{title} {summary}")
             if score >= 0.18:
                 scored.append(
-                    {
-                        "source": "arxiv_api",
-                        "score": round(score, 3),
-                        "title": title,
-                        "locator": _entry_text(row, "id").rstrip("/").split("/")[-1],
-                        "evidence": summary[:360],
-                    }
+                    _normalized_work(
+                        source="arxiv_api",
+                        score=round(score, 3),
+                        title=title,
+                        work_id=_entry_text(row, "id").rstrip("/").split("/")[-1],
+                        url=_entry_text(row, "id"),
+                        abstract=summary,
+                        evidence=summary[:360],
+                    )
                 )
-    summary: dict[str, Any] = {"records_scanned": scanned, "provider": "arxiv_api", "status": "success" if not errors else "provider_unavailable", "cached": cached, "queries": len(queries)}
+    summary: dict[str, Any] = {
+        "records_scanned": scanned,
+        "provider": "arxiv_api",
+        "status": "success" if not errors else "provider_unavailable",
+        "cached": cached,
+        "cache_status": "stale" if "stale" in cache_statuses else ("fresh" if "fresh" in cache_statuses else "missing"),
+        "queries": len(queries),
+        "result_count": len(scored),
+    }
     if errors:
         summary["error"] = ";".join(errors)
     return sorted(scored, key=lambda row: row["score"], reverse=True)[:limit], summary
@@ -379,14 +486,16 @@ def _scan_openalex(item: dict[str, Any], *, max_queries: int, timeout: int, dela
     scanned = 0
     errors: list[str] = []
     cached = False
+    cache_statuses: list[str] = []
     for query in queries:
         params = {"search": query, "per-page": 5}
         mailto = os.environ.get("OPENALEX_MAILTO", "").strip()
         if mailto:
             params["mailto"] = mailto
         url = f"{OPENALEX_API}?{urllib.parse.urlencode(params)}"
-        payload, request_summary = _fetch_url_cached("openalex", url, timeout=timeout, delay_sec=delay_sec)
+        payload, request_summary = _fetch_url_cached("openalex", url, timeout=timeout, delay_sec=delay_sec, query=query)
         cached = cached or bool(request_summary.get("cached"))
+        cache_statuses.append(str(request_summary.get("cache_status") or "missing"))
         if request_summary.get("error") or not isinstance(payload, dict):
             errors.append(str(request_summary.get("error") or "openalex_empty_response"))
             continue
@@ -403,20 +512,27 @@ def _scan_openalex(item: dict[str, Any], *, max_queries: int, timeout: int, dela
             score = _overlap_score(query_text, f"{title} {abstract}")
             if score >= 0.18:
                 scored.append(
-                    {
-                        "source": "openalex",
-                        "score": round(score, 3),
-                        "title": title,
-                        "locator": str(row.get("doi") or row.get("id") or ""),
-                        "evidence": (abstract or str(row.get("publication_year") or ""))[:360],
-                    }
+                    _normalized_work(
+                        source="openalex",
+                        score=round(score, 3),
+                        title=title,
+                        work_id=str(row.get("doi") or row.get("id") or ""),
+                        year=row.get("publication_year"),
+                        url=str(row.get("id") or ""),
+                        abstract=abstract,
+                        authors=[str(author.get("author", {}).get("display_name", "")) for author in row.get("authorships", []) if isinstance(author, dict)],
+                        venue=str((row.get("primary_location") or {}).get("source", {}).get("display_name", "")) if isinstance(row.get("primary_location"), dict) else "",
+                        evidence=(abstract or str(row.get("publication_year") or ""))[:360],
+                    )
                 )
     summary: dict[str, Any] = {
         "records_scanned": scanned,
         "provider": "openalex",
         "status": "success" if scanned or not errors else "provider_unavailable",
         "cached": cached,
+        "cache_status": "stale" if "stale" in cache_statuses else ("fresh" if "fresh" in cache_statuses else "missing"),
         "queries": len(queries),
+        "result_count": len(scored),
     }
     if errors and not scanned:
         summary["error"] = ";".join(errors)
@@ -454,6 +570,7 @@ def _scan_semantic_scholar(
     scanned = 0
     errors: list[str] = []
     cached = False
+    cache_statuses: list[str] = []
     fields = "title,abstract,url,year,venue,authors,externalIds"
     headers = {"x-api-key": api_key}
     for query in queries:
@@ -464,8 +581,10 @@ def _scan_semantic_scholar(
             timeout=timeout,
             delay_sec=delay_sec,
             headers=headers,
+            query=query,
         )
         cached = cached or bool(request_summary.get("cached"))
+        cache_statuses.append(str(request_summary.get("cache_status") or "missing"))
         if request_summary.get("error") or not isinstance(payload, dict):
             errors.append(str(request_summary.get("error") or "semantic_scholar_empty_response"))
             continue
@@ -482,21 +601,28 @@ def _scan_semantic_scholar(
             score = _overlap_score(query_text, f"{title} {abstract}")
             if score >= 0.18:
                 scored.append(
-                    {
-                        "source": "semantic_scholar",
-                        "score": round(score, 3),
-                        "title": title,
-                        "locator": str(row.get("paperId") or row.get("url") or ""),
-                        "evidence": abstract[:360],
-                    }
+                    _normalized_work(
+                        source="semantic_scholar",
+                        score=round(score, 3),
+                        title=title,
+                        work_id=str(row.get("paperId") or row.get("url") or ""),
+                        year=row.get("year"),
+                        url=str(row.get("url") or ""),
+                        abstract=abstract,
+                        authors=[str(author.get("name", "")) for author in row.get("authors", []) if isinstance(author, dict)],
+                        venue=str(row.get("venue") or ""),
+                        evidence=abstract[:360],
+                    )
                 )
     summary = {
         "records_scanned": scanned,
         "provider": "semantic_scholar",
         "status": "success" if scanned or not errors else "provider_unavailable",
         "cached": cached,
+        "cache_status": "stale" if "stale" in cache_statuses else ("fresh" if "fresh" in cache_statuses else "missing"),
         "queries": len(queries),
         "api_key_present": True,
+        "result_count": len(scored),
     }
     if errors and not scanned:
         summary["error"] = ";".join(errors)
@@ -592,7 +718,8 @@ def _build_candidate_scan(
             provider_results[provider] = summary
             if summary.get("status") == "success" and not summary.get("error"):
                 external_nearest.extend(nearest)
-                external_providers_used.append(provider)
+                if summary.get("cache_status") != "stale":
+                    external_providers_used.append(provider)
             error = _provider_error(provider, summary)
             if error:
                 provider_errors.append(error)
@@ -620,6 +747,22 @@ def _build_candidate_scan(
         and classification in {"likely_open", "partial_overlap"}
     )
     formal_publish_risk = ARXIV_ONLY_RISK if verification_scope == "local_plus_arxiv_api" else ""
+    stale_external_novelty_cache = any(
+        isinstance(item, dict) and item.get("cache_status") == "stale"
+        for provider, item in provider_results.items()
+        if provider in BROAD_EXTERNAL_PROVIDERS
+    )
+    provider_health_summary = {
+        provider: {
+            "status": summary.get("status"),
+            "cache_status": summary.get("cache_status", "missing"),
+            "result_count": summary.get("result_count", summary.get("records_scanned", 0)),
+        }
+        for provider, summary in provider_results.items()
+        if isinstance(summary, dict)
+    }
+    if stale_external_novelty_cache:
+        formal_publish_risk = ";".join(filter(None, [formal_publish_risk, "stale_external_novelty_cache"]))
     return {
         "candidate_id": cid,
         "candidate_title": item.get("title", ""),
@@ -632,6 +775,8 @@ def _build_candidate_scan(
         "external_providers_used": external_providers_used,
         "provider_results": provider_results,
         "provider_errors": provider_errors,
+        "provider_health_summary": provider_health_summary,
+        "stale_external_novelty_cache": stale_external_novelty_cache,
         "formal_publish_risk": formal_publish_risk,
         "classification_reason": reason,
         "nearest_works": nearest_works,

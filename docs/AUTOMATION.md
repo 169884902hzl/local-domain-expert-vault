@@ -265,7 +265,7 @@ $env:LOCAL_FIRST_VAULT_ALLOW_DANGEROUS_CLAUDE = "1"
 
 这个开关只影响 `daily_arxiv_pipeline.py` 的本机运行，不应该写入公开仓库配置。
 
-### v0.2.0-v0.2.3 research-seed 状态机和 publish policy
+### v0.2.0-v0.3.0 research-seed 状态机和 publish policy
 
 v0.2.0 的 daily automation 不再把 Gemini/local score 的输出直接当成正式 idea seed。它把每轮候选放进一个 transactional research-seed state machine：
 
@@ -324,6 +324,15 @@ Formal novelty verification 不能只依赖 local claim graph、local arXiv mirr
 v0.2.3 加固的是 evidence graph，不是 formal publish enablement。`paper_primitives.v1` 会为每条 claim 记录 anchor、confidence、confidence reason、summary origin 和 human-check 标记；note-derived / legacy structured fields 没有 section / snippet / table / figure anchor 时默认低置信，`note_only` 不能产生 high confidence，`actual_baseline_result` 没有严格 anchor 时会变成 `unusable`。`research_claim_graph.jsonl` 和 run snapshot 现在同时包含 `record_type=node` 与 `record_type=edge`；edge 必须引用现有 node，edge confidence 不能高于相关 node 的最低 confidence。`tension_map.py` 优先从 claim graph edges 生成 tension，并显式记录 `supporting_nodes` / `supporting_edges`。LLM-only 或无 node tension 必须标记为 `speculative_tension` 与 `do_not_use_as_seed_evidence=true`，只能进入 breakthrough speculative lane，不能支撑 formal seed。
 
 formal target policy 下，如果候选核心 claim graph evidence 全是 low / note_only / requires_human_check，`survival_decision.py` 和 strict validation 会阻断并记录 `formal_core_evidence_not_anchored`。默认 `seed-candidates-only` 只记录 `anchorless_core_evidence_risk`，不会写 production formal seed。v0.2.3 不放宽 v0.2.2 external novelty gate，也不证明 generated candidates 已达到 doctoral-level novelty、publishability 或实验有效性。
+
+v0.3.0 是 supervised research-validity hardening，不是 scheduled formal publish enablement。它新增 manual prior-art review、PDF/table/figure evidence anchors、baseline table、cross-paper edges、weekly resurrection review、pilot feedback 和 redacted run packet。状态语义如下：
+
+- `seed-candidates-only`：manual review、baseline table、pilot plan 都是 optional risk；不会写 formal seed。
+- `formal_rehearsal_candidate`：需要 completed manual prior-art review 和 baseline table；只写 `projects/research-agenda/seed-candidates/formal-rehearsal/`，不写 `idea_bank/seed/`。
+- `active_seed`：需要 human `allow_active_seed`、known strongest baseline、fresh broad novelty、anchored core evidence、DeepSeek survive、Codex accept 和 minimal pilot plan；只有 `active_seed_allowed=true` 时，手动 `--v2-publish-policy formal` 才能写 `idea_bank/seed/`。
+- `pilot_ready`：在 active seed 基础上还需要 executable pilot plan、metric automation、baseline implementation path 和 resource budget。
+
+OpenAlex / Semantic Scholar / arXiv 仍只是 external probes，不是完整人工 prior-art review；pilot feedback 只用于 strategy calibration，不是 publication proof。`note_section` anchor 不等价于 PDF/table verified evidence；`result_row` 需要 page/table/row/metric/baseline/reported value 等字段。Manual artifact 不能绕过 DeepSeek fatal flaw、Codex reject/rewrite、external novelty failure、stale cache、anchorless evidence、speculative tension 或 missing survival decision。
 
 Formal provider provenance 也更严格：`provider=json` 可以继续用于 seed-candidates-only fixture 和 CI，但 formal mode 默认拒绝它。只有手动传入 `--allow-test-provider-for-formal` 才能继续测试 formal path，并且 manifest / publish result / audit 会记录 `test_provider_used_for_formal=true` 和 `formal_publish_risk=test_provider_not_production_provenance`。
 

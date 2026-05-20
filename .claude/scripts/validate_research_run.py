@@ -196,6 +196,8 @@ def _validate_formal_policy(run_date: str) -> list[str]:
                 errors.append(f"formal_novelty_missing_external_provider:{cid}")
             if not _has_broad_external_provider(external_providers):
                 errors.append(f"formal_novelty_missing_broad_external_provider:{cid}")
+            if item.get("stale_external_novelty_cache") is True:
+                errors.append(f"formal_novelty_stale_external_cache:{cid}")
     if not manifest.get("test_provider_used_for_formal"):
         provider_expectations = [
             ("deepseek-review.json", "opencode"),
@@ -209,6 +211,23 @@ def _validate_formal_policy(run_date: str) -> list[str]:
             if provider.get("mode") != expected_mode:
                 errors.append(f"formal_provider_mode_not_production:{artifact_name}:expected={expected_mode}:actual={provider.get('mode')}")
     errors.extend(_validate_formal_core_evidence(run_date))
+    survival_path = artifacts / "survival-decision.json"
+    if survival_path.exists():
+        for item in read_json(survival_path).get("decisions", []):
+            if not isinstance(item, dict):
+                continue
+            cid = str(item.get("candidate_id"))
+            if item.get("decision") == "accept_for_user_review" and item.get("active_seed_allowed") is not True:
+                errors.append(f"formal_active_seed_not_allowed:{cid}")
+            risks = set(str(risk) for risk in item.get("risks", []))
+            for risk in [
+                "manual_prior_art_review_missing",
+                "stale_external_novelty_cache",
+                "strongest_baseline_unknown",
+                "active_seed_without_pilot_plan",
+            ]:
+                if risk in risks:
+                    errors.append(f"{risk}:{cid}")
     return errors
 
 

@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Research Seed v2 Baseline Table",
+  "type": "object",
+  "required": ["schema_version", "run_date", "candidate_id", "baselines", "strongest_baseline_final", "baseline_verification_status"],
+  "properties": {
+    "schema_version": {"type": "string", "const": "baseline_table.v1"},
+    "run_date": {"type": "string"},
+    "candidate_id": {"type": "string", "minLength": 1},
+    "baselines": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/baseline"}
+    },
+    "strongest_baseline_id": {"type": "string"},
+    "strongest_baseline_final": {"$ref": "#/$defs/strongest_final"},
+    "baseline_verification_status": {"type": "string", "enum": ["verified", "partial", "unknown"]},
+    "artifact_hashes": {"type": "object"},
+    "boundary": {"type": "string"}
+  },
+  "$defs": {
+    "baseline": {
+      "type": "object",
+      "required": ["baseline_id", "name", "source", "baseline_role", "confidence"],
+      "properties": {
+        "baseline_id": {"type": "string", "minLength": 1},
+        "name": {"type": "string"},
+        "source_work_id": {"type": "string"},
+        "source": {
+          "type": "string",
+          "enum": ["claim_graph", "novelty_scan", "manual_prior_art", "codex_review", "candidate_field"]
+        },
+        "baseline_role": {
+          "type": "string",
+          "enum": ["nearest_work", "candidate_baseline_guess", "codex_feasibility_baseline", "manual_strongest_baseline", "strongest_baseline_final"]
+        },
+        "why_strongest": {"type": "string"},
+        "covered_claim": {"type": "string"},
+        "kill_condition": {"type": "string"},
+        "implementation_feasibility": {
+          "type": "string",
+          "enum": ["available", "needs_reimplementation", "unknown", "prohibitive"]
+        },
+        "metric": {"type": "string"},
+        "known_result": {"type": "string"},
+        "evidence_anchor_ids": {"type": "array", "items": {"type": "string"}},
+        "confidence": {"type": "string", "enum": ["high", "medium", "low", "unknown"]}
+      },
+      "additionalProperties": true
+    },
+    "strongest_final": {
+      "type": "object",
+      "required": ["status", "baseline_id", "name", "source", "kill_condition", "metric_or_task"],
+      "properties": {
+        "status": {"type": "string", "enum": ["known", "unknown", "contested"]},
+        "baseline_id": {"type": "string"},
+        "name": {"type": "string"},
+        "source": {"type": "string"},
+        "kill_condition": {"type": "string"},
+        "metric_or_task": {"type": "string"},
+        "implementation_feasibility": {"type": "string"},
+        "why_strongest": {"type": "string"}
+      },
+      "additionalProperties": true
+    }
+  }
+}

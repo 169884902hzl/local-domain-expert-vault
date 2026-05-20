@@ -49,6 +49,8 @@ def _tension_item(
     supporting_edges: list[str] | None = None,
     confidence: str,
     source: str,
+    tension_scope: str = "same_paper",
+    requires_human_check: bool = False,
     do_not_use_as_seed_evidence: bool = False,
     original_tension_type: str = "",
 ) -> dict[str, Any]:
@@ -58,8 +60,10 @@ def _tension_item(
         "summary": summary[:320],
         "supporting_nodes": supporting_nodes,
         "supporting_edges": supporting_edges or [],
+        "tension_scope": tension_scope,
         "confidence": confidence if confidence in CONFIDENCE_ORDER else "low",
         "source": source,
+        "requires_human_check": requires_human_check,
         "do_not_use_as_seed_evidence": do_not_use_as_seed_evidence,
     }
     if original_tension_type:
@@ -83,6 +87,8 @@ def _canonical_or_speculative(
                 supporting_edges=[str(edge) for edge in item.get("supporting_edges", [])],
                 confidence=str(item.get("confidence", "low")),
                 source=str(item.get("source", "claim_graph")),
+                tension_scope="speculative",
+                requires_human_check=True,
                 do_not_use_as_seed_evidence=True,
                 original_tension_type=str(item.get("tension_type", "")),
             )
@@ -133,6 +139,7 @@ def build_tensions(nodes: list[dict[str, Any]], edges: list[dict[str, Any]] | No
         if not tension_type:
             continue
         supporting = [str(source["node_id"]), str(target["node_id"])]
+        scope = str(edge.get("edge_scope") or "same_paper")
         item = _tension_item(
             tension_type=tension_type,
             summary=f"{source.get('statement', '')} / {target.get('statement', '')}",
@@ -140,6 +147,8 @@ def build_tensions(nodes: list[dict[str, Any]], edges: list[dict[str, Any]] | No
             supporting_edges=[str(edge["edge_id"])],
             confidence=_edge_confidence(edge, [source, target]),
             source="claim_graph_edge",
+            tension_scope=scope,
+            requires_human_check=bool(edge.get("requires_human_check") or scope == "cross_paper"),
         )
         _canonical_or_speculative(item, speculative, tensions)
     node_only_pairs = [
@@ -156,6 +165,8 @@ def build_tensions(nodes: list[dict[str, Any]], edges: list[dict[str, Any]] | No
                 supporting_nodes=supporting,
                 confidence=confidence,
                 source="claim_graph_node",
+                tension_scope="same_paper",
+                requires_human_check=bool(node.get("requires_human_check")),
             )
             _canonical_or_speculative(item, speculative, tensions)
     seen = set()
@@ -190,10 +201,12 @@ def validate_tensions(
             missing_edges = [edge for edge in edges if edge not in edge_ids]
             if missing_edges:
                 errors.append(f"{item.get('tension_id')}:missing_claim_edges:{','.join(missing_edges)}")
+        if item.get("tension_scope") == "cross_paper" and not edges:
+            errors.append(f"{item.get('tension_id')}:cross_paper_tension_missing_supporting_edge")
         if item.get("confidence") == "high":
             if not any(
-                node_by_id[node].get("confidence") == "high"
-                and node_by_id[node].get("anchor", {}).get("anchor_type") in {"section", "snippet", "table", "figure"}
+                node_by_id[node].get("confidence") in {"high", "medium"}
+                and node_by_id[node].get("anchor", {}).get("anchor_type") in {"section", "snippet", "table", "figure", "result_row"}
                 for node in nodes
                 if node in node_by_id
             ):
@@ -216,7 +229,7 @@ def render_markdown(payload: dict[str, Any]) -> str:
     ]
     for item in payload["tensions"]:
         edges = f" edges={', '.join(item.get('supporting_edges', []))}" if item.get("supporting_edges") else ""
-        lines.append(f"- `{item['tension_type']}` {item['summary']} nodes={', '.join(item['supporting_nodes'])}{edges}")
+        lines.append(f"- `{item['tension_type']}` scope={item.get('tension_scope', 'same_paper')} {item['summary']} nodes={', '.join(item['supporting_nodes'])}{edges}")
     lines.extend(["", "## Speculative Lane", ""])
     for item in payload["speculative_tensions"]:
         edges = f" edges={', '.join(item.get('supporting_edges', []))}" if item.get("supporting_edges") else ""

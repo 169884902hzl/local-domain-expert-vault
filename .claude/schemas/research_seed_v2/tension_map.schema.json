@@ -55,9 +55,11 @@
         "summary": {"type": "string"},
         "supporting_nodes": {"type": "array", "items": {"type": "string"}},
         "supporting_edges": {"type": "array", "items": {"type": "string"}},
+        "tension_scope": {"type": "string", "enum": ["same_paper", "cross_paper", "speculative"]},
         "confidence": {"type": "string", "enum": ["high", "medium", "low", "unusable"]},
         "source": {"type": "string"},
         "do_not_use_as_seed_evidence": {"type": "boolean"},
+        "requires_human_check": {"type": "boolean"},
         "original_tension_type": {"type": "string"},
         "allowed_lane": {"type": "string"}
       }

@@ -150,6 +150,128 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("\ufeff" + json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
+    def write_active_seed_support(self, candidate_id: str = "cand-alpha") -> None:
+        write_run_artifact(
+            RUN_DATE,
+            "manual-prior-art-review.json",
+            {
+                "schema_version": "manual_prior_art_review.v1",
+                "run_date": RUN_DATE,
+                "reviews": [
+                    {
+                        "candidate_id": candidate_id,
+                        "review_status": "completed",
+                        "reviewer": "human",
+                        "reviewed_at": "2099-01-02T12:00:00+00:00",
+                        "searched_sources": ["OpenAlex", "Semantic Scholar", "arXiv", "Google Scholar/manual"],
+                        "search_queries": ["anchored contact failure benchmark DLO latent friction"],
+                        "nearest_works": [
+                            {
+                                "title": "Near work",
+                                "source": "manual",
+                                "url": "",
+                                "overlap_type": "adjacent",
+                                "what_is_already_done": "Adjacent benchmark exists.",
+                                "remaining_delta": "This candidate targets anchored latent contact failure.",
+                            }
+                        ],
+                        "strongest_baseline_judgment": {
+                            "status": "known",
+                            "baseline_name": "Diffusion policy with fixed recovery threshold",
+                            "source_work_id": "manual:near-work",
+                            "why_strongest": "It is the direct policy baseline for this contact-failure claim.",
+                            "kill_condition": "Reject if it matches failure detection under latent friction shifts.",
+                            "metric_or_task": "failure_detection_auc",
+                            "implementation_feasibility": "available",
+                        },
+                        "remaining_delta": "Test latent friction failure with anchored evidence.",
+                        "risk_acceptance": "Human reviewer accepts active-seed rehearsal risk after prior-art search.",
+                        "decision": "allow_active_seed",
+                        "reason": "Remaining delta is explicit and strongest baseline is known.",
+                        "limitations": "Manual review is not a publishability proof.",
+                        "cannot_weaken": [
+                            "deepseek_success_required",
+                            "codex_accept_required",
+                            "external_novelty_required",
+                            "anchored_core_evidence_required",
+                            "no_unresolved_fatal_flaw",
+                            "fresh_external_cache_required",
+                        ],
+                    }
+                ],
+            },
+            state="manual_prior_art_reviewed",
+        )
+        write_run_artifact(
+            RUN_DATE,
+            "baseline-table.json",
+            {
+                "schema_version": "baseline_table.v1",
+                "run_date": RUN_DATE,
+                "candidate_id": candidate_id,
+                "baselines": [
+                    {
+                        "baseline_id": "baseline-nearest",
+                        "name": "Near work",
+                        "source_work_id": "manual:near-work",
+                        "source": "novelty_scan",
+                        "baseline_role": "nearest_work",
+                        "why_strongest": "",
+                        "covered_claim": "prior adjacent benchmark",
+                        "kill_condition": "",
+                        "implementation_feasibility": "unknown",
+                        "metric": "",
+                        "known_result": "",
+                        "evidence_anchor_ids": [],
+                        "confidence": "medium",
+                    },
+                    {
+                        "baseline_id": "baseline-strongest",
+                        "name": "Diffusion policy with fixed recovery threshold",
+                        "source_work_id": "manual:near-work",
+                        "source": "manual_prior_art",
+                        "baseline_role": "strongest_baseline_final",
+                        "why_strongest": "Direct policy baseline for the failure detection claim.",
+                        "covered_claim": "latent friction contact-failure benchmark",
+                        "kill_condition": "Reject if it matches failure detection under latent friction shifts.",
+                        "implementation_feasibility": "available",
+                        "metric": "failure_detection_auc",
+                        "known_result": "",
+                        "evidence_anchor_ids": ["claim-1"],
+                        "confidence": "high",
+                    },
+                ],
+                "strongest_baseline_id": "baseline-strongest",
+                "strongest_baseline_final": {
+                    "status": "known",
+                    "baseline_id": "baseline-strongest",
+                    "name": "Diffusion policy with fixed recovery threshold",
+                    "source": "manual_prior_art",
+                    "kill_condition": "Reject if it matches failure detection under latent friction shifts.",
+                    "metric_or_task": "failure_detection_auc",
+                    "implementation_feasibility": "available",
+                    "why_strongest": "Direct policy baseline for the failure detection claim.",
+                },
+                "baseline_verification_status": "verified",
+            },
+            state="baseline_table_built",
+        )
+        plan_path = Path(self.tmp.name) / "pilots" / "anchored-contact-failure-benchmark" / "pilot-plan.json"
+        write_json(
+            plan_path,
+            {
+                "schema_version": "pilot_plan.v1",
+                "seed_slug": "anchored-contact-failure-benchmark",
+                "candidate_id": candidate_id,
+                "pilot_status": "planned",
+                "metric": "failure_detection_auc",
+                "metric_automation": "pytest evaluator",
+                "baseline_implementation_path": "baselines/diffusion-policy-threshold",
+                "resource_budget": "one GPU day",
+                "executable": True,
+            },
+        )
+
     def fake_urlopen_json(self, payload: dict[str, object], calls: list[object] | None = None):
         class FakeResponse:
             def __enter__(self) -> "FakeResponse":
@@ -1461,6 +1583,7 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
 
     def test_formal_provider_json_manual_override_records_risk(self) -> None:
         self.write_review_artifacts(verification_scope="local_plus_s2_or_openalex")
+        self.write_active_seed_support()
         survival = decide(run_date=RUN_DATE, allow_human_override=False, target_policy="formal")
         write_run_artifact(RUN_DATE, "survival-decision.json", survival, state="survival_decided")
         result = publish(
@@ -1482,6 +1605,7 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
             deepseek_mode="opencode",
             codex_mode="codex-cli",
         )
+        self.write_active_seed_support()
         survival = decide(run_date=RUN_DATE, allow_human_override=False, target_policy="formal")
         write_run_artifact(RUN_DATE, "survival-decision.json", survival, state="survival_decided")
         result = publish(RUN_DATE, dry_run=False, target_policy="formal", allow_formal_seed_publish=True)
@@ -1507,6 +1631,7 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
             deepseek_mode="opencode",
             codex_mode="codex-cli",
         )
+        self.write_active_seed_support()
         survival = decide(run_date=RUN_DATE, allow_human_override=False, target_policy="formal")
         write_run_artifact(RUN_DATE, "survival-decision.json", survival, state="survival_decided")
         result = publish(RUN_DATE, dry_run=False, target_policy="formal", allow_formal_seed_publish=True)
@@ -1518,6 +1643,8 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
             "deepseek-review.json",
             "novelty-scan.json",
             "codex-execution-review.json",
+            "manual-prior-art-review.json",
+            "baseline-table.json",
             "artifact-hashes.json",
         ]:
             self.assertTrue((target / name).exists(), name)
@@ -1530,6 +1657,7 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
             deepseek_mode="opencode",
             codex_mode="codex-cli",
         )
+        self.write_active_seed_support()
         survival = decide(run_date=RUN_DATE, allow_human_override=False, target_policy="formal")
         write_run_artifact(RUN_DATE, "survival-decision.json", survival, state="survival_decided")
         seed_dir = Path(self.tmp.name) / "idea_bank" / "seed" / "anchored-contact-failure-benchmark"
@@ -1549,6 +1677,7 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
             deepseek_mode="opencode",
             codex_mode="codex-cli",
         )
+        self.write_active_seed_support()
         survival = decide(run_date=RUN_DATE, allow_human_override=False, target_policy="formal")
         write_run_artifact(RUN_DATE, "survival-decision.json", survival, state="survival_decided")
         lock = Path(self.tmp.name) / "idea_bank" / "seed" / "anchored-contact-failure-benchmark.publish.lock"
@@ -1565,6 +1694,7 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
             deepseek_mode="opencode",
             codex_mode="codex-cli",
         )
+        self.write_active_seed_support()
         survival = decide(run_date=RUN_DATE, allow_human_override=False, target_policy="formal")
         write_run_artifact(RUN_DATE, "survival-decision.json", survival, state="survival_decided")
         with patch("publish_research_run.FORMAL_SEED_REQUIRED_FILES", ["idea.md", "missing-required.txt"]):

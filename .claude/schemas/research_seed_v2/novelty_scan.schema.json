@@ -53,6 +53,9 @@
           "local_scan_evidence": {"type": "object"},
           "external_scan_evidence": {"type": "object"},
           "duplicate_guard": {"type": "object"}
+          ,
+          "provider_health_summary": {"type": "object"},
+          "stale_external_novelty_cache": {"type": "boolean"}
         }
       }
     },
@@ -65,7 +68,15 @@
       "required": ["provider", "status", "records_scanned", "cached"],
       "properties": {
         "provider": {"type": "string", "enum": ["arxiv_api", "openalex", "semantic_scholar"]},
-        "status": {"type": "string", "enum": ["success", "provider_unavailable"]},
+        "status": {"type": "string", "enum": ["success", "provider_unavailable", "timeout", "rate_limited", "invalid_response"]},
+        "cache_status": {"type": "string", "enum": ["fresh", "stale", "missing", "provider_unavailable"]},
+        "query": {"type": "string"},
+        "query_hash": {"type": "string"},
+        "created_at": {"type": "string"},
+        "expires_at": {"type": "string"},
+        "ttl_days": {"type": "integer", "minimum": 0},
+        "result_count": {"type": "integer", "minimum": 0},
+        "rate_limit_observed": {"type": "string"},
         "records_scanned": {"type": "integer", "minimum": 0},
         "cached": {"type": "boolean"},
         "queries": {"type": "integer", "minimum": 0},
@@ -95,7 +106,17 @@
       "properties": {
         "source": {"type": "string"},
         "score": {"type": "number"},
+        "work_id": {"type": "string"},
         "title": {"type": "string"},
+        "year": {"type": ["integer", "string", "null"]},
+        "url": {"type": "string"},
+        "abstract": {"type": "string"},
+        "authors": {"type": "array", "items": {"type": "string"}},
+        "venue": {"type": "string"},
+        "overlap_score": {"type": "number"},
+        "overlap_type": {"type": "string"},
+        "what_is_already_done": {"type": "string"},
+        "remaining_delta": {"type": "string"},
         "locator": {"type": "string"},
         "evidence": {"type": "string"}
       },
