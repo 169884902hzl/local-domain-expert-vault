@@ -12,10 +12,12 @@ from research_seed_v2_common import (
     PUBLISH_REQUIRED_ARTIFACTS,
     RUN_SCHEMA_VERSION,
     artifact_dir,
+    candidate_id,
     file_sha256,
     init_manifest_with_policy,
     read_json,
     run_dir,
+    schema_validator_available,
     validate_artifact,
     validate_json_file,
     v2_rel,
@@ -46,6 +48,74 @@ def _validate_referenced_hashes(run_date: str, artifact_name: str) -> list[str]:
     return errors
 
 
+def _final_candidate_ids(run_date: str) -> set[str]:
+    selected = read_json(artifact_dir(run_date) / "selected-candidates.json").get("selected", [])
+    mutations_path = artifact_dir(run_date) / "gemini-mutations.json"
+    mutations = read_json(mutations_path).get("mutations", []) if mutations_path.exists() else []
+    mutated_parent_ids = {str(item.get("parent_candidate_id")) for item in mutations if isinstance(item, dict)}
+    ids = {candidate_id(item) for item in selected if isinstance(item, dict) and candidate_id(item) not in mutated_parent_ids}
+    ids.update(candidate_id(item) for item in mutations if isinstance(item, dict))
+    return ids
+
+
+def _validate_candidate_alignment(run_date: str) -> list[str]:
+    artifacts = artifact_dir(run_date)
+    required = ["selected-candidates.json", "novelty-scan.json", "codex-execution-review.json", "survival-decision.json"]
+    if any(not (artifacts / name).exists() for name in required):
+        return []
+    final_ids = _final_candidate_ids(run_date)
+    errors: list[str] = []
+    novelty_ids = {str(item.get("candidate_id")) for item in read_json(artifacts / "novelty-scan.json").get("scans", []) if isinstance(item, dict)}
+    codex_ids = {str(item.get("candidate_id")) for item in read_json(artifacts / "codex-execution-review.json").get("reviews", []) if isinstance(item, dict)}
+    survival_ids = {str(item.get("candidate_id")) for item in read_json(artifacts / "survival-decision.json").get("decisions", []) if isinstance(item, dict)}
+    for label, ids in [("novelty_scan", novelty_ids), ("codex_execution_review", codex_ids), ("survival_decision", survival_ids)]:
+        missing = sorted(final_ids - ids)
+        extra = sorted(ids - final_ids)
+        if missing:
+            errors.append(f"candidate_alignment:{label}:missing={','.join(missing)}")
+        if extra:
+            errors.append(f"candidate_alignment:{label}:unexpected={','.join(extra)}")
+    return errors
+
+
+def _validate_formal_policy(run_date: str) -> list[str]:
+    manifest_path = run_dir(run_date) / "manifest.json"
+    if not manifest_path.exists():
+        return []
+    manifest = read_json(manifest_path)
+    if manifest.get("v2_publish_policy") != "formal":
+        return []
+    errors: list[str] = []
+    if not schema_validator_available():
+        errors.append("schema_validator_unavailable_blocks_formal_publish")
+    artifacts = artifact_dir(run_date)
+    novelty_path = artifacts / "novelty-scan.json"
+    if novelty_path.exists():
+        for item in read_json(novelty_path).get("scans", []):
+            if not isinstance(item, dict):
+                continue
+            cid = str(item.get("candidate_id"))
+            if item.get("formal_promotion_allowed") is not True:
+                errors.append(f"formal_novelty_not_allowed:{cid}")
+            if item.get("verification_scope") == "local_only":
+                errors.append(f"formal_novelty_local_only:{cid}")
+            if not item.get("external_providers_used"):
+                errors.append(f"formal_novelty_missing_external_provider:{cid}")
+    if not manifest.get("test_provider_used_for_formal"):
+        provider_expectations = [
+            ("deepseek-review.json", "opencode"),
+            ("codex-execution-review.json", "codex-cli"),
+        ]
+        for artifact_name, expected_mode in provider_expectations:
+            path = artifacts / artifact_name
+            if not path.exists():
+                continue
+            provider = read_json(path).get("provider_status", {})
+            if provider.get("mode") != expected_mode:
+                errors.append(f"formal_provider_mode_not_production:{artifact_name}:expected={expected_mode}:actual={provider.get('mode')}")
+    return errors
+
+
 def validate_run(run_date: str, *, strict_publish: bool = False) -> dict[str, Any]:
     errors = _validate_manifest(run_date)
     checked: list[str] = ["manifest.json"]
@@ -58,6 +128,9 @@ def validate_run(run_date: str, *, strict_publish: bool = False) -> dict[str, An
         checked.append(f"artifacts/{artifact_name}")
         errors.extend(f"{artifact_name}:{issue}" for issue in validate_artifact(run_date, artifact_name))
         errors.extend(_validate_referenced_hashes(run_date, artifact_name))
+    errors.extend(_validate_candidate_alignment(run_date))
+    if strict_publish:
+        errors.extend(_validate_formal_policy(run_date))
     return {
         "schema_version": "research_run_validation.v1",
         "run_date": run_date,

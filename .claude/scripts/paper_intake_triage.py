@@ -29,8 +29,36 @@ def _score(item: dict[str, Any]) -> int:
     return 0
 
 
+def _paper(item: dict[str, Any]) -> dict[str, Any]:
+    paper = item.get("paper")
+    return paper if isinstance(paper, dict) else item
+
+
+def _paper_id(item: dict[str, Any]) -> str:
+    paper = _paper(item)
+    return str(item.get("arxiv_id") or item.get("id") or item.get("paper_id") or paper.get("arxiv_id") or paper.get("id") or "")
+
+
+def _title(item: dict[str, Any]) -> str:
+    return str(item.get("title") or _paper(item).get("title") or "")
+
+
+def _summary(item: dict[str, Any]) -> str:
+    return str(item.get("summary") or item.get("abstract") or _paper(item).get("summary") or _paper(item).get("abstract") or "")
+
+
 def _category(item: dict[str, Any]) -> str:
-    text = " ".join(str(item.get(key, "")) for key in ["title", "summary", "decision", "primary_category"]).lower()
+    paper = _paper(item)
+    diversity = " ".join(str(value) for value in item.get("diversity_features", []) if value)
+    text = " ".join(
+        [
+            _title(item),
+            _summary(item),
+            str(item.get("decision", "")),
+            str(item.get("primary_category") or paper.get("primary_category") or ""),
+            diversity,
+        ]
+    ).lower()
     if any(token in text for token in ["benchmark", "evaluation", "dataset", "metric"]):
         return "infrastructure_or_evaluation"
     if any(token in text for token in ["tactile", "force", "haptic", "contact"]):
@@ -49,11 +77,12 @@ def build_triage(
     target_deep_read: int,
     max_deep_read: int,
 ) -> dict[str, Any]:
-    ranked = sorted(items, key=_score, reverse=True)
+    ranked = sorted(enumerate(items), key=lambda row: _score(row[1]), reverse=True)
     decisions: list[dict[str, Any]] = []
+    selected_for_deep_read: list[dict[str, Any]] = []
     selected = 0
     seen_categories: set[str] = set()
-    for index, item in enumerate(ranked):
+    for index, (original_index, item) in enumerate(ranked):
         category = _category(item)
         decision = "defer"
         reason = "below_daily_read_budget"
@@ -62,23 +91,37 @@ def build_triage(
             reason = "target_or_diversity_slot"
             selected += 1
             seen_categories.add(category)
-        decisions.append(
-            {
-                "rank": index + 1,
-                "paper_id": str(item.get("arxiv_id") or item.get("id") or item.get("paper_id") or ""),
-                "title": str(item.get("title") or ""),
-                "score": _score(item),
-                "category": category,
-                "decision": decision,
-                "reason": reason,
-            }
-        )
+        row = {
+            "rank": index + 1,
+            "original_index": original_index,
+            "arxiv_id": _paper_id(item),
+            "paper_id": _paper_id(item),
+            "title": _title(item),
+            "score": _score(item),
+            "category": category,
+            "decision": decision,
+            "reason": reason,
+        }
+        decisions.append(row)
+        if decision == "deep_read":
+            selected_for_deep_read.append(
+                {
+                    "rank": row["rank"],
+                    "original_index": original_index,
+                    "arxiv_id": row["arxiv_id"],
+                    "title": row["title"],
+                    "score": row["score"],
+                    "category": category,
+                    "reason": reason,
+                }
+            )
     return {
         "schema_version": "intake_triage.v1",
         "run_date": run_date,
         "target_deep_read": target_deep_read,
         "max_deep_read": max_deep_read,
         "decisions": decisions,
+        "selected_for_deep_read": selected_for_deep_read,
         "counts": {
             "input_candidates": len(items),
             "deep_read": sum(1 for item in decisions if item["decision"] == "deep_read"),

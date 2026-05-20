@@ -19,7 +19,7 @@ The public vault uses robotic manipulation as its example domain, especially DLO
 
 It is built for graduate students, PI/lab knowledge-base maintainers, and researchers who need long-term literature memory rather than another one-off summarizer.
 
-Current public version: `v0.2.0`. `v0.1.0` was the first releasable local-first vault: local browsing, knowledge-base audits, `kb_search.py` retrieval, Zotero/Obsidian setup documentation, Paper Reading Workbench, arXiv mirror-first automation docs, and the Windows scheduled-task entry point. `v0.2.0` adds the research-seed v2 state machine on top of that base.
+Current public version: `v0.2.1`. `v0.1.0` was the first releasable local-first vault: local browsing, knowledge-base audits, `kb_search.py` retrieval, Zotero/Obsidian setup documentation, Paper Reading Workbench, arXiv mirror-first automation docs, and the Windows scheduled-task entry point. `v0.2.0` adds the research-seed v2 state machine on top of that base; `v0.2.1` hardens the gates needed before any future scheduled formal publish, but still does not enable scheduled formal publish.
 
 `v0.2.0` is a major workflow architecture upgrade: the old Gemini greenhouse plus downstream-review scaffold is now a transactional research-seed state machine. It improves state control, review ordering, auditability, and rollout safety; it does not claim that generated ideas are automatically novel or publishable.
 
@@ -91,6 +91,21 @@ Important boundaries:
 - Scheduled daily automation should not be described as automatically publishing formal seeds.
 
 v0.2.0 improves state control, review ordering, auditability, and rollout safety. It does not prove that generated ideas are novel, publishable, or doctoral-level by itself. That still requires real prior-art review, human judgment, and pilot outcomes.
+
+## v0.2.1: Formal Publish Hardening Rehearsal
+
+v0.2.1 is a hardening release, not a formal-publish enablement release. Scheduled daily automation still defaults to `seed-candidates-only` and does not automatically write to `projects/research-agenda/idea_bank/seed/`.
+
+Key changes:
+
+- v2 daily intake is now controlled by `paper_intake_triage.py` and its `selected_for_deep_read` output for both Zotero import attempts and Claudian deep-read attempts. The default daily target is 3 papers and the daily hard cap is 4 papers; the legacy `min_new_imports=10` floor no longer forces v2 deep reading back to 10 papers.
+- `paper_intake_triage.py` supports both flat JSONL and nested `RankedPaper.to_dict()` JSONL, with stable `arxiv_id` and original candidate index tracking.
+- Formal publish now requires novelty verification beyond `local_only`. In v0.2.1, the minimum accepted external scope is `local_plus_arxiv_api`, and the publish artifacts record `formal_publish_risk=external_scope_arxiv_only_not_full_prior_art` because this is not a full prior-art review.
+- Formal mode requires DeepSeek provider mode `opencode` and Codex execution provider mode `codex-cli` by default. `provider=json` is allowed only with an explicit manual test override, and that path records `test_provider_not_production_provenance`.
+- v2 artifacts now use deeper JSON Schema validation for promotion-critical nested fields, enum values, `candidate_id`, and cross-artifact alignment.
+- Formal seed publish adds a lock, duplicate guard, no-overwrite staging, and quarantine invariant; scheduled wrappers still must not include formal publish flags.
+
+These changes only make future manual formal publish tests harder to misuse. They do not prove that the system can generate doctoral-level research ideas.
 
 ## What this is / is not
 

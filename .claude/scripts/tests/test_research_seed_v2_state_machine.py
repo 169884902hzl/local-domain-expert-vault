@@ -16,8 +16,10 @@ if str(SCRIPTS_DIR) not in sys.path:
 
 from candidate_portfolio_select import select_portfolio
 from codex_seed_review import execution_review
-from daily_arxiv_pipeline import build_v2_review_stages, resolve_v2_publish_policy, run_research_seed_v2
+from arxiv_ranker import ArxivPaper, RankedPaper
+from daily_arxiv_pipeline import _filter_import_candidates_by_v2_triage, build_v2_review_stages, resolve_v2_publish_policy, run_research_seed_v2
 from deepseek_scientific_review import build_payload as build_deepseek_payload
+from paper_intake_triage import build_triage
 from publish_research_run import publish
 from research_agenda_extract import build_paper_primitives
 from research_claim_graph import build_nodes
@@ -144,6 +146,11 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
         novelty_candidate_id: str | None = None,
         codex_candidate_id: str | None = None,
         mutations: list[dict[str, object]] | None = None,
+        verification_scope: str = "local_only",
+        external_providers_used: list[str] | None = None,
+        formal_promotion_allowed: bool | None = None,
+        deepseek_mode: str = "test",
+        codex_mode: str = "test",
     ) -> str:
         item = candidate or self.candidate()
         cid = str(item["candidate_id"])
@@ -183,7 +190,7 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
                         "allowed_next_stage": "novelty_scan",
                     }
                 ],
-                "provider_status": {"provider": "deepseek", "provider_backed": True, "mode": "test"},
+                "provider_status": {"provider": "deepseek", "provider_backed": True, "mode": deepseek_mode},
                 "artifact_hashes": {},
             },
             state="attacked_by_deepseek",
@@ -200,19 +207,30 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
                 },
                 state="rescued_or_mutated",
             )
+        external_providers = external_providers_used or ([] if verification_scope == "local_only" else ["arxiv_api"])
+        if formal_promotion_allowed is None:
+            formal_promotion_allowed = novelty in {"likely_open", "partial_overlap"} and verification_scope != "local_only" and bool(external_providers)
         write_run_artifact(
             RUN_DATE,
             "novelty-scan.json",
             {
                 "schema_version": "novelty_scan.v1",
                 "run_date": RUN_DATE,
-                "status": "completed_local_only",
+                "status": "completed" if verification_scope != "local_only" else "completed_local_only",
                 "scans": [
                     {
                         "candidate_id": novelty_candidate_id or cid,
+                        "candidate_title": str(item["title"]),
+                        "status": "completed" if verification_scope != "local_only" else "completed_local_only",
                         "novelty_classification": novelty,
                         "promotion_allowed": novelty in {"likely_open", "partial_overlap"},
+                        "formal_promotion_allowed": formal_promotion_allowed,
+                        "verification_scope": verification_scope,
+                        "external_providers_used": external_providers,
+                        "formal_publish_risk": "external_scope_arxiv_only_not_full_prior_art" if verification_scope == "local_plus_arxiv_api" else "",
                         "nearest_works": [{"source": "test", "score": 0.1, "title": "Near work"}] if novelty != "unknown" else [],
+                        "local_scan_evidence": {},
+                        "external_scan_evidence": {"arxiv_api": {"records_scanned": 1}} if external_providers else {},
                         "duplicate_guard": {"status": "pass", "action": "allow_with_lineage", "nearest_candidates": []},
                     }
                 ],
@@ -244,12 +262,53 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
                         "compute_time_budget": "one day",
                     }
                 ],
-                "provider_status": {"provider": "codex", "provider_backed": True, "mode": "test"},
+                "provider_status": {"provider": "codex", "provider_backed": True, "mode": codex_mode},
                 "artifact_hashes": {},
             },
             state="execution_reviewed",
         )
         return cid
+
+    def ranked_paper(self, index: int, *, score: int = 80) -> RankedPaper:
+        paper = ArxivPaper(
+            arxiv_id=f"2401.{index:05d}",
+            title=f"Robot DLO Benchmark {index}",
+            authors=["A. Author"],
+            summary="A tactile deformable linear object benchmark for robot learning.",
+            published="2099-01-01T00:00:00Z",
+            updated="2099-01-01T00:00:00Z",
+            url=f"https://arxiv.org/abs/2401.{index:05d}",
+            pdf_url=f"https://arxiv.org/pdf/2401.{index:05d}",
+            categories=["cs.RO"],
+            primary_category="cs.RO",
+        )
+        return RankedPaper(
+            paper=paper,
+            quality_score=score,
+            decision="top1_candidate",
+            reasons=[],
+            matched_terms=[],
+            penalties=[],
+            research_value_score=score,
+            diversity_features=["dlo"],
+        )
+
+    def test_v2_triage_nested_jsonl_selects_default_three_and_caps_four(self) -> None:
+        records = [self.ranked_paper(index, score=90 - index).to_dict() for index in range(8)]
+        payload = build_triage(records, run_date=RUN_DATE, target_deep_read=3, max_deep_read=4)
+        selected = payload["selected_for_deep_read"]
+        self.assertEqual(len(selected), 3)
+        self.assertLessEqual(payload["counts"]["deep_read"], 4)
+        self.assertEqual(selected[0]["arxiv_id"], "2401.00000")
+        self.assertEqual(selected[0]["original_index"], 0)
+
+    def test_v2_intake_filter_controls_import_attempts_not_min_new_imports(self) -> None:
+        ranked = [self.ranked_paper(index, score=90 - index) for index in range(10)]
+        candidates = [(item, item.decision, item.decision) for item in ranked]
+        triage = build_triage([item.to_dict() for item in ranked], run_date=RUN_DATE, target_deep_read=3, max_deep_read=4)
+        filtered = _filter_import_candidates_by_v2_triage(candidates, triage)
+        self.assertEqual(len(filtered), 3)
+        self.assertEqual([item.paper.arxiv_id for item, _selection, _original in filtered], [row["arxiv_id"] for row in triage["selected_for_deep_read"]])
 
     def test_backfill_ingest_only_stops_before_candidates_and_seed(self) -> None:
         candidates = Path(self.tmp.name) / "candidates.jsonl"
@@ -395,6 +454,104 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
         self.write_bom_json(path, {"schema_version": "wrong.v1", "run_date": RUN_DATE, "candidates": []})
         errors = validate_json_file(path, "raw_candidate.v1")
         self.assertTrue(any(error.startswith("schema_version_mismatch") for error in errors))
+
+    def test_invalid_nested_codex_action_fails_schema(self) -> None:
+        path = artifact_dir(RUN_DATE) / "codex-execution-review.json"
+        self.write_bom_json(
+            path,
+            {
+                "schema_version": "codex_execution_review.v1",
+                "run_date": RUN_DATE,
+                "status": "success",
+                "provider_status": {"provider": "codex", "provider_backed": True, "mode": "codex-cli"},
+                "reviews": [{**self.provider_codex_payload()["reviews"][0], "action": "accept"}],
+            },
+        )
+        errors = validate_json_file(path, "codex_execution_review.v1")
+        self.assertTrue(any("action" in error for error in errors))
+
+    def test_invalid_deepseek_survivability_label_fails_schema(self) -> None:
+        path = artifact_dir(RUN_DATE) / "deepseek-review.json"
+        payload = self.provider_deepseek_payload()
+        payload["schema_version"] = "deepseek_review.v1"
+        payload["run_date"] = RUN_DATE
+        payload["status"] = "success"
+        payload["reviews"][0]["survivability_label"] = "maybe"  # type: ignore[index]
+        self.write_bom_json(path, payload)
+        errors = validate_json_file(path, "deepseek_review.v1")
+        self.assertTrue(any("survivability_label" in error for error in errors))
+
+    def test_missing_nested_candidate_id_fails_schema(self) -> None:
+        path = artifact_dir(RUN_DATE) / "novelty-scan.json"
+        self.write_bom_json(
+            path,
+            {
+                "schema_version": "novelty_scan.v1",
+                "run_date": RUN_DATE,
+                "status": "completed_local_only",
+                "scans": [
+                    {
+                        "novelty_classification": "likely_open",
+                        "promotion_allowed": True,
+                        "formal_promotion_allowed": False,
+                        "verification_scope": "local_only",
+                        "external_providers_used": [],
+                        "nearest_works": [],
+                        "duplicate_guard": {},
+                    }
+                ],
+            },
+        )
+        errors = validate_json_file(path, "novelty_scan.v1")
+        self.assertTrue(any("candidate_id" in error for error in errors))
+
+    def test_invalid_novelty_classification_fails_schema(self) -> None:
+        path = artifact_dir(RUN_DATE) / "novelty-scan.json"
+        self.write_bom_json(
+            path,
+            {
+                "schema_version": "novelty_scan.v1",
+                "run_date": RUN_DATE,
+                "status": "completed_local_only",
+                "scans": [
+                    {
+                        "candidate_id": "cand-alpha",
+                        "novelty_classification": "new",
+                        "promotion_allowed": True,
+                        "formal_promotion_allowed": False,
+                        "verification_scope": "local_only",
+                        "external_providers_used": [],
+                        "nearest_works": [],
+                        "duplicate_guard": {},
+                    }
+                ],
+            },
+        )
+        errors = validate_json_file(path, "novelty_scan.v1")
+        self.assertTrue(any("novelty_classification" in error for error in errors))
+
+    def test_invalid_human_override_cannot_be_consumed(self) -> None:
+        cid = self.write_review_artifacts(novelty="unknown")
+        override_dir = Path(self.tmp.name) / "overrides" / "human-overrides" / RUN_DATE
+        self.write_bom_json(
+            override_dir / f"{cid}.json",
+            {
+                "schema_version": "human_override.v1",
+                "candidate_id": cid,
+                "run_id": RUN_DATE,
+                "override_type": "bad_override",
+                "reviewer": "human",
+                "created_at": "2099-01-02T00:00:00Z",
+                "reason": "test",
+                "risk_acceptance": "test",
+                "expires_after_days": 7,
+                "allowed_publish_target": "seed",
+                "cannot_weaken": [],
+            },
+        )
+        payload = decide(run_date=RUN_DATE, allow_human_override=True)
+        self.assertEqual(payload["human_overrides_consumed"], [])
+        self.assertTrue(payload["human_override_errors"])
 
     def test_bom_deepseek_provider_json_can_be_loaded_but_invalid_still_blocks(self) -> None:
         item = self.candidate()
@@ -573,6 +730,36 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
         self.assertEqual(payload["decisions"][0]["decision"], "killed")
         self.assertIn("unknown_novelty_without_human_override", payload["decisions"][0]["blocks"])
 
+    def test_local_only_likely_open_cannot_formal_publish(self) -> None:
+        self.write_review_artifacts(novelty="likely_open", verification_scope="local_only")
+        payload = decide(run_date=RUN_DATE, allow_human_override=False, target_policy="formal")
+        self.assertEqual(payload["decisions"][0]["decision"], "killed")
+        self.assertIn("formal_novelty_promotion_not_allowed", payload["decisions"][0]["blocks"])
+        self.assertIn("formal_novelty_requires_external_or_hybrid_scope", payload["decisions"][0]["blocks"])
+
+    def test_local_only_likely_open_can_seed_candidates_only(self) -> None:
+        self.write_review_artifacts(novelty="likely_open", verification_scope="local_only")
+        survival = decide(run_date=RUN_DATE, allow_human_override=False)
+        write_run_artifact(RUN_DATE, "survival-decision.json", survival, state="survival_decided")
+        result = publish(RUN_DATE, dry_run=False, target_policy="seed-candidates-only")
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["published"], [])
+        self.assertEqual(len(result["bucketed"]), 1)
+
+    def test_external_arxiv_only_novelty_can_formal_publish_with_risk_marker(self) -> None:
+        self.write_review_artifacts(
+            verification_scope="local_plus_arxiv_api",
+            deepseek_mode="opencode",
+            codex_mode="codex-cli",
+        )
+        survival = decide(run_date=RUN_DATE, allow_human_override=False, target_policy="formal")
+        self.assertEqual(survival["decisions"][0]["decision"], "accept_for_user_review")
+        write_run_artifact(RUN_DATE, "survival-decision.json", survival, state="survival_decided")
+        result = publish(RUN_DATE, dry_run=False, target_policy="formal", allow_formal_seed_publish=True)
+        self.assertEqual(result["status"], "success")
+        manifest = read_json(run_dir(RUN_DATE) / "manifest.json")
+        self.assertEqual(manifest["formal_publish_risk"], "external_scope_arxiv_only_not_full_prior_art")
+
     def test_deepseek_local_adapter_does_not_satisfy_gate(self) -> None:
         payload, exit_code = build_deepseek_payload([self.candidate()], run_date=RUN_DATE, provider_payload={})
         self.assertEqual(exit_code, 2)
@@ -603,6 +790,12 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
         self.assertFalse(allowed)
         self.assertEqual(reason, "insufficient_local_or_external_evidence")
 
+    def test_arxiv_external_provider_timeout_fails_closed(self) -> None:
+        with patch.object(novelty_scan.urllib.request, "urlopen", side_effect=TimeoutError("test timeout")):
+            hits, summary = novelty_scan._scan_arxiv_api(self.candidate(), max_queries=1, timeout=1, delay_sec=0)
+        self.assertEqual(hits, [])
+        self.assertIn("TimeoutError", summary["error"])
+
     def test_bom_claim_graph_jsonl_first_line_is_used_by_novelty_scan(self) -> None:
         graph_path = Path(self.tmp.name) / "evidence" / "research_claim_graph.jsonl"
         graph_path.parent.mkdir(parents=True, exist_ok=True)
@@ -623,7 +816,7 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
         self.assertTrue(nearest)
 
     def test_codex_reject_goes_to_rescue_or_parked_not_seed(self) -> None:
-        self.write_review_artifacts(codex_action="reject")
+        self.write_review_artifacts(codex_action="reject_with_rescue")
         payload = decide(run_date=RUN_DATE, allow_human_override=False)
         self.assertNotEqual(payload["decisions"][0]["decision"], "accept_for_user_review")
 
@@ -738,9 +931,38 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
         self.assertEqual(result["published"], [])
         self.assertEqual(list((Path(self.tmp.name) / "idea_bank" / "seed").glob("*")), [])
 
+    def test_formal_provider_json_blocks_by_default(self) -> None:
+        self.write_review_artifacts(verification_scope="local_plus_arxiv_api")
+        survival = decide(run_date=RUN_DATE, allow_human_override=False, target_policy="formal")
+        write_run_artifact(RUN_DATE, "survival-decision.json", survival, state="survival_decided")
+        result = publish(RUN_DATE, dry_run=False, target_policy="formal", allow_formal_seed_publish=True)
+        self.assertEqual(result["status"], "blocked_formal_provider_provenance")
+        self.assertTrue(any("formal_provider_mode_not_production" in item for item in result["blocked"]))
+
+    def test_formal_provider_json_manual_override_records_risk(self) -> None:
+        self.write_review_artifacts(verification_scope="local_plus_arxiv_api")
+        survival = decide(run_date=RUN_DATE, allow_human_override=False, target_policy="formal")
+        write_run_artifact(RUN_DATE, "survival-decision.json", survival, state="survival_decided")
+        result = publish(
+            RUN_DATE,
+            dry_run=False,
+            target_policy="formal",
+            allow_formal_seed_publish=True,
+            allow_test_provider_for_formal=True,
+        )
+        self.assertEqual(result["status"], "success")
+        manifest = read_json(run_dir(RUN_DATE) / "manifest.json")
+        self.assertTrue(manifest["test_provider_used_for_formal"])
+        self.assertIn("test_provider_not_production_provenance", manifest["formal_publish_risk"])
+
     def test_formal_publish_with_allow_still_requires_existing_gates(self) -> None:
-        self.write_review_artifacts(codex_action="reject_with_rescue")
-        survival = decide(run_date=RUN_DATE, allow_human_override=False)
+        self.write_review_artifacts(
+            codex_action="reject_with_rescue",
+            verification_scope="local_plus_arxiv_api",
+            deepseek_mode="opencode",
+            codex_mode="codex-cli",
+        )
+        survival = decide(run_date=RUN_DATE, allow_human_override=False, target_policy="formal")
         write_run_artifact(RUN_DATE, "survival-decision.json", survival, state="survival_decided")
         result = publish(RUN_DATE, dry_run=False, target_policy="formal", allow_formal_seed_publish=True)
         self.assertEqual(result["status"], "success")
@@ -760,8 +982,12 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
         self.assertEqual(result["published"], [])
 
     def test_publish_actual_staged_rename_writes_required_artifacts(self) -> None:
-        self.write_review_artifacts()
-        survival = decide(run_date=RUN_DATE, allow_human_override=False)
+        self.write_review_artifacts(
+            verification_scope="local_plus_arxiv_api",
+            deepseek_mode="opencode",
+            codex_mode="codex-cli",
+        )
+        survival = decide(run_date=RUN_DATE, allow_human_override=False, target_policy="formal")
         write_run_artifact(RUN_DATE, "survival-decision.json", survival, state="survival_decided")
         result = publish(RUN_DATE, dry_run=False, target_policy="formal", allow_formal_seed_publish=True)
         self.assertEqual(result["status"], "success")
@@ -779,8 +1005,12 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
         self.assertTrue(manifest["formal_seed_written"])
 
     def test_publish_existing_target_blocks_duplicate_no_overwrite(self) -> None:
-        self.write_review_artifacts()
-        survival = decide(run_date=RUN_DATE, allow_human_override=False)
+        self.write_review_artifacts(
+            verification_scope="local_plus_arxiv_api",
+            deepseek_mode="opencode",
+            codex_mode="codex-cli",
+        )
+        survival = decide(run_date=RUN_DATE, allow_human_override=False, target_policy="formal")
         write_run_artifact(RUN_DATE, "survival-decision.json", survival, state="survival_decided")
         seed_dir = Path(self.tmp.name) / "idea_bank" / "seed" / "anchored-contact-failure-benchmark"
         seed_dir.mkdir(parents=True, exist_ok=True)
@@ -792,6 +1022,37 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
         self.assertEqual(marker.read_text(encoding="utf-8"), "existing")
         duplicate_reports = list((Path(self.tmp.name) / "seed-candidates" / "duplicate-review" / RUN_DATE).glob("*.json"))
         self.assertEqual(len(duplicate_reports), 1)
+
+    def test_concurrent_publish_lock_blocks_same_slug(self) -> None:
+        self.write_review_artifacts(
+            verification_scope="local_plus_arxiv_api",
+            deepseek_mode="opencode",
+            codex_mode="codex-cli",
+        )
+        survival = decide(run_date=RUN_DATE, allow_human_override=False, target_policy="formal")
+        write_run_artifact(RUN_DATE, "survival-decision.json", survival, state="survival_decided")
+        lock = Path(self.tmp.name) / "idea_bank" / "seed" / "anchored-contact-failure-benchmark.publish.lock"
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        lock.write_text("held", encoding="utf-8")
+        result = publish(RUN_DATE, dry_run=False, target_policy="formal", allow_formal_seed_publish=True)
+        self.assertEqual(result["status"], "partial")
+        self.assertTrue(any(item.startswith("blocked_concurrent_publish_lock_exists") for item in result["blocked"]))
+        self.assertEqual(list((Path(self.tmp.name) / "idea_bank" / "seed").glob("anchored-contact-failure-benchmark")), [])
+
+    def test_missing_required_file_after_publish_moves_to_quarantine(self) -> None:
+        self.write_review_artifacts(
+            verification_scope="local_plus_arxiv_api",
+            deepseek_mode="opencode",
+            codex_mode="codex-cli",
+        )
+        survival = decide(run_date=RUN_DATE, allow_human_override=False, target_policy="formal")
+        write_run_artifact(RUN_DATE, "survival-decision.json", survival, state="survival_decided")
+        with patch("publish_research_run.FORMAL_SEED_REQUIRED_FILES", ["idea.md", "missing-required.txt"]):
+            result = publish(RUN_DATE, dry_run=False, target_policy="formal", allow_formal_seed_publish=True)
+        self.assertEqual(result["status"], "partial")
+        self.assertTrue(any(item.startswith("failed_publish_invariant") for item in result["blocked"]))
+        quarantine = Path(self.tmp.name) / "quarantine"
+        self.assertTrue(any(path.is_dir() for path in quarantine.glob("anchored-contact-failure-benchmark.*")))
 
     def test_artifact_hash_mismatch_blocks_validation(self) -> None:
         self.write_review_artifacts()
@@ -836,6 +1097,7 @@ def bad(source, recommended):
         wrapper = SCRIPTS_DIR / "run_daily_arxiv_task.ps1"
         text = wrapper.read_text(encoding="utf-8")
         self.assertNotIn("--allow-formal-seed-publish", text)
+        self.assertNotIn("--allow-test-provider-for-formal", text)
         self.assertNotRegex(text, r"--v2-publish-policy\s+['\"]?formal\b")
 
     def test_audit_catches_policy_manifest_mismatch(self) -> None:
@@ -912,6 +1174,9 @@ def bad(source, recommended):
         self.assertIn("123", by_name["deepseek_review"])
         self.assertIn("--provider", by_name["codex_execution_review"])
         self.assertIn("codex-cli", by_name["codex_execution_review"])
+        self.assertIn("--target-policy", by_name["novelty_scan"])
+        self.assertIn("seed-candidates-only", by_name["novelty_scan"])
+        self.assertIn("--target-policy", by_name["survival_decision"])
         self.assertIn("--allow-human-override", by_name["survival_decision"])
 
 

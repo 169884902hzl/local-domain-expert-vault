@@ -4,10 +4,30 @@
   "type": "object",
   "required": ["schema_version", "run_date", "selected", "rejected"],
   "properties": {
-    "schema_version": {"type": "string"},
+    "schema_version": {"type": "string", "const": "selected_candidates.v1"},
     "run_date": {"type": "string"},
-    "selected": {"type": "array"},
-    "rejected": {"type": "array"},
+    "selected": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["candidate_id"],
+        "properties": {
+          "candidate_id": {"type": "string", "minLength": 1},
+          "title": {"type": "string"},
+          "selection_status": {"type": "string"}
+        }
+      }
+    },
+    "rejected": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "candidate_id": {"type": "string"},
+          "selection_status": {"type": "string"}
+        }
+      }
+    },
     "selection_rules": {"type": "object"},
     "artifact_hashes": {"type": "object"}
   }

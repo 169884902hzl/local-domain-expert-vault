@@ -1,5 +1,33 @@
 # Changelog
 
+## v0.2.1 - Scheduled Formal Publish Hardening Rehearsal
+
+### Added
+
+- v2 intake now uses `selected_for_deep_read` to control daily Zotero import attempts and Claudian deep-read attempts.
+- `paper_intake_triage.py` supports both flat JSONL and nested `RankedPaper.to_dict()` JSONL records.
+- Novelty scan artifacts now record `verification_scope`, `external_providers_used`, `formal_promotion_allowed`, and formal publish risk markers.
+- Formal seed publish now has explicit lock, duplicate-review, no-overwrite staging, and quarantine invariants.
+- Promotion-critical v2 artifacts now have deeper JSON Schema validation and cross-artifact candidate alignment checks.
+
+### Changed
+
+- Daily v2 deep-read target defaults to 3 papers with a hard cap of 4 papers.
+- Legacy `min_new_imports=10` no longer forces v2 import/read back to 10 papers unless `--legacy-import-fill` is explicitly set.
+- Formal mode requires DeepSeek provider mode `opencode` and Codex execution provider mode `codex-cli` by default.
+- `provider=json` remains available for seed-candidates-only fixtures and manual review, but formal mode blocks it unless `--allow-test-provider-for-formal` is explicitly passed and risk is recorded.
+
+### Safety
+
+- Scheduled daily automation remains on `seed-candidates-only`; it still does not publish formal seeds automatically.
+- Formal publish rejects local-only `likely_open` novelty. v0.2.1's minimum external scope is `local_plus_arxiv_api`, which records `formal_publish_risk=external_scope_arxiv_only_not_full_prior_art`.
+- Scheduled wrappers must not pass `--v2-publish-policy formal`, `--allow-formal-seed-publish`, or `--allow-test-provider-for-formal`.
+- Backfill remains ingest-only by default and cannot generate production formal seeds.
+
+### Limitations
+
+- v0.2.1 is hardening, not enablement. It does not prove generated ideas are doctoral-level, novel, publishable, or experimentally valid.
+
 ## v0.2.0 - Transactional Research-Seed State Machine
 
 ### Added

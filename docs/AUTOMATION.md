@@ -265,7 +265,7 @@ $env:LOCAL_FIRST_VAULT_ALLOW_DANGEROUS_CLAUDE = "1"
 
 这个开关只影响 `daily_arxiv_pipeline.py` 的本机运行，不应该写入公开仓库配置。
 
-### v0.2.0 research-seed 状态机和 publish policy
+### v0.2.0/v0.2.1 research-seed 状态机和 publish policy
 
 v0.2.0 的 daily automation 不再把 Gemini/local score 的输出直接当成正式 idea seed。它把每轮候选放进一个 transactional research-seed state machine：
 
@@ -295,12 +295,24 @@ v2 相关 CLI flags：
 | `--codex-execution-provider-json PATH` | path | 读取已有 `codex_execution_review.v1` JSON，适合复现或 CI fixture。 |
 | `--v2-publish-policy` | `disabled`, `seed-candidates-only`, `formal` | v2 rollout publish policy；默认是 `seed-candidates-only`。 |
 | `--allow-formal-seed-publish` | flag | formal seed publish 的第二道显式确认。仅设置 `--v2-publish-policy formal` 不够。 |
+| `--target-deep-read` | integer | v2 daily deep-read target；默认 3。 |
+| `--max-deep-read` | integer | v2 daily deep-read hard cap；默认 4。 |
+| `--legacy-import-fill` | flag | 手动恢复旧的 import fill 行为。默认关闭，所以 `min_new_imports=10` 不会强制 v2 import/read 10 篇。 |
+| `--allow-test-provider-for-formal` | flag | 仅限手动测试。允许 formal mode 使用 JSON provider fixture，并记录 test-provider risk；scheduled wrappers 不得设置。 |
 
 默认 publish policy 是 `seed-candidates-only`：通过 pre-publish gates 的候选写入 `projects/research-agenda/seed-candidates/`，不会写入 `projects/research-agenda/idea_bank/seed/`。formal seed publish 默认关闭，必须同时满足：
 
 - `--v2-publish-policy formal`
 - `--allow-formal-seed-publish`
+- novelty verification scope 不是 `local_only`，v0.2.1 最低接受 `local_plus_arxiv_api`
+- DeepSeek provider mode 是 `opencode`，Codex execution provider mode 是 `codex-cli`，除非显式手动设置 `--allow-test-provider-for-formal`
 - DeepSeek scientific review、novelty/baseline scan、Codex execution review、survival decision、artifact hash 等 hard gates 全部通过
+
+v0.2.1 里，`paper_intake_triage.py` 会输出 `selected_for_deep_read`，daily pipeline 用这些 stable `arxiv_id` 同时控制 Zotero import attempts 和 Claudian deep-read attempts。默认 target 是 3 篇，hard cap 是 4 篇；除非显式启用 `--legacy-import-fill`，旧的 `min_new_imports=10` 不再把 v2 import/read 数量拉回 10。
+
+Formal novelty verification 不能只依赖 local claim graph 或 local arXiv mirror。`novelty_scan.v1` 会记录 `verification_scope`、`external_providers_used` 和 `formal_promotion_allowed`。v0.2.1 的最低外部 scope 是 `local_plus_arxiv_api`；如果只用了 arXiv API，会记录 `formal_publish_risk=external_scope_arxiv_only_not_full_prior_art`，表示这不是完整 prior-art review。
+
+Formal provider provenance 也更严格：`provider=json` 可以继续用于 seed-candidates-only fixture 和 CI，但 formal mode 默认拒绝它。只有手动传入 `--allow-test-provider-for-formal` 才能继续测试 formal path，并且 manifest / publish result / audit 会记录 `test_provider_used_for_formal=true` 和 `formal_publish_risk=test_provider_not_production_provenance`。
 
 backfill 运行的默认操作策略应是 `ingest-only`：只补齐 intake / reading / metadata，不生成 formal seed。做 backfill 时请显式传入：
 
@@ -332,6 +344,8 @@ Audit invariants：
 - 不允许非 `publish_research_run.py` 的脚本创建、移动或修改 formal seed folder。
 - seed folder 必须有 DeepSeek review、novelty scan、Codex execution review、survival decision 和 artifact hashes。
 - formal publish 必须显式设置 formal policy 和 confirmation flag。
+- formal publish 必须通过外部/混合 novelty verification，不能用 local-only `likely_open` 晋升 formal seed。
+- scheduled wrapper 不得包含 `--v2-publish-policy formal`、`--allow-formal-seed-publish` 或 `--allow-test-provider-for-formal`。
 - `quality_tier`、`sharpness_score`、`evidence_execution_score` 和 `ordinaryness_penalty` 是 potential / display 字段，不是 promotion gates。
 - 没有 seed 是正常结果；未经审查就写 formal seed 是失败。
 

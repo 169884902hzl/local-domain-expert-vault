@@ -2,13 +2,47 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Research Seed v2 Intake Triage",
   "type": "object",
-  "required": ["schema_version", "run_date", "target_deep_read", "max_deep_read", "decisions"],
+  "required": ["schema_version", "run_date", "target_deep_read", "max_deep_read", "decisions", "selected_for_deep_read"],
   "properties": {
     "schema_version": {"type": "string"},
     "run_date": {"type": "string"},
     "target_deep_read": {"type": "integer"},
     "max_deep_read": {"type": "integer"},
-    "decisions": {"type": "array"},
+    "decisions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["rank", "original_index", "arxiv_id", "paper_id", "title", "score", "category", "decision", "reason"],
+        "properties": {
+          "rank": {"type": "integer"},
+          "original_index": {"type": "integer"},
+          "arxiv_id": {"type": "string"},
+          "paper_id": {"type": "string"},
+          "title": {"type": "string"},
+          "score": {"type": "integer"},
+          "category": {"type": "string"},
+          "decision": {"type": "string", "enum": ["deep_read", "defer"]},
+          "reason": {"type": "string"}
+        }
+      }
+    },
+    "selected_for_deep_read": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["rank", "original_index", "arxiv_id", "title", "score", "category", "reason"],
+        "properties": {
+          "rank": {"type": "integer"},
+          "original_index": {"type": "integer"},
+          "arxiv_id": {"type": "string", "minLength": 1},
+          "title": {"type": "string"},
+          "score": {"type": "integer"},
+          "category": {"type": "string"},
+          "reason": {"type": "string"}
+        }
+      }
+    },
+    "counts": {"type": "object"},
     "artifact_hashes": {"type": "object"}
   }
 }

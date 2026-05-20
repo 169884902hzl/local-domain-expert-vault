@@ -43,11 +43,11 @@ def _fallback_review_candidate(item: dict[str, Any]) -> dict[str, Any]:
     label = "survives"
     allowed = "novelty_scan"
     if fatal:
-        label = "killed"
-        allowed = "park_or_rescue_only"
+        label = "reject_fatal"
+        allowed = "stop"
     elif not has_pilot:
         label = "survives_if_mutated"
-        allowed = "mutation_then_rescan"
+        allowed = "gemini_mutation"
     return {
         "candidate_id": cid,
         "candidate_title": item.get("title", ""),
@@ -57,7 +57,7 @@ def _fallback_review_candidate(item: dict[str, Any]) -> dict[str, Any]:
         "mechanism_attack": item.get("reviewer_kill_shot") or "mechanism must isolate the causal variable rather than stack modules.",
         "evaluation_attack": item.get("killer_experiment") or "needs a falsifying no-hardware pilot and metric.",
         "scope_attack": item.get("negative_claim_boundary") or "scope must be narrowed to one interface or benchmark claim.",
-        "a_plus_b_risk": "generic combination risk" if "with" in text or "combine" in text else "not obvious from local fields",
+        "a_plus_b_risk": "high" if "with" in text or "combine" in text else "low",
         "fatal_flaw": fatal,
         "rescue_mutation": item.get("rescue_mutation") or item.get("post_kill_mutation") or "",
         "survivability_label": label,
@@ -114,7 +114,7 @@ def _render_opencode_prompt(selected: list[dict[str, Any]], *, run_date: str) ->
                 "provider_status": {
                     "provider": "deepseek",
                     "provider_backed": True,
-                    "mode": "opencode-cli",
+                    "mode": "opencode",
                     "requested_model": "<filled_by_runner>",
                     "effective_model": "<filled_by_runner>",
                     "exit_code": 0,
@@ -172,7 +172,7 @@ def _opencode_provider_payload(selected: list[dict[str, Any]], *, run_date: str,
         title=f"{run_date}-v2-deepseek-scientific-review",
     )
     status = {
-        "mode": "opencode-cli",
+        "mode": "opencode",
         "requested_model": model,
         "effective_model": result.get("effective_model") or model,
         "exit_code": result.get("exit_code"),

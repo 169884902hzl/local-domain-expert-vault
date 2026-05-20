@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,7 @@ from research_seed_v2_common import (
     publish_dir,
     read_json,
     run_dir,
+    schema_validator_available,
     write_json,
     write_run_artifact,
     write_text,
@@ -187,12 +189,15 @@ def _result(
     status: str,
     target_policy: str,
     allow_formal_seed_publish: bool,
+    allow_test_provider_for_formal: bool = False,
     published: list[dict[str, str]] | None = None,
     bucketed: list[dict[str, str]] | None = None,
     blocked: list[str] | None = None,
     artifact_names: list[str] | None = None,
 ) -> dict[str, Any]:
     manifest = _manifest(run_date)
+    test_provider_used = bool(target_policy == "formal" and allow_test_provider_for_formal)
+    risk = _formal_publish_risk(run_date, allow_test_provider_for_formal=allow_test_provider_for_formal) if target_policy == "formal" else ""
     return {
         "schema_version": "publish_result.v1",
         "run_date": run_date,
@@ -201,6 +206,8 @@ def _result(
         "formal_seed_publish_allowed": bool(allow_formal_seed_publish),
         "scheduled_daily_switched": bool(manifest.get("scheduled_daily_switched", False)),
         "formal_seed_written": any(item.get("status") == "seed_written" for item in (published or [])),
+        "test_provider_used_for_formal": test_provider_used,
+        "formal_publish_risk": risk,
         "published": published or [],
         "bucketed": bucketed or [],
         "blocked": blocked or [],
@@ -213,6 +220,7 @@ def _record_manifest_publish_policy(
     *,
     target_policy: str,
     allow_formal_seed_publish: bool,
+    allow_test_provider_for_formal: bool = False,
     formal_seed_written: bool,
     dry_run: bool,
 ) -> None:
@@ -226,7 +234,68 @@ def _record_manifest_publish_policy(
     manifest["formal_seed_publish_allowed"] = bool(allow_formal_seed_publish)
     manifest["scheduled_daily_switched"] = bool(manifest.get("scheduled_daily_switched", False))
     manifest["formal_seed_written"] = bool(formal_seed_written)
+    manifest["test_provider_used_for_formal"] = bool(target_policy == "formal" and allow_test_provider_for_formal)
+    manifest["formal_publish_risk"] = _formal_publish_risk(run_date, allow_test_provider_for_formal=allow_test_provider_for_formal) if target_policy == "formal" else ""
     write_json(manifest_path, manifest, dry_run=False)
+
+
+def _formal_publish_risk(run_date: str, *, allow_test_provider_for_formal: bool) -> str:
+    risks: list[str] = []
+    if allow_test_provider_for_formal:
+        risks.append("test_provider_not_production_provenance")
+    novelty_path = artifact_dir(run_date) / "novelty-scan.json"
+    if novelty_path.exists():
+        for item in read_json(novelty_path).get("scans", []):
+            if isinstance(item, dict) and item.get("formal_publish_risk"):
+                risks.append(str(item["formal_publish_risk"]))
+    return ";".join(dict.fromkeys(risks))
+
+
+def _publish_lock_path(slug: str) -> Path:
+    return agenda_root() / "idea_bank" / "seed" / f"{slug}.publish.lock"
+
+
+def _acquire_publish_lock(slug: str, *, run_date: str, candidate_id_value: str, dry_run: bool) -> Path | None:
+    lock_path = _publish_lock_path(slug)
+    _assert_under_root(lock_path)
+    if dry_run:
+        return lock_path
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        return None
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(json.dumps({"run_date": run_date, "candidate_id": candidate_id_value, "created_at": utc_now()}, sort_keys=True) + "\n")
+    return lock_path
+
+
+def _release_publish_lock(lock_path: Path | None, *, dry_run: bool) -> None:
+    if dry_run or lock_path is None:
+        return
+    try:
+        lock_path.unlink()
+    except FileNotFoundError:
+        pass
+
+
+def _formal_provider_errors(run_date: str) -> list[str]:
+    errors: list[str] = []
+    if not schema_validator_available():
+        errors.append("schema_validator_unavailable_blocks_formal_publish")
+    expectations = [
+        ("deepseek-review.json", "opencode"),
+        ("codex-execution-review.json", "codex-cli"),
+    ]
+    for artifact_name, expected_mode in expectations:
+        path = artifact_dir(run_date) / artifact_name
+        if not path.exists():
+            errors.append(f"missing_provider_artifact:{artifact_name}")
+            continue
+        provider = read_json(path).get("provider_status", {})
+        if provider.get("mode") != expected_mode:
+            errors.append(f"formal_provider_mode_not_production:{artifact_name}:expected={expected_mode}:actual={provider.get('mode')}")
+    return errors
 
 
 def publish(
@@ -235,6 +304,7 @@ def publish(
     dry_run: bool,
     target_policy: str = DEFAULT_V2_PUBLISH_POLICY,
     allow_formal_seed_publish: bool = False,
+    allow_test_provider_for_formal: bool = False,
 ) -> dict[str, Any]:
     ensure_v2_dirs(run_date)
     if target_policy not in V2_PUBLISH_POLICIES:
@@ -244,6 +314,7 @@ def publish(
         run_date,
         target_policy=target_policy,
         allow_formal_seed_publish=allow_formal_seed_publish,
+        allow_test_provider_for_formal=allow_test_provider_for_formal,
         formal_seed_written=False,
         dry_run=dry_run,
     )
@@ -253,7 +324,17 @@ def publish(
             status="blocked_formal_publish_not_allowed",
             target_policy=target_policy,
             allow_formal_seed_publish=allow_formal_seed_publish,
+            allow_test_provider_for_formal=allow_test_provider_for_formal,
             blocked=["formal_publish_requires_allow_formal_seed_publish"],
+        )
+    if target_policy == "formal" and allow_test_provider_for_formal and manifest.get("scheduled_daily_switched"):
+        return _result(
+            run_date=run_date,
+            status="blocked_scheduled_test_provider_for_formal",
+            target_policy=target_policy,
+            allow_formal_seed_publish=allow_formal_seed_publish,
+            allow_test_provider_for_formal=allow_test_provider_for_formal,
+            blocked=["allow_test_provider_for_formal_disallowed_for_scheduled_daily"],
         )
     if target_policy == "formal" and manifest.get("backfill_mode") != "daily":
         return _result(
@@ -261,8 +342,20 @@ def publish(
             status="blocked_backfill_formal_publish",
             target_policy=target_policy,
             allow_formal_seed_publish=allow_formal_seed_publish,
+            allow_test_provider_for_formal=allow_test_provider_for_formal,
             blocked=[f"backfill_mode_cannot_formal_publish:{manifest.get('backfill_mode')}"],
         )
+    if target_policy == "formal" and not allow_test_provider_for_formal:
+        provider_errors = _formal_provider_errors(run_date)
+        if provider_errors:
+            return _result(
+                run_date=run_date,
+                status="blocked_formal_provider_provenance",
+                target_policy=target_policy,
+                allow_formal_seed_publish=allow_formal_seed_publish,
+                allow_test_provider_for_formal=allow_test_provider_for_formal,
+                blocked=provider_errors,
+            )
     validation = validate_run_artifacts(run_date, strict_publish=True)
     if validation["status"] != "success":
         return _result(
@@ -270,6 +363,7 @@ def publish(
             status="blocked_validation",
             target_policy=target_policy,
             allow_formal_seed_publish=allow_formal_seed_publish,
+            allow_test_provider_for_formal=allow_test_provider_for_formal,
             blocked=validation["errors"],
         )
     if target_policy == "disabled":
@@ -278,6 +372,7 @@ def publish(
             status="publish_disabled",
             target_policy=target_policy,
             allow_formal_seed_publish=allow_formal_seed_publish,
+            allow_test_provider_for_formal=allow_test_provider_for_formal,
             blocked=[],
         )
     if target_policy == "formal" and not dry_run:
@@ -346,11 +441,43 @@ def publish(
             write_json(duplicate_target, duplicate_payload, dry_run=dry_run)
             blocked.append(f"duplicate_guard_failed:{slug}:duplicate_review={duplicate_target}")
             continue
-        staging = _write_seed_stage(run_date, slug, candidate, decision, hashes, dry_run=dry_run)
-        if dry_run:
-            published.append({"candidate_id": decision["candidate_id"], "target": str(target), "status": "dry_run"})
+        lock_path = _acquire_publish_lock(slug, run_date=run_date, candidate_id_value=str(decision["candidate_id"]), dry_run=dry_run)
+        if lock_path is None:
+            blocked.append(f"blocked_concurrent_publish_lock_exists:{slug}")
             continue
         try:
+            if target.exists():
+                duplicate_target = agenda_root() / "seed-candidates" / "duplicate-review" / run_date / f"{slug}.{decision['candidate_id']}.json"
+                _assert_under_root(duplicate_target)
+                duplicate_payload = {
+                    "schema_version": "duplicate_review.v1",
+                    "run_date": run_date,
+                    "candidate_id": decision["candidate_id"],
+                    "candidate": candidate,
+                    "survival_decision": decision,
+                    "existing_seed_target": str(target),
+                    "duplicate_review_target": str(duplicate_target),
+                    "artifact_hashes": hashes,
+                    "boundary": "Existing formal seed was not overwritten; review this duplicate candidate outside idea_bank/seed.",
+                }
+                write_json(duplicate_target, duplicate_payload, dry_run=dry_run)
+                blocked.append(f"duplicate_guard_failed:{slug}:duplicate_review={duplicate_target}")
+                continue
+            staging = _write_seed_stage(run_date, slug, candidate, decision, hashes, dry_run=dry_run)
+            staging_missing = [name for name in FORMAL_SEED_REQUIRED_FILES if not (staging / name).exists()]
+            if staging_missing and not dry_run:
+                quarantine = agenda_root() / "quarantine" / f"{slug}.{decision['candidate_id']}"
+                _assert_under_root(quarantine)
+                if staging.exists():
+                    staging.rename(quarantine)
+                blocked.append(f"failed_publish_invariant:{slug}:missing={','.join(staging_missing)}")
+                continue
+            if dry_run:
+                published.append({"candidate_id": decision["candidate_id"], "target": str(target), "status": "dry_run"})
+                continue
+            if target.exists():
+                blocked.append(f"duplicate_guard_failed:{slug}:target_exists_before_rename")
+                continue
             staging.rename(target)
             missing = [name for name in FORMAL_SEED_REQUIRED_FILES if not (target / name).exists()]
             if missing:
@@ -366,6 +493,8 @@ def publish(
             if staging.exists():
                 staging.rename(quarantine)
             blocked.append(f"publish_exception:{slug}:{type(exc).__name__}:{exc}")
+        finally:
+            _release_publish_lock(lock_path, dry_run=dry_run)
     write_json(publish_dir(run_date) / "seed-write-plan.json", plan, dry_run=dry_run)
     status = "success" if (published or bucketed) and not blocked else ("nothing_to_publish" if not published and not bucketed and not blocked else "partial")
     if published and not dry_run:
@@ -373,6 +502,7 @@ def publish(
             run_date,
             target_policy=target_policy,
             allow_formal_seed_publish=allow_formal_seed_publish,
+            allow_test_provider_for_formal=allow_test_provider_for_formal,
             formal_seed_written=True,
             dry_run=False,
         )
@@ -382,6 +512,7 @@ def publish(
             run_date,
             target_policy=target_policy,
             allow_formal_seed_publish=allow_formal_seed_publish,
+            allow_test_provider_for_formal=allow_test_provider_for_formal,
             formal_seed_written=False,
             dry_run=False,
         )
@@ -390,6 +521,7 @@ def publish(
         status=status,
         target_policy=target_policy,
         allow_formal_seed_publish=allow_formal_seed_publish,
+        allow_test_provider_for_formal=allow_test_provider_for_formal,
         published=published,
         bucketed=bucketed,
         blocked=blocked,
@@ -403,6 +535,7 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--target-policy", choices=["disabled", "seed-candidates-only", "formal"], default=DEFAULT_V2_PUBLISH_POLICY)
     parser.add_argument("--allow-formal-seed-publish", action="store_true")
+    parser.add_argument("--allow-test-provider-for-formal", action="store_true")
     parser.add_argument("--migrate-legacy-status", action="store_true")
     args = parser.parse_args()
 
@@ -420,6 +553,7 @@ def main() -> int:
         dry_run=args.dry_run,
         target_policy=args.target_policy,
         allow_formal_seed_publish=args.allow_formal_seed_publish,
+        allow_test_provider_for_formal=args.allow_test_provider_for_formal,
     )
     state = "seed_written" if result["published"] and not args.dry_run else "publish_checked"
     write_json(publish_dir(args.run_date) / "publish-result.json", result, dry_run=args.dry_run)

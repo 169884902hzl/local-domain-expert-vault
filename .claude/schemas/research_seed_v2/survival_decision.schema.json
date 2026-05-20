@@ -4,10 +4,31 @@
   "type": "object",
   "required": ["schema_version", "run_date", "status", "decisions"],
   "properties": {
-    "schema_version": {"type": "string"},
+    "schema_version": {"type": "string", "const": "survival_decision.v1"},
     "run_date": {"type": "string"},
-    "status": {"type": "string"},
-    "decisions": {"type": "array"},
+    "status": {"type": "string", "enum": ["success", "partial_schema_blocked"]},
+    "target_policy": {"type": "string", "enum": ["disabled", "seed-candidates-only", "formal"]},
+    "decisions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["candidate_id", "candidate_title", "decision", "blocks", "novelty_classification", "codex_action", "human_override_used", "publish_target"],
+        "properties": {
+          "candidate_id": {"type": "string", "minLength": 1},
+          "parent_candidate_id": {"type": "string"},
+          "candidate_title": {"type": "string"},
+          "decision": {"type": "string", "enum": ["accept_for_user_review", "killed", "parked", "rescue"]},
+          "blocks": {"type": "array", "items": {"type": "string"}},
+          "deepseek_label": {"type": "string"},
+          "novelty_classification": {"type": "string", "enum": ["likely_open", "partial_overlap", "unknown", "duplicate"]},
+          "verification_scope": {"type": "string"},
+          "external_providers_used": {"type": "array", "items": {"type": "string"}},
+          "codex_action": {"type": "string"},
+          "human_override_used": {"type": "boolean"},
+          "publish_target": {"type": "string", "enum": ["seed", "seed-candidates", "killed", "parked", "rescue"]}
+        }
+      }
+    },
     "human_overrides_consumed": {"type": "array"},
     "artifact_hashes": {"type": "object"}
   }

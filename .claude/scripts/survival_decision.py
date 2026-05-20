@@ -14,6 +14,7 @@ from research_seed_v2_common import (
     ensure_v2_dirs,
     read_json,
     run_dir,
+    validate_artifact,
     validate_json_file,
     write_run_artifact,
 )
@@ -59,7 +60,26 @@ def decide(
     *,
     run_date: str,
     allow_human_override: bool,
+    target_policy: str = "seed-candidates-only",
 ) -> dict[str, Any]:
+    input_errors: list[str] = []
+    for artifact_name in ["selected-candidates.json", "deepseek-review.json", "novelty-scan.json", "codex-execution-review.json"]:
+        input_errors.extend(f"{artifact_name}:{error}" for error in validate_artifact(run_date, artifact_name))
+    if input_errors:
+        return {
+            "schema_version": "survival_decision.v1",
+            "run_date": run_date,
+            "status": "partial_schema_blocked",
+            "target_policy": target_policy,
+            "decisions": [],
+            "human_overrides_consumed": [],
+            "human_override_errors": input_errors,
+            "artifact_hashes": artifact_hashes(
+                run_date,
+                ["selected-candidates.json", "deepseek-review.json", "gemini-mutations.json", "novelty-scan.json", "codex-execution-review.json"],
+            ),
+            "boundary": "Invalid upstream artifacts are not consumed by survival decision.",
+        }
     selected_payload = read_json(artifact_dir(run_date) / "selected-candidates.json")
     deepseek_payload = read_json(artifact_dir(run_date) / "deepseek-review.json")
     mutations_path = artifact_dir(run_date) / "gemini-mutations.json"
@@ -97,6 +117,15 @@ def decide(
             blocks.append("novelty_scan_not_completed")
         if novelty.get("promotion_allowed") is not True:
             blocks.append("novelty_promotion_not_allowed")
+        verification_scope = str(novelty.get("verification_scope") or "local_only")
+        external_providers_used = [str(value) for value in novelty.get("external_providers_used", []) if value]
+        if target_policy == "formal":
+            if novelty.get("formal_promotion_allowed") is not True:
+                blocks.append("formal_novelty_promotion_not_allowed")
+            if verification_scope == "local_only":
+                blocks.append("formal_novelty_requires_external_or_hybrid_scope")
+            if not external_providers_used:
+                blocks.append("formal_novelty_requires_external_provider")
         if novelty_class == "unknown" and not override:
             blocks.append("unknown_novelty_without_human_override")
         if novelty_class not in {"likely_open", "partial_overlap", "unknown"}:
@@ -128,9 +157,11 @@ def decide(
                 "blocks": blocks,
                 "deepseek_label": deepseek.get("survivability_label", ""),
                 "novelty_classification": novelty_class,
+                "verification_scope": verification_scope,
+                "external_providers_used": external_providers_used,
                 "codex_action": codex.get("action", ""),
                 "human_override_used": bool(override),
-                "publish_target": "seed" if action == "accept_for_user_review" else action,
+                "publish_target": ("seed" if target_policy == "formal" else "seed-candidates") if action == "accept_for_user_review" else action,
             }
         )
     status = "success" if not override_errors else "partial_schema_blocked"
@@ -138,6 +169,7 @@ def decide(
         "schema_version": "survival_decision.v1",
         "run_date": run_date,
         "status": status,
+        "target_policy": target_policy,
         "decisions": decisions,
         "human_overrides_consumed": sorted(overrides),
         "human_override_errors": override_errors,
@@ -159,11 +191,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run-date", required=True)
     parser.add_argument("--allow-human-override", action="store_true")
+    parser.add_argument("--target-policy", choices=["disabled", "seed-candidates-only", "formal"], default="seed-candidates-only")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
     ensure_v2_dirs(args.run_date)
-    payload = decide(run_date=args.run_date, allow_human_override=args.allow_human_override)
+    payload = decide(run_date=args.run_date, allow_human_override=args.allow_human_override, target_policy=args.target_policy)
     write_run_artifact(args.run_date, "survival-decision.json", payload, state="survival_decided", dry_run=args.dry_run)
     counts: dict[str, int] = {}
     for item in payload["decisions"]:

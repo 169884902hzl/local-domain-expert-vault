@@ -33,6 +33,7 @@ from generate_gemini_idea_prompt import render_prompt as render_gemini_prompt
 from arxiv_metadata_sync import DEFAULT_DB as ARXIV_METADATA_DB
 from arxiv_metadata_sync import query_mirror, mirror_status_path
 from kb_common import extract_frontmatter, parse_frontmatter_map, safe_print, safe_write, today_iso, vault_path
+from paper_intake_triage import build_triage
 from research_seed_v2_common import DEFAULT_V2_PUBLISH_POLICY
 from zotero_import import (
     DEFAULT_COLLECTION_KEY,
@@ -577,6 +578,21 @@ def _selection_quota_text(summary: dict[str, int]) -> str:
     return ";".join(f"{key}={summary.get(key, 0)}" for key in ["primary", "focus", "domain_coverage", "fill", "attempts_total"])
 
 
+def _filter_import_candidates_by_v2_triage(
+    selected: list[tuple[RankedPaper, str, str]],
+    triage: dict[str, Any],
+) -> list[tuple[RankedPaper, str, str]]:
+    selected_rows = triage.get("selected_for_deep_read", [])
+    if not isinstance(selected_rows, list):
+        return selected
+    selected_ids = [str(row.get("arxiv_id") or row.get("paper_id") or "") for row in selected_rows if isinstance(row, dict)]
+    selected_ids = [value for value in selected_ids if value]
+    if not selected_ids:
+        return []
+    by_id = {item.paper.arxiv_id: (item, selection, original) for item, selection, original in selected}
+    return [by_id[arxiv_id] for arxiv_id in selected_ids if arxiv_id in by_id]
+
+
 def _non_robotics_rejected_sample(ranked: list[RankedPaper], *, limit: int = 8) -> list[RankedPaper]:
     return [item for item in ranked if "non_robotics_cv_context" in item.penalties][:limit]
 
@@ -783,13 +799,33 @@ def build_v2_review_stages(args: argparse.Namespace, run_date: str) -> list[tupl
     else:
         codex_cmd.extend(["--provider", "none"])
 
+    novelty_cmd = [
+        sys.executable,
+        ".claude/scripts/novelty_baseline_scan.py",
+        "--run-date",
+        run_date,
+        "--target-policy",
+        resolve_v2_publish_policy(args),
+        "--max-external-queries",
+        str(getattr(args, "novelty_max_external_queries", 1)),
+        "--external-timeout",
+        str(getattr(args, "novelty_external_timeout", 12)),
+    ]
+    survival_cmd = [
+        sys.executable,
+        ".claude/scripts/survival_decision.py",
+        "--run-date",
+        run_date,
+        "--target-policy",
+        resolve_v2_publish_policy(args),
+    ]
     review_stages: list[tuple[str, list[str], int]] = [
         ("portfolio_select", [sys.executable, ".claude/scripts/candidate_portfolio_select.py", "--run-date", run_date], 180),
         ("deepseek_review", deepseek_cmd, max(900, args.deepseek_timeout)),
         ("gemini_rescue_mutation", [sys.executable, ".claude/scripts/gemini_rescue_mutation.py", "--run-date", run_date], max(600, args.idea_timeout)),
-        ("novelty_scan", [sys.executable, ".claude/scripts/novelty_baseline_scan.py", "--run-date", run_date], 600),
+        ("novelty_scan", novelty_cmd, 600),
         ("codex_execution_review", codex_cmd, max(600, codex_timeout)),
-        ("survival_decision", [sys.executable, ".claude/scripts/survival_decision.py", "--run-date", run_date], 300),
+        ("survival_decision", survival_cmd, 300),
     ]
     if args.allow_human_override:
         review_stages[-1][1].append("--allow-human-override")
@@ -831,6 +867,15 @@ def run_research_seed_v2(
         errors.append("research_seed_v2_backfill_formal_publish_blocked")
         result["status"] = "partial"
         result["boundary"] = "Backfill cannot formal-publish; use ingest-only or seed-candidates-only rehearsal."
+        return result
+    if (
+        v2_publish_policy == "formal"
+        and not getattr(args, "allow_test_provider_for_formal", False)
+        and (getattr(args, "deepseek_provider", "none") != "opencode" or getattr(args, "codex_execution_provider", "none") != "codex-cli")
+    ):
+        errors.append("research_seed_v2_formal_requires_production_providers")
+        result["status"] = "partial"
+        result["boundary"] = "Formal publish requires DeepSeek opencode and Codex codex-cli unless explicit manual test-provider override is used."
         return result
 
     init_args = [
@@ -960,6 +1005,8 @@ def run_research_seed_v2(
     ]
     if formal_seed_publish_allowed:
         publish_args.append("--allow-formal-seed-publish")
+    if getattr(args, "allow_test_provider_for_formal", False):
+        publish_args.append("--allow-test-provider-for-formal")
     publish_stage = "publish_disabled" if v2_publish_policy == "disabled" else f"publish_{v2_publish_policy}"
     if not _v2_stage(publish_stage, publish_args, timeout=300, result=result, errors=errors):
         return result
@@ -1930,10 +1977,26 @@ def run_pipeline(args: argparse.Namespace) -> int:
     ranked = new_ranked_all[: args.max_candidates]
     selection_pool = new_ranked_all[: max(args.max_candidates, args.max_auto_import)]
     records = [item.to_dict() for item in new_ranked_all[: max(args.max_candidates, args.max_auto_import)]]
+    intake_triage = build_triage(
+        records,
+        run_date=run_date,
+        target_deep_read=args.target_deep_read,
+        max_deep_read=args.max_deep_read,
+    )
+    selected_deep_read_ids = [
+        str(item.get("arxiv_id") or "")
+        for item in intake_triage.get("selected_for_deep_read", [])
+        if isinstance(item, dict) and item.get("arxiv_id")
+    ]
     import_policy = {
         "min_new_imports": args.min_new_imports,
         "max_auto_import": args.max_auto_import,
         "max_read": args.max_read,
+        "v2_intake_controls_imports": bool(args.v2_intake_controls_imports),
+        "legacy_import_fill": bool(args.legacy_import_fill),
+        "target_deep_read": args.target_deep_read,
+        "max_deep_read": args.max_deep_read,
+        "v2_selected_for_deep_read": selected_deep_read_ids,
         "read_failure_backfill": args.read_failure_backfill,
         "fill_import_threshold": args.fill_import_threshold,
         "fetch_timeout": args.fetch_timeout,
@@ -1954,6 +2017,9 @@ def run_pipeline(args: argparse.Namespace) -> int:
         max_attempts=args.max_auto_import,
         fill_threshold=args.fill_import_threshold,
     )
+    legacy_floor_active = not args.v2_intake_controls_imports or args.legacy_import_fill
+    if args.v2_intake_controls_imports and not args.legacy_import_fill:
+        selected_import_candidates = _filter_import_candidates_by_v2_triage(selected_import_candidates, intake_triage)
     quota_summary = selection_quota_summary(selected_import_candidates, target=args.min_new_imports)
     import_policy["selection_quota_summary"] = quota_summary
     existing_note_titles = existing_literature_notes_by_title()
@@ -2197,7 +2263,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
                 errors.append(f"read_pending:{key}:waiting_local_note")
             if read_status not in {"skipped", "backlog", "waiting_local_note"} and not read_status.startswith("success"):
                 errors.append(f"read_failed:{key}:{read_status}")
-    if not args.resume_backlog and new_import_count < args.min_new_imports:
+    if not args.resume_backlog and legacy_floor_active and new_import_count < args.min_new_imports:
         errors.append(f"min_new_imports_not_met:created={new_import_count}:target={args.min_new_imports}:attempts={len(imports)}")
 
     maintenance_status = "not_run"
@@ -2401,11 +2467,24 @@ def main() -> int:
     parser.add_argument("--deepseek-provider-json", default="")
     parser.add_argument("--codex-execution-provider", choices=["json", "codex-cli", "none"], default="none")
     parser.add_argument("--codex-execution-provider-json", default="")
+    parser.add_argument("--novelty-max-external-queries", type=int, default=1)
+    parser.add_argument("--novelty-external-timeout", type=int, default=12)
     parser.add_argument("--raw-candidate-limit", type=int, default=24)
     parser.add_argument("--min-raw-candidates", type=int, default=24)
     parser.add_argument("--max-generated", type=int, default=24)
     parser.add_argument("--target-deep-read", type=int, default=3, help="v2 intake target for daily deep reads.")
     parser.add_argument("--max-deep-read", type=int, default=4, help="v2 hard cap for daily deep reads.")
+    parser.add_argument(
+        "--v2-intake-controls-imports",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Let v2 intake triage control daily Zotero import and Claudian deep-read attempts.",
+    )
+    parser.add_argument(
+        "--legacy-import-fill",
+        action="store_true",
+        help="Opt back in to legacy min_new_imports fill behavior. Disabled by default for v2 daily runs.",
+    )
     parser.add_argument(
         "--backfill-mode",
         choices=["daily", "ingest-only"],
@@ -2435,13 +2514,23 @@ def main() -> int:
         help="Required with --v2-publish-policy formal; scheduled daily wrappers must not set this by default.",
     )
     parser.add_argument(
+        "--allow-test-provider-for-formal",
+        action="store_true",
+        help="Manual-only test override for formal mode with json providers. Scheduled daily wrappers must not set this.",
+    )
+    parser.add_argument(
         "--allow-human-override",
         action="store_true",
         help="Allow scheduled run to consume explicit human override files; default is disabled.",
     )
     args = parser.parse_args()
     if args.max_read is None:
-        args.max_read = args.min_new_imports
+        if args.v2_intake_controls_imports:
+            args.max_read = min(args.target_deep_read, args.max_deep_read)
+        else:
+            args.max_read = args.min_new_imports
+    elif args.v2_intake_controls_imports:
+        args.max_read = min(args.max_read, args.max_deep_read)
     return run_pipeline(args)
 
 

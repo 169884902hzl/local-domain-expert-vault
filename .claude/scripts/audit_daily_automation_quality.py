@@ -279,6 +279,15 @@ def _scan_scheduled_daily_rollout_policy() -> list[dict[str, str]]:
                 _rel(wrapper),
             )
         )
+    if "--allow-test-provider-for-formal" in text:
+        issues.append(
+            _issue(
+                "FAIL",
+                "v2_scheduled_test_provider_for_formal_allowed",
+                "Scheduled daily wrapper must not enable formal test-provider override.",
+                _rel(wrapper),
+            )
+        )
     return issues
 
 
@@ -431,6 +440,8 @@ def _audit_v2_state_machine(run_date: str) -> tuple[dict[str, Any], list[dict[st
             issues.append(_issue("FAIL", "v2_manifest_seed_written_without_publish_result", "Manifest says formal seed written but publish result has no published seed.", _rel(manifest_path)))
         if publish_data.get("formal_seed_written") and not manifest_formal_written:
             issues.append(_issue("FAIL", "v2_publish_result_manifest_seed_written_mismatch", "Publish result says formal seed written but manifest disagrees.", _rel(publish_result)))
+        if manifest.get("scheduled_daily_switched") and publish_data.get("test_provider_used_for_formal"):
+            issues.append(_issue("FAIL", "v2_scheduled_formal_test_provider_used", "Scheduled formal publish cannot use test provider override.", _rel(publish_result)))
 
     seed_root = vault_path("projects", "research-agenda", "idea_bank", "seed")
     v2_seed_count = 0
@@ -470,6 +481,8 @@ def _audit_v2_state_machine(run_date: str) -> tuple[dict[str, Any], list[dict[st
             "v2_publish_policy": manifest.get("v2_publish_policy", ""),
             "formal_seed_publish_allowed": bool(manifest.get("formal_seed_publish_allowed", False)),
             "scheduled_daily_switched": bool(manifest.get("scheduled_daily_switched", False)),
+            "test_provider_used_for_formal": bool(manifest.get("test_provider_used_for_formal", False)),
+            "formal_publish_risk": manifest.get("formal_publish_risk", ""),
             "publish_required_artifacts": PUBLISH_REQUIRED_ARTIFACTS,
             "formal_seed_required_files": FORMAL_SEED_REQUIRED_FILES,
             "v2_seed_count": v2_seed_count,

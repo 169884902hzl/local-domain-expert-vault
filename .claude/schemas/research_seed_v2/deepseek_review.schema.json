@@ -2,13 +2,42 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Research Seed v2 DeepSeek Review",
   "type": "object",
-  "required": ["schema_version", "run_date", "status", "reviews"],
+  "required": ["schema_version", "run_date", "status", "reviews", "provider_status"],
   "properties": {
-    "schema_version": {"type": "string"},
+    "schema_version": {"type": "string", "const": "deepseek_review.v1"},
     "run_date": {"type": "string"},
-    "status": {"type": "string"},
-    "reviews": {"type": "array"},
-    "provider_status": {"type": "object"},
+    "status": {"type": "string", "enum": ["success", "partial_provider_invalid", "partial_provider_unavailable", "partial_empty_selection"]},
+    "reviews": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["candidate_id", "status", "novelty_attack", "baseline_attack", "mechanism_attack", "evaluation_attack", "scope_attack", "a_plus_b_risk", "fatal_flaw", "rescue_mutation", "survivability_label", "allowed_next_stage"],
+        "properties": {
+          "candidate_id": {"type": "string", "minLength": 1},
+          "candidate_title": {"type": "string"},
+          "status": {"type": "string", "enum": ["success", "failed_fallback_only"]},
+          "novelty_attack": {"type": "string"},
+          "baseline_attack": {"type": "string"},
+          "mechanism_attack": {"type": "string"},
+          "evaluation_attack": {"type": "string"},
+          "scope_attack": {"type": "string"},
+          "a_plus_b_risk": {"type": "string", "enum": ["none", "low", "medium", "high", "fatal"]},
+          "fatal_flaw": {"type": ["string", "boolean"]},
+          "rescue_mutation": {"type": "string"},
+          "survivability_label": {"type": "string", "enum": ["survives", "survives_if_mutated", "park_for_unknown", "reject_with_rescue", "reject_fatal"]},
+          "allowed_next_stage": {"type": "string", "enum": ["novelty_scan", "gemini_mutation", "parked", "rescue", "stop"]}
+        }
+      }
+    },
+    "provider_status": {
+      "type": "object",
+      "required": ["provider", "provider_backed"],
+      "properties": {
+        "provider": {"type": "string"},
+        "provider_backed": {"type": "boolean"},
+        "mode": {"type": "string"}
+      }
+    },
     "artifact_hashes": {"type": "object"}
   }
 }

@@ -2,13 +2,48 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Research Seed v2 Codex Execution Review",
   "type": "object",
-  "required": ["schema_version", "run_date", "status", "reviews"],
+  "required": ["schema_version", "run_date", "status", "reviews", "provider_status"],
   "properties": {
-    "schema_version": {"type": "string"},
+    "schema_version": {"type": "string", "const": "codex_execution_review.v1"},
     "run_date": {"type": "string"},
-    "status": {"type": "string"},
-    "reviews": {"type": "array"},
-    "provider_status": {"type": "object"},
+    "status": {"type": "string", "enum": ["success", "partial_provider_invalid", "partial_provider_unavailable", "partial_empty_selection"]},
+    "reviews": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["candidate_id", "status", "action", "no_hardware_pilot_feasibility", "public_dataset_or_sim_availability", "baseline_training_cost", "metric_automation", "data_leakage_risk", "minimal_repo_plan", "real_robot_pilot_complexity", "reproducibility_path", "compute_time_budget"],
+        "properties": {
+          "candidate_id": {"type": "string", "minLength": 1},
+          "candidate_title": {"type": "string"},
+          "status": {"type": "string", "enum": ["success", "failed_fallback_only"]},
+          "action": {"type": "string", "enum": ["accept_for_user_review", "rewrite_before_seed", "park_for_weekly", "reject_with_rescue", "requires_human_decision"]},
+          "no_hardware_pilot_feasibility": {"type": "string"},
+          "public_dataset_or_sim_availability": {"type": "string"},
+          "baseline_training_cost": {"type": "string"},
+          "metric_automation": {"type": "string"},
+          "data_leakage_risk": {"type": "string"},
+          "minimal_repo_plan": {"type": "string"},
+          "real_robot_pilot_complexity": {"type": "string"},
+          "reproducibility_path": {"type": "string"},
+          "compute_time_budget": {"type": "string"},
+          "blocking_issues": {"type": "array"},
+          "nonblocking_risks": {"type": "array"},
+          "rewrite_request": {"type": "string"},
+          "rescue_signal": {"type": "string"},
+          "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+          "field_presence_only": {"type": "boolean"}
+        }
+      }
+    },
+    "provider_status": {
+      "type": "object",
+      "required": ["provider", "provider_backed"],
+      "properties": {
+        "provider": {"type": "string"},
+        "provider_backed": {"type": "boolean"},
+        "mode": {"type": "string"}
+      }
+    },
     "artifact_hashes": {"type": "object"}
   }
 }

@@ -4,9 +4,20 @@
   "type": "object",
   "required": ["schema_version", "run_date", "candidates", "lanes"],
   "properties": {
-    "schema_version": {"type": "string"},
+    "schema_version": {"type": "string", "const": "raw_candidate.v1"},
     "run_date": {"type": "string"},
-    "candidates": {"type": "array"},
+    "candidates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["candidate_id"],
+        "properties": {
+          "candidate_id": {"type": "string", "minLength": 1},
+          "title": {"type": "string"},
+          "lane": {"type": "string"}
+        }
+      }
+    },
     "lanes": {"type": "array"},
     "artifact_hashes": {"type": "object"},
     "boundary": {"type": "string"}

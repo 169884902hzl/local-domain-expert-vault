@@ -13,6 +13,11 @@ from typing import Any
 from kb_common import safe_print, vault_path
 from research_agenda_common import AGENDA_ROOT, slugify
 
+try:
+    from jsonschema import Draft202012Validator
+except Exception:  # pragma: no cover - exercised by fallback tests via monkeypatch
+    Draft202012Validator = None  # type: ignore[assignment]
+
 
 SCHEMA_ROOT = vault_path(".claude", "schemas", "research_seed_v2")
 STATE_MACHINE_VERSION = "research_seed_state_machine.v2"
@@ -203,6 +208,47 @@ def _type_name(value: Any) -> str:
     return type(value).__name__
 
 
+def schema_validator_available() -> bool:
+    return Draft202012Validator is not None
+
+
+def _jsonschema_error_path(error: Any) -> str:
+    path = ".".join(str(part) for part in error.absolute_path)
+    return path or "$"
+
+
+def _fallback_validate(instance: Any, schema: dict[str, Any], path: str = "$") -> list[str]:
+    errors: list[str] = []
+    if "const" in schema and instance != schema["const"]:
+        errors.append(f"const_mismatch:{path}:expected={schema['const']}:actual={instance}")
+    if "enum" in schema and instance not in schema["enum"]:
+        errors.append(f"enum_mismatch:{path}:allowed={schema['enum']}:actual={instance}")
+    expected_type = schema.get("type")
+    if expected_type is not None:
+        allowed = expected_type if isinstance(expected_type, list) else [expected_type]
+        actual = _type_name(instance)
+        if actual not in allowed:
+            errors.append(f"type_mismatch:{path}:expected={allowed}:actual={actual}")
+            return errors
+    if isinstance(instance, dict):
+        for field in schema.get("required", []):
+            if field not in instance:
+                errors.append(f"missing_field:{path}.{field}")
+        properties = schema.get("properties", {})
+        if isinstance(properties, dict):
+            for field, child_schema in properties.items():
+                if field in instance and isinstance(child_schema, dict):
+                    errors.extend(_fallback_validate(instance[field], child_schema, f"{path}.{field}"))
+    if isinstance(instance, list):
+        item_schema = schema.get("items")
+        if isinstance(item_schema, dict):
+            for index, item in enumerate(instance):
+                errors.extend(_fallback_validate(item, item_schema, f"{path}[{index}]"))
+    if schema.get("minLength") and isinstance(instance, str) and len(instance) < int(schema["minLength"]):
+        errors.append(f"min_length:{path}:min={schema['minLength']}:actual={len(instance)}")
+    return errors
+
+
 def validate_payload(payload: dict[str, Any], schema_version: str) -> list[str]:
     errors: list[str] = []
     if payload.get("schema_version") != schema_version:
@@ -213,19 +259,16 @@ def validate_payload(payload: dict[str, Any], schema_version: str) -> list[str]:
         errors.append(f"missing_schema:{v2_rel(path)}")
         return errors
     schema = read_json(path)
-    for field in schema.get("required", []):
-        if field not in payload:
-            errors.append(f"missing_field:{field}")
-    properties = schema.get("properties", {})
-    for field, spec in properties.items():
-        if field not in payload or "type" not in spec:
-            continue
-        allowed = spec["type"]
-        allowed_types = allowed if isinstance(allowed, list) else [allowed]
-        actual = _type_name(payload[field])
-        if actual not in allowed_types:
-            errors.append(f"type_mismatch:{field}:expected={allowed_types}:actual={actual}")
-    return errors
+    if Draft202012Validator is not None:
+        try:
+            Draft202012Validator.check_schema(schema)
+        except Exception as exc:
+            return [f"schema_invalid:{schema_version}:{type(exc).__name__}:{exc}"]
+        validator = Draft202012Validator(schema)
+        for error in sorted(validator.iter_errors(payload), key=lambda err: list(err.absolute_path)):
+            errors.append(f"jsonschema:{_jsonschema_error_path(error)}:{error.message}")
+        return errors
+    return _fallback_validate(payload, schema)
 
 
 def validate_json_file(path: Path, schema_version: str) -> list[str]:
@@ -315,6 +358,8 @@ def init_manifest_with_policy(
         "formal_seed_publish_allowed": bool(formal_seed_publish_allowed),
         "scheduled_daily_switched": bool(scheduled_daily_switched),
         "formal_seed_written": bool(existing.get("formal_seed_written", False)),
+        "test_provider_used_for_formal": bool(existing.get("test_provider_used_for_formal", False)),
+        "formal_publish_risk": str(existing.get("formal_publish_risk", "")),
         "states": existing.get("states", []),
         "boundary": "v2 transactional research-seed run; legacy same-day outputs are not formal v2 seed artifacts.",
     }

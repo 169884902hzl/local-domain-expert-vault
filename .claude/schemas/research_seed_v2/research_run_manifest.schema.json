@@ -4,11 +4,16 @@
   "type": "object",
   "required": ["schema_version", "state_machine_version", "run_id", "run_date", "states", "formal_seed_written"],
   "properties": {
-    "schema_version": {"type": "string"},
+    "schema_version": {"type": "string", "const": "research_run_manifest.v1"},
     "state_machine_version": {"type": "string"},
     "run_id": {"type": "string"},
     "run_date": {"type": "string"},
     "states": {"type": "array"},
-    "formal_seed_written": {"type": "boolean"}
+    "v2_publish_policy": {"type": "string", "enum": ["disabled", "seed-candidates-only", "formal"]},
+    "formal_seed_publish_allowed": {"type": "boolean"},
+    "scheduled_daily_switched": {"type": "boolean"},
+    "formal_seed_written": {"type": "boolean"},
+    "test_provider_used_for_formal": {"type": "boolean"},
+    "formal_publish_risk": {"type": "string"}
   }
 }
