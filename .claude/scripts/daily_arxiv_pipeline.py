@@ -1,4 +1,4 @@
-"""Daily arXiv embodied-AI scout pipeline."""
+﻿"""Daily arXiv embodied-AI scout pipeline."""
 from __future__ import annotations
 
 import argparse
@@ -33,6 +33,7 @@ from generate_gemini_idea_prompt import render_prompt as render_gemini_prompt
 from arxiv_metadata_sync import DEFAULT_DB as ARXIV_METADATA_DB
 from arxiv_metadata_sync import query_mirror, mirror_status_path
 from kb_common import extract_frontmatter, parse_frontmatter_map, safe_print, safe_write, today_iso, vault_path
+from research_seed_v2_common import DEFAULT_V2_PUBLISH_POLICY
 from zotero_import import (
     DEFAULT_COLLECTION_KEY,
     ImportResult,
@@ -729,13 +730,263 @@ def run_subprocess(command: list[str], *, timeout: int) -> tuple[int, str]:
     return proc.returncode, output.strip()
 
 
+def _v2_stage(
+    stage: str,
+    command: list[str],
+    *,
+    timeout: int,
+    result: dict[str, Any],
+    errors: list[str],
+) -> bool:
+    started = time.monotonic()
+    try:
+        code, output = run_subprocess(command, timeout=timeout)
+    except Exception as exc:
+        code, output = 1, f"{type(exc).__name__}:{exc}"
+    result["stages"].append(
+        {
+            "stage": stage,
+            "status": "success" if code == 0 else "failed",
+            "exit_code": code,
+            "elapsed_sec": round(time.monotonic() - started, 2),
+            "output_tail": output[-1200:],
+        }
+    )
+    if code != 0:
+        errors.append(f"research_seed_v2_{stage}_failed")
+        result["status"] = "partial"
+        return False
+    return True
+
+
+def build_v2_review_stages(args: argparse.Namespace, run_date: str) -> list[tuple[str, list[str], int]]:
+    deepseek_cmd = [sys.executable, ".claude/scripts/deepseek_scientific_review.py", "--run-date", run_date]
+    deepseek_provider = getattr(args, "deepseek_provider", "none")
+    if deepseek_provider == "opencode":
+        deepseek_cmd.extend(["--provider", "opencode", "--model", args.deepseek_model, "--timeout", str(args.deepseek_timeout)])
+    elif deepseek_provider == "json":
+        deepseek_cmd.extend(["--provider", "json"])
+        if getattr(args, "deepseek_provider_json", ""):
+            deepseek_cmd.extend(["--provider-review-json", args.deepseek_provider_json])
+    else:
+        deepseek_cmd.extend(["--provider", "none"])
+
+    codex_timeout = 1200
+    codex_cmd = [sys.executable, ".claude/scripts/codex_seed_review.py", "execution-review", "--run-date", run_date]
+    codex_provider = getattr(args, "codex_execution_provider", "none")
+    if codex_provider == "codex-cli":
+        codex_cmd.extend(["--provider", "codex-cli", "--timeout", str(codex_timeout)])
+    elif codex_provider == "json":
+        codex_cmd.extend(["--provider", "json"])
+        if getattr(args, "codex_execution_provider_json", ""):
+            codex_cmd.extend(["--provider-review-json", args.codex_execution_provider_json])
+    else:
+        codex_cmd.extend(["--provider", "none"])
+
+    review_stages: list[tuple[str, list[str], int]] = [
+        ("portfolio_select", [sys.executable, ".claude/scripts/candidate_portfolio_select.py", "--run-date", run_date], 180),
+        ("deepseek_review", deepseek_cmd, max(900, args.deepseek_timeout)),
+        ("gemini_rescue_mutation", [sys.executable, ".claude/scripts/gemini_rescue_mutation.py", "--run-date", run_date], max(600, args.idea_timeout)),
+        ("novelty_scan", [sys.executable, ".claude/scripts/novelty_baseline_scan.py", "--run-date", run_date], 600),
+        ("codex_execution_review", codex_cmd, max(600, codex_timeout)),
+        ("survival_decision", [sys.executable, ".claude/scripts/survival_decision.py", "--run-date", run_date], 300),
+    ]
+    if args.allow_human_override:
+        review_stages[-1][1].append("--allow-human-override")
+    return review_stages
+
+
+def resolve_v2_publish_policy(args: argparse.Namespace) -> str:
+    return str(getattr(args, "v2_publish_policy", DEFAULT_V2_PUBLISH_POLICY) or DEFAULT_V2_PUBLISH_POLICY)
+
+
+def run_research_seed_v2(
+    *,
+    args: argparse.Namespace,
+    run_date: str,
+    candidates_path: Path,
+    focus_zotero_keys: list[str],
+    errors: list[str],
+) -> dict[str, Any]:
+    """Run the transactional v2 state machine. Formal seed writes occur only in publish_research_run.py."""
+    backfill_mode = args.backfill_mode
+    v2_publish_policy = resolve_v2_publish_policy(args)
+    formal_seed_publish_allowed = bool(getattr(args, "allow_formal_seed_publish", False))
+    ingest_only = backfill_mode == "ingest-only" and not args.backfill_generate_ideas
+    result: dict[str, Any] = {
+        "schema_version": "daily_research_seed_v2_summary.v1",
+        "status": "success",
+        "run_date": run_date,
+        "run_dir": f"projects/research-agenda/runs/{run_date}",
+        "backfill_mode": backfill_mode,
+        "backfill_generate_ideas": bool(args.backfill_generate_ideas),
+        "backfill_publish": args.backfill_publish,
+        "v2_publish_policy": v2_publish_policy,
+        "formal_seed_publish_allowed": formal_seed_publish_allowed,
+        "scheduled_daily_switched": False,
+        "focus_zotero_keys": focus_zotero_keys,
+        "stages": [],
+    }
+    if backfill_mode != "daily" and v2_publish_policy == "formal":
+        errors.append("research_seed_v2_backfill_formal_publish_blocked")
+        result["status"] = "partial"
+        result["boundary"] = "Backfill cannot formal-publish; use ingest-only or seed-candidates-only rehearsal."
+        return result
+
+    init_args = [
+        sys.executable,
+        ".claude/scripts/validate_research_run.py",
+        "init",
+        "--run-date",
+        run_date,
+        "--backfill-mode",
+        backfill_mode,
+        "--v2-publish-policy",
+        v2_publish_policy,
+    ]
+    if formal_seed_publish_allowed:
+        init_args.append("--formal-seed-publish-allowed")
+    if not _v2_stage("init_manifest", init_args, timeout=120, result=result, errors=errors):
+        return result
+
+    triage_args = [
+        sys.executable,
+        ".claude/scripts/paper_intake_triage.py",
+        "--run-date",
+        run_date,
+        "--candidates",
+        str(candidates_path),
+        "--target-deep-read",
+        str(args.target_deep_read),
+        "--max-deep-read",
+        str(args.max_deep_read),
+    ]
+    if not _v2_stage("intake_triage", triage_args, timeout=180, result=result, errors=errors):
+        return result
+
+    if focus_zotero_keys:
+        extract_args = [
+            sys.executable,
+            ".claude/scripts/research_agenda_extract.py",
+            "--run-date",
+            run_date,
+            "--zotero-keys",
+            ",".join(focus_zotero_keys),
+            "--write-v2-primitives",
+        ]
+        if not _v2_stage("paper_primitives", extract_args, timeout=600, result=result, errors=errors):
+            return result
+    else:
+        result["stages"].append(
+            {
+                "stage": "paper_primitives",
+                "status": "skipped_no_focus_keys",
+                "exit_code": 0,
+                "elapsed_sec": 0,
+                "output_tail": "No successfully read focus Zotero keys; claim graph will be empty unless previous primitives exist.",
+            }
+        )
+
+    for stage, command, timeout in [
+        ("claim_graph", [sys.executable, ".claude/scripts/research_claim_graph.py", "--run-date", run_date], 240),
+        ("tension_map", [sys.executable, ".claude/scripts/tension_map.py", "--run-date", run_date], 240),
+    ]:
+        if not _v2_stage(stage, command, timeout=timeout, result=result, errors=errors):
+            return result
+
+    if ingest_only:
+        result["status"] = "success_ingest_only"
+        result["boundary"] = "Backfill ingest-only stopped before raw candidate generation and formal seed publish."
+        return result
+
+    if not focus_zotero_keys:
+        result["status"] = "success_no_focus_keys"
+        result["boundary"] = "No raw candidates generated because no successfully read focus Zotero keys were available."
+        return result
+
+    ideate_args = [
+        sys.executable,
+        ".claude/scripts/research_agenda_ideate.py",
+        "--run-date",
+        run_date,
+        "--focus-zotero-keys",
+        ",".join(focus_zotero_keys),
+        "--generator",
+        args.idea_mode,
+        "--generator-timeout",
+        str(args.idea_timeout),
+        "--gemini-model",
+        args.gemini_model,
+        "--raw-candidate-limit",
+        str(args.raw_candidate_limit),
+        "--min-raw-candidates",
+        str(args.min_raw_candidates),
+        "--max-generated",
+        str(args.max_generated),
+        "--write-v2-run-artifact",
+    ]
+    if not _v2_stage("raw_candidates", ideate_args, timeout=max(900, args.idea_timeout + 300), result=result, errors=errors):
+        return result
+
+    for stage, command, timeout in build_v2_review_stages(args, run_date):
+        if not _v2_stage(stage, command, timeout=timeout, result=result, errors=errors):
+            return result
+
+    if args.backfill_publish != "disabled":
+        publish_args = [
+            sys.executable,
+            ".claude/scripts/publish_research_run.py",
+            "--run-date",
+            run_date,
+            "--target-policy",
+            "seed-candidates-only",
+        ]
+        if not _v2_stage("publish_seed_candidates_only", publish_args, timeout=300, result=result, errors=errors):
+            return result
+        result["status"] = "success_seed_candidates_only"
+        result["boundary"] = "Backfill requested seed-candidates-only; formal seed publish is intentionally disabled."
+        return result
+    if backfill_mode == "ingest-only":
+        result["status"] = "success_backfill_review_only"
+        result["boundary"] = "Backfill generated/reviewed ideas but publish is disabled; no formal seed or seed-candidate bucket was written."
+        return result
+    publish_args = [
+        sys.executable,
+        ".claude/scripts/publish_research_run.py",
+        "--run-date",
+        run_date,
+        "--target-policy",
+        v2_publish_policy,
+    ]
+    if formal_seed_publish_allowed:
+        publish_args.append("--allow-formal-seed-publish")
+    publish_stage = "publish_disabled" if v2_publish_policy == "disabled" else f"publish_{v2_publish_policy}"
+    if not _v2_stage(publish_stage, publish_args, timeout=300, result=result, errors=errors):
+        return result
+    if v2_publish_policy == "disabled":
+        result["status"] = "success_publish_disabled"
+        result["boundary"] = "V2 rollout policy disabled publish; survival decision was recorded but no buckets or formal seed were written."
+        return result
+    if v2_publish_policy == "seed-candidates-only":
+        result["status"] = "success_seed_candidates_only"
+        result["boundary"] = "V2 rollout policy routed accepted candidates to seed-candidates; formal seed publish is disabled."
+
+    audit_args = [sys.executable, ".claude/scripts/audit_daily_automation_quality.py", "--run-date", run_date, "--dry-run"]
+    _v2_stage("audit", audit_args, timeout=300, result=result, errors=errors)
+    return result
+
+
 def run_subprocess_capture(
     command: list[str],
     *,
     timeout: int,
     heartbeat: Callable[[int], None] | None = None,
     heartbeat_interval: int = 60,
+    env_overrides: dict[str, str] | None = None,
 ) -> tuple[int, str, str]:
+    env = os.environ.copy()
+    if env_overrides:
+        env.update(env_overrides)
     proc = subprocess.Popen(
         command,
         cwd=vault_path(),
@@ -744,6 +995,7 @@ def run_subprocess_capture(
         text=True,
         encoding="utf-8",
         errors="replace",
+        env=env,
     )
     if heartbeat:
         heartbeat(proc.pid)
@@ -905,6 +1157,16 @@ def _write_read_heartbeat(
 
 def _read_failure_reason(output: str, note_status: str) -> str:
     lowered = output.lower()
+    if (
+        "permission mode forced to default" in lowered
+        or "claude_code_subprocess_env_scrub" in lowered
+        or "需要写入权限" in output
+        or "请允许写入" in output
+        or "请批准写入" in output
+        or "please allow" in lowered
+        or "write permission" in lowered
+    ):
+        return "permission_blocked"
     if "too many requests" in lowered or "429" in lowered:
         return "claude_rate_limited"
     if "timeout:" in lowered or "timed out" in lowered:
@@ -930,8 +1192,19 @@ def read_zotero_key(
 ) -> tuple[str, str, dict[str, str]]:
     prompt = read_paper_prompt(zotero_key)
     command = ["claude"]
-    if allow_dangerous_claude or os.environ.get(DANGEROUS_CLAUDE_ENV, "").lower() in {"1", "true", "yes", "on"}:
-        command.append("--dangerously-skip-permissions")
+    dangerous_claude = allow_dangerous_claude or os.environ.get(DANGEROUS_CLAUDE_ENV, "").lower() in {"1", "true", "yes", "on"}
+    env_overrides: dict[str, str] = {}
+    if dangerous_claude:
+        command.extend(
+            [
+                "--dangerously-skip-permissions",
+                "--permission-mode",
+                "bypassPermissions",
+                "--allowedTools",
+                "Read,Write,Edit,MultiEdit,Glob,Grep,LS,Bash",
+            ]
+        )
+        env_overrides["CLAUDE_CODE_SUBPROCESS_ENV_SCRUB"] = "0"
     command.extend(["--print", prompt])
     heartbeat_path = ""
 
@@ -953,6 +1226,7 @@ def read_zotero_key(
             timeout=timeout,
             heartbeat=heartbeat if run_date else None,
             heartbeat_interval=60,
+            env_overrides=env_overrides or None,
         )
     except FileNotFoundError:
         return "failed", "claude CLI not found", {}
@@ -982,6 +1256,9 @@ def read_zotero_key(
     if note_status == "done":
         return "success_done", output + verification, log_paths
     if code == 0:
+        reason = _read_failure_reason(output, note_status)
+        if reason != f"not_finalized:{note_status}":
+            return f"failed:{reason}", output + verification, log_paths
         return f"failed_not_done:{note_status}", output + verification, log_paths
     reason = _read_failure_reason(output, note_status)
     return f"failed:{reason}", output + verification, log_paths
@@ -1081,6 +1358,7 @@ def render_run_log(
         f"- min_new_imports: {import_policy.get('min_new_imports')}",
         f"- max_import_attempts: {import_policy.get('max_auto_import')}",
         f"- max_daily_reads: {import_policy.get('max_read')}",
+        f"- read_failure_backfill: {import_policy.get('read_failure_backfill', 0)}",
         f"- fill_import_threshold: {import_policy.get('fill_import_threshold')}",
         f"- existing_prefilter: {import_policy.get('existing_prefilter', 'not_run')}",
         f"- existing_candidates_excluded: {len(existing_candidates)}",
@@ -1099,6 +1377,8 @@ def render_run_log(
         "- provider_matrix: `projects/research-agenda/workflow-contracts/provider-matrix.json`",
         f"- agenda_update_mode: {idea_generation.get('mode', 'research_agenda_update')}",
         f"- agenda_update_status: {idea_generation.get('status', 'unknown')}",
+        f"- research_seed_v2_status: {idea_generation.get('v2_state_machine', {}).get('status', 'not_run')}",
+        f"- research_seed_v2_run_dir: `{idea_generation.get('v2_state_machine', {}).get('run_dir', '')}`",
         f"- strict_kb_maintenance: {import_policy.get('strict_kb_maintenance', 'not_run')}",
         f"- legacy_idea_audit: {idea_audit.get('status', 'not_applicable')}",
         "",
@@ -1168,6 +1448,24 @@ def render_run_log(
             if match:
                 key = marker.rstrip(":").lower()
                 lines.append(f"- {key}: {match.group(1).strip()}")
+    v2_state = idea_generation.get("v2_state_machine", {})
+    lines.extend(["", "## Research Seed V2", ""])
+    if not v2_state:
+        lines.append("- status: not_run")
+    else:
+        lines.append(f"- status: {v2_state.get('status', 'unknown')}")
+        lines.append(f"- run_dir: `{v2_state.get('run_dir', '')}`")
+        lines.append(f"- backfill_mode: {v2_state.get('backfill_mode', '')}")
+        lines.append(f"- backfill_generate_ideas: {str(v2_state.get('backfill_generate_ideas', False)).lower()}")
+        lines.append(f"- backfill_publish: {v2_state.get('backfill_publish', '')}")
+        lines.append(f"- v2_publish_policy: {v2_state.get('v2_publish_policy', '')}")
+        lines.append(f"- formal_seed_publish_allowed: {str(v2_state.get('formal_seed_publish_allowed', False)).lower()}")
+        lines.append(f"- scheduled_daily_switched: {str(v2_state.get('scheduled_daily_switched', False)).lower()}")
+        for stage in v2_state.get("stages", []):
+            lines.append(
+                f"- stage={stage.get('stage')} status={stage.get('status')} "
+                f"exit_code={stage.get('exit_code')} elapsed_sec={stage.get('elapsed_sec')}"
+            )
     lines.extend(["", "## Errors", ""])
     if not errors:
         lines.append("- none")
@@ -1506,7 +1804,7 @@ def run_resume_backlog(args: argparse.Namespace) -> int:
         agenda_command.extend(
             [
                 "--idea-generator",
-                args.idea_mode,
+                "none",
                 "--idea-timeout",
                 str(args.idea_timeout),
                 "--gemini-model",
@@ -1531,11 +1829,18 @@ def run_resume_backlog(args: argparse.Namespace) -> int:
     except Exception as exc:
         agenda_code, agenda_output = 1, str(exc)
     if agenda_code == 0:
-        agenda_status = "skipped_no_focus_keys" if not focus_zotero_keys and args.idea_mode == "gemini-divergent" else "success"
+        agenda_status = "skipped_no_focus_keys" if not focus_zotero_keys else "success"
     else:
         agenda_status = "partial"
         errors.append("research_agenda_update_failed")
 
+    v2_result = run_research_seed_v2(
+        args=args,
+        run_date=run_date,
+        candidates_path=base_dir / f"{run_date}-candidates.jsonl",
+        focus_zotero_keys=focus_zotero_keys,
+        errors=errors,
+    )
     status = "success" if not errors else "partial"
     safe_write(backlog_path, merge_resume_backlog(run_date=run_date, original_records=resume_records, reads=reads), dry_run=False, backup=True)
     safe_write(
@@ -1568,6 +1873,7 @@ def run_resume_backlog(args: argparse.Namespace) -> int:
     safe_print(f"BACKLOG: {backlog_path.relative_to(vault_path())}")
     safe_print(f"AGENDA_DELTA: {agenda_delta_path.relative_to(vault_path())}")
     safe_print(f"AGENDA_UPDATE: research_agenda_update:{agenda_status}")
+    safe_print(f"RESEARCH_SEED_V2: {v2_result.get('status', 'unknown')} run_dir={v2_result.get('run_dir', '')}")
     safe_print(f"STRICT_KB_MAINTENANCE: {maintenance_status}")
     safe_print(f"RUN_LOG_RECONCILED: {str(reconciled).lower()}")
     if errors:
@@ -1628,6 +1934,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
         "min_new_imports": args.min_new_imports,
         "max_auto_import": args.max_auto_import,
         "max_read": args.max_read,
+        "read_failure_backfill": args.read_failure_backfill,
         "fill_import_threshold": args.fill_import_threshold,
         "fetch_timeout": args.fetch_timeout,
         "fetch_retries": args.fetch_retries,
@@ -1708,9 +2015,13 @@ def run_pipeline(args: argparse.Namespace) -> int:
 
     new_import_count = 0
     read_attempts = 0
+    successful_read_count = 0
+    max_read_candidate_attempts = args.max_read + max(0, args.read_failure_backfill)
     if can_import:
         for ranked_item, selection_decision, original_decision in selected_import_candidates:
-            if new_import_count >= args.min_new_imports:
+            if args.skip_read and new_import_count >= args.min_new_imports:
+                break
+            if not args.skip_read and args.max_read > 0 and successful_read_count >= args.max_read:
                 break
             paper = ranked_item.paper
             existing_note = existing_note_titles.get(normalize_title(paper.title))
@@ -1776,7 +2087,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
                     read_status = "success_done_already"
                 elif note_status == "missing_note":
                     read_status = "waiting_local_note"
-                elif read_attempts < args.max_read:
+                elif read_attempts < max_read_candidate_attempts and successful_read_count < args.max_read:
                     read_attempts += 1
                     read_status, read_output, read_elapsed_sec, read_attempt_logs = read_zotero_key_timed(
                         result.zotero_key,
@@ -1805,6 +2116,8 @@ def run_pipeline(args: argparse.Namespace) -> int:
                 errors.append(f"read_pending:{result.zotero_key}:waiting_local_note")
             if read_status not in {"skipped", "backlog", "waiting_local_note"} and not read_status.startswith("success"):
                 errors.append(f"read_failed:{result.zotero_key}:{read_status}")
+            if read_status.startswith("success"):
+                successful_read_count += 1
     if args.resume_backlog:
         for record in resume_records:
             if record.get("read_status", "").startswith("success"):
@@ -1954,7 +2267,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
         agenda_command.extend(
             [
                 "--idea-generator",
-                args.idea_mode,
+                "none",
                 "--idea-timeout",
                 str(args.idea_timeout),
                 "--gemini-model",
@@ -1979,11 +2292,19 @@ def run_pipeline(args: argparse.Namespace) -> int:
     except Exception as exc:
         agenda_code, agenda_output = 1, str(exc)
     if agenda_code == 0:
-        status_value = "skipped_no_focus_keys" if not focus_zotero_keys and args.idea_mode == "gemini-divergent" else "success"
+        status_value = "skipped_no_focus_keys" if not focus_zotero_keys else "success"
         idea_generation = {"mode": "research_agenda_update", "status": status_value, "message": agenda_output[-1200:]}
     else:
         idea_generation = {"mode": "research_agenda_update", "status": "partial", "message": agenda_output[-1200:]}
         errors.append("research_agenda_update_failed")
+    v2_result = run_research_seed_v2(
+        args=args,
+        run_date=run_date,
+        candidates_path=candidates_path,
+        focus_zotero_keys=focus_zotero_keys,
+        errors=errors,
+    )
+    idea_generation["v2_state_machine"] = v2_result
     safe_write(
         idea_path,
         render_legacy_idea_pointer(
@@ -2032,6 +2353,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
     safe_print(f"LEGACY_IDEA_POINTER: {idea_path.relative_to(vault_path())}")
     safe_print(f"GEMINI_PROMPT_PATH: {gemini_prompt_path.relative_to(vault_path())}")
     safe_print(f"AGENDA_UPDATE: {idea_generation['mode']}:{idea_generation['status']}")
+    safe_print(f"RESEARCH_SEED_V2: {v2_result.get('status', 'unknown')} run_dir={v2_result.get('run_dir', '')}")
     safe_print(f"LEGACY_IDEA_AUDIT: {idea_result['status']}")
     if errors:
         safe_print("PIPELINE_STATUS: partial")
@@ -2064,6 +2386,7 @@ def main() -> int:
     parser.add_argument("--read-timeout", type=int, default=2700)
     parser.add_argument("--read-retries", type=int, default=1, help="Retry failed Claudian reads this many extra times before marking failed.")
     parser.add_argument("--read-retry-delay", type=int, default=90, help="Seconds to wait between failed Claudian read attempts.")
+    parser.add_argument("--read-failure-backfill", type=int, default=5, help="Extra candidate read slots used to replace failed Claudian reads before ending the daily run.")
     parser.add_argument(
         "--allow-dangerous-claude",
         action="store_true",
@@ -2072,11 +2395,50 @@ def main() -> int:
     parser.add_argument("--idea-mode", choices=["claude", "gemini-cli", "gemini-divergent", "template"], default="gemini-divergent", help="Use Claude Code or Gemini CLI to synthesize final ideas, or keep deterministic template ideas.")
     parser.add_argument("--idea-timeout", type=int, default=1200)
     parser.add_argument("--gemini-model", default="gemini-3.1-pro-preview")
-    parser.add_argument("--deepseek-model", default="deepseek/deepseek-v4-pro(max)")
+    parser.add_argument("--deepseek-model", default="deepseek/deepseek-v4-pro")
     parser.add_argument("--deepseek-timeout", type=int, default=1200)
-    parser.add_argument("--raw-candidate-limit", type=int, default=8)
-    parser.add_argument("--min-raw-candidates", type=int, default=6)
-    parser.add_argument("--max-generated", type=int, default=3)
+    parser.add_argument("--deepseek-provider", choices=["json", "opencode", "none"], default="none")
+    parser.add_argument("--deepseek-provider-json", default="")
+    parser.add_argument("--codex-execution-provider", choices=["json", "codex-cli", "none"], default="none")
+    parser.add_argument("--codex-execution-provider-json", default="")
+    parser.add_argument("--raw-candidate-limit", type=int, default=24)
+    parser.add_argument("--min-raw-candidates", type=int, default=24)
+    parser.add_argument("--max-generated", type=int, default=24)
+    parser.add_argument("--target-deep-read", type=int, default=3, help="v2 intake target for daily deep reads.")
+    parser.add_argument("--max-deep-read", type=int, default=4, help="v2 hard cap for daily deep reads.")
+    parser.add_argument(
+        "--backfill-mode",
+        choices=["daily", "ingest-only"],
+        default="daily",
+        help="Use ingest-only for backfill; it stops before raw candidates and formal seed publish.",
+    )
+    parser.add_argument(
+        "--backfill-generate-ideas",
+        action="store_true",
+        help="Advanced backfill mode: allow raw candidate generation, but not formal seed publish by default.",
+    )
+    parser.add_argument(
+        "--backfill-publish",
+        choices=["disabled", "seed-candidates-only"],
+        default="disabled",
+        help="Backfill publish policy. Formal seed publish remains disabled for backfill.",
+    )
+    parser.add_argument(
+        "--v2-publish-policy",
+        choices=["disabled", "seed-candidates-only", "formal"],
+        default=DEFAULT_V2_PUBLISH_POLICY,
+        help="V2 rollout publish policy. Formal production seed publish is not the default.",
+    )
+    parser.add_argument(
+        "--allow-formal-seed-publish",
+        action="store_true",
+        help="Required with --v2-publish-policy formal; scheduled daily wrappers must not set this by default.",
+    )
+    parser.add_argument(
+        "--allow-human-override",
+        action="store_true",
+        help="Allow scheduled run to consume explicit human override files; default is disabled.",
+    )
     args = parser.parse_args()
     if args.max_read is None:
         args.max_read = args.min_new_imports

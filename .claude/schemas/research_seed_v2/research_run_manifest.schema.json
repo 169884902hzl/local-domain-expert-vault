@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Research Seed v2 Manifest",
+  "type": "object",
+  "required": ["schema_version", "state_machine_version", "run_id", "run_date", "states", "formal_seed_written"],
+  "properties": {
+    "schema_version": {"type": "string"},
+    "state_machine_version": {"type": "string"},
+    "run_id": {"type": "string"},
+    "run_date": {"type": "string"},
+    "states": {"type": "array"},
+    "formal_seed_written": {"type": "boolean"}
+  }
+}

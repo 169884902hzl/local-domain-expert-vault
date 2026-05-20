@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Research Seed v2 Intake Triage",
+  "type": "object",
+  "required": ["schema_version", "run_date", "target_deep_read", "max_deep_read", "decisions"],
+  "properties": {
+    "schema_version": {"type": "string"},
+    "run_date": {"type": "string"},
+    "target_deep_read": {"type": "integer"},
+    "max_deep_read": {"type": "integer"},
+    "decisions": {"type": "array"},
+    "artifact_hashes": {"type": "object"}
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Research Seed v2 DeepSeek Review",
+  "type": "object",
+  "required": ["schema_version", "run_date", "status", "reviews"],
+  "properties": {
+    "schema_version": {"type": "string"},
+    "run_date": {"type": "string"},
+    "status": {"type": "string"},
+    "reviews": {"type": "array"},
+    "provider_status": {"type": "object"},
+    "artifact_hashes": {"type": "object"}
+  }
+}

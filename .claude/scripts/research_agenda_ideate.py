@@ -28,6 +28,7 @@ from research_agenda_common import (
     split_csv,
     today,
 )
+from research_seed_v2_common import artifact_hashes, candidate_id, ensure_v2_dirs, write_run_artifact
 
 
 MIN_MECHANISM_SOURCES = 5
@@ -3026,10 +3027,21 @@ def generate_seed_report(
                 greenhouse.append(item)
             parked.append(item)
 
+    if preserve_greenhouse and high_quality:
+        promoted_titles = {str(axis.get("title", "")) for axis, _, _ in high_quality}
+        for item in greenhouse:
+            if str(item.get("title", "")) in promoted_titles:
+                item["greenhouse_label"] = "raw_candidate"
+                item["readiness_tier"] = "v2_review_required"
+                item["promotion_decision"] = "requires_v2_survival_run"
+        high_quality = []
+
     reason = ""
     if not high_quality:
         if generator == "none":
             reason = "idea_generation_disabled"
+        elif preserve_greenhouse and greenhouse:
+            reason = "v2_review_required"
         elif preserve_greenhouse and greenhouse:
             reason = "no_top_tier_seed_today"
         else:
@@ -3403,20 +3415,6 @@ def _render_aux_file(axis: dict[str, Any], kind: str) -> str:
     return f"# {kind.replace('.md', '').replace('_', ' ').title()} - {axis['title']}\n\n{body}".rstrip() + "\n"
 
 
-def write_seed_folder(axis: dict[str, Any], evidence: list[dict[str, Any]], *, recent_count: int, dry_run: bool) -> Path:
-    slug = slugify(axis["title"])
-    folder = IDEA_BANK_DIR / "seed" / slug
-    if not dry_run:
-        folder.mkdir(parents=True, exist_ok=True)
-    safe_write(folder / "idea.md", _render_idea(axis, evidence, recent_count=recent_count), dry_run=dry_run, backup=True)
-    safe_write(folder / "evidence_pack.md", _render_evidence_pack(axis, evidence), dry_run=dry_run, backup=True)
-    for name in REQUIRED_IDEA_FILES:
-        if name in {"idea.md", "evidence_pack.md"}:
-            continue
-        safe_write(folder / name, _render_aux_file(axis, name), dry_run=dry_run, backup=True)
-    return folder
-
-
 def _greenhouse_counts(items: list[dict[str, Any]]) -> Counter[str]:
     return Counter(str(item.get("greenhouse_label", "unlabeled")) for item in items)
 
@@ -3591,7 +3589,7 @@ def render_greenhouse_markdown(run_date: str, report: dict[str, Any]) -> str:
             "## Boundary",
             "",
             "- Greenhouse candidates preserve creative raw ideas for review.",
-            "- Only promoted_to_seed candidates are written to `idea_bank/seed/`.",
+        "- Formal seed writing is disabled here; only `publish_research_run.py` may write the seed bank.",
             "- speculative_preserve means high-sharpness / low-evidence candidates are kept for weekly breakthrough review, not accepted.",
             "- Parked/rewrite/blocked candidates are not paper claims and are not deleted.",
         ]
@@ -3653,14 +3651,46 @@ def _report_json(report: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _v2_raw_candidate_payload(report: dict[str, Any], run_date: str) -> dict[str, Any]:
+    lanes = [
+        "grounded_mechanism",
+        "interface_or_control_boundary",
+        "infrastructure_or_benchmark",
+        "data_or_evaluation_protocol",
+        "outside_analogy",
+        "breakthrough_speculative",
+    ]
+    candidates: list[dict[str, Any]] = []
+    for item in report.get("greenhouse", []):
+        candidate = dict(item)
+        candidate["candidate_id"] = candidate_id(candidate)
+        candidate.setdefault("lane", candidate.get("portfolio_slot") or "grounded_mechanism")
+        if candidate["lane"] not in lanes:
+            candidate["lane"] = "breakthrough_speculative" if candidate.get("risk_class") == "breakthrough" else "grounded_mechanism"
+        candidate["state"] = "raw_candidate"
+        candidate["promotion_decision"] = "requires_v2_survival_run"
+        candidate["quality_tier_semantics"] = QUALITY_TIER_SEMANTICS
+        candidates.append(candidate)
+    return {
+        "schema_version": "raw_candidate.v1",
+        "run_date": run_date,
+        "lanes": lanes,
+        "candidates": candidates,
+        "raw_candidate_target": 24,
+        "per_lane_target": 4,
+        "artifact_hashes": artifact_hashes(run_date, ["tension-map.json", "claim-graph-snapshot.jsonl"]),
+        "boundary": "Raw candidates only; quality_tier, sharpness_score, evidence_execution_score, and ordinaryness_penalty are potential display fields, not promotion gates.",
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--matrix", default=str(agenda_path("evidence", "evidence_matrix.jsonl")))
     parser.add_argument("--focus-zotero-keys", default="")
-    parser.add_argument("--limit", type=int, default=3)
-    parser.add_argument("--max-generated", type=int, default=3)
-    parser.add_argument("--raw-candidate-limit", type=int, default=8)
-    parser.add_argument("--min-raw-candidates", type=int, default=DEFAULT_MIN_RAW_CANDIDATES)
+    parser.add_argument("--limit", type=int, default=24)
+    parser.add_argument("--max-generated", type=int, default=24)
+    parser.add_argument("--raw-candidate-limit", type=int, default=24)
+    parser.add_argument("--min-raw-candidates", type=int, default=24)
     parser.add_argument("--mode", choices=["mechanism", "curated"], default="mechanism")
     parser.add_argument("--generator", choices=["template", "claude", "gemini-cli", "gemini-divergent", "none"], default="template")
     parser.add_argument("--generator-timeout", type=int, default=1200)
@@ -3668,6 +3698,7 @@ def main() -> int:
     parser.add_argument("--run-date", default=today())
     parser.add_argument("--include-dynamic", action="store_true", help="Deprecated: also generate generic cross-domain gap candidates in curated mode.")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--write-v2-run-artifact", action="store_true")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
 
@@ -3702,14 +3733,18 @@ def main() -> int:
         )
         if report["no_high_quality_seed_today_reason"]:
             safe_print(f"NO_HIGH_QUALITY_SEED_TODAY: {report['no_high_quality_seed_today_reason']}")
-        for axis, evidence, recent in report["high_quality"]:
-            folder = IDEA_BANK_DIR / "seed" / slugify(axis["title"])
-            safe_print(f"  seed={rel(folder)} evidence_sources={_source_count(evidence)} recent={recent}")
     if not args.dry_run:
         if report.get("generator") == "gemini-divergent":
             write_greenhouse_archive(report, run_date=args.run_date, dry_run=False)
-        for axis, evidence, recent in report["high_quality"]:
-            write_seed_folder(axis, evidence, recent_count=recent, dry_run=False)
+        if args.write_v2_run_artifact:
+            ensure_v2_dirs(args.run_date)
+            write_run_artifact(
+                args.run_date,
+                "raw-candidates.json",
+                _v2_raw_candidate_payload(report, args.run_date),
+                state="raw_candidate",
+                dry_run=False,
+            )
     return 0
 
 

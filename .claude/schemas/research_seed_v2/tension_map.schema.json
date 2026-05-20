@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Research Seed v2 Tension Map",
+  "type": "object",
+  "required": ["schema_version", "run_date", "tensions"],
+  "properties": {
+    "schema_version": {"type": "string"},
+    "run_date": {"type": "string"},
+    "tensions": {"type": "array"},
+    "speculative_tensions": {"type": "array"},
+    "artifact_hashes": {"type": "object"}
+  }
+}

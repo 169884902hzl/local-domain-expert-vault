@@ -26,6 +26,14 @@ from research_agenda_common import (
     write_jsonl,
     read_frontmatter,
 )
+from research_seed_v2_common import (
+    artifact_dir,
+    agenda_v2_path,
+    ensure_v2_dirs,
+    mark_state,
+    write_json,
+    write_jsonl as write_v2_jsonl,
+)
 
 
 LEGACY_STRUCTURED_FIELD_RE = re.compile(
@@ -124,7 +132,7 @@ def _snippet_for_claim(
     section = CLAIM_TO_SECTION.get(claim_type, "结构化提取")
     field_name = CLAIM_TO_STRUCTURED_FIELD.get(claim_type)
     if field_name and structured.get(field_name):
-        return section, _short_snippet(structured[field_name]), "structured_field", "high"
+        return section, _short_snippet(structured[field_name]), "structured_field", "low"
     if claim_type == "paper_summary" and fields.get("summary"):
         return section, _short_snippet(fields["summary"]), "frontmatter_summary", "medium"
     section_candidates = [section]
@@ -141,6 +149,17 @@ def _anchor_for(path: Path, section: str) -> str:
     if section == "Frontmatter summary":
         return rel(path)
     return f"{rel(path)}#{section}"
+
+
+def _anchor_type(section: str, snippet_type: str, snippet: str) -> str:
+    lowered = f"{section} {snippet}".lower()
+    if "table" in lowered or "表" in lowered:
+        return "table"
+    if "figure" in lowered or "fig." in lowered or "fig " in lowered or "图" in lowered:
+        return "figure"
+    if snippet_type == "section_summary" and snippet:
+        return "section"
+    return "note_only"
 
 
 def _risks_for_claim(claim_type: str, statement: str, structured: dict[str, str]) -> list[str]:
@@ -198,6 +217,7 @@ def _record(
         "source_snippet": source_snippet,
         "source_snippet_type": snippet_type,
         "evidence_anchor": _anchor_for(path, evidence_section),
+        "anchor_type": _anchor_type(evidence_section, snippet_type, source_snippet),
         "extraction_confidence": confidence,
     }
     for domain, key in TRANSFER_DOMAINS.items():
@@ -340,11 +360,113 @@ def validate_records(records: list[dict[str, Any]]) -> list[str]:
     return issues
 
 
+def _anchor_confidence(record: dict[str, Any], claim_type: str) -> str:
+    snippet_type = str(record.get("source_snippet_type", ""))
+    snippet = str(record.get("source_snippet", ""))
+    anchor_type = str(record.get("anchor_type", "note_only"))
+    if not snippet or snippet_type == "claim_statement" or anchor_type == "note_only":
+        if claim_type == "actual_baseline_result":
+            return "unusable"
+        return "low"
+    if anchor_type in {"section", "snippet", "table", "figure"}:
+        return "high" if claim_type not in {"evaluation_blind_spot", "reusable_primitive"} else "medium"
+    return "low"
+
+
+def _first_statement(records: list[dict[str, Any]], claim_types: set[str]) -> tuple[str, dict[str, Any] | None]:
+    for record in records:
+        if str(record.get("claim_type")) in claim_types and record.get("statement"):
+            return str(record["statement"]), record
+    return "", None
+
+
+def build_paper_primitives(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    by_source: dict[str, list[dict[str, Any]]] = {}
+    for record in records:
+        by_source.setdefault(str(record.get("source_note", "")), []).append(record)
+    primitives: list[dict[str, Any]] = []
+    for source_note, items in sorted(by_source.items()):
+        paper_key = str(items[0].get("zotero_key") or Path(source_note).stem)
+        central_claim, central_record = _first_statement(items, {"paper_summary", "problem"})
+        method_assumption, method_record = _first_statement(items, {"method"})
+        strongest_baseline, baseline_record = _first_statement(items, {"metric", "method"})
+        actual_baseline_result, result_record = _first_statement(items, {"metric"})
+        missing_ablation, ablation_record = _first_statement(items, {"limitation", "open_question"})
+        evaluation_blind_spot, blind_record = _first_statement(items, {"limitation", "evidence_note"})
+        reusable_primitive, primitive_record = _first_statement(items, {"method", "task", "sensor", "robot_setup"})
+        record_by_name = {
+            "central_claim": central_record,
+            "method_assumption": method_record,
+            "strongest_baseline": baseline_record,
+            "actual_baseline_result": result_record,
+            "missing_ablation": ablation_record,
+            "evaluation_blind_spot": blind_record,
+            "reusable_primitive": primitive_record,
+        }
+        anchors = {
+            name: {
+                "source_note": source_note,
+                "anchor": item.get("evidence_anchor", ""),
+                "section": item.get("evidence_section", ""),
+                "snippet": item.get("source_snippet", ""),
+                "snippet_type": item.get("source_snippet_type", "note_only"),
+                "anchor_type": item.get("anchor_type", "note_only"),
+            }
+            for name, item in record_by_name.items()
+            if item
+        }
+        confidence = {
+            name: _anchor_confidence(item, name)
+            for name, item in record_by_name.items()
+            if item
+        }
+        primitives.append(
+            {
+                "schema_version": "paper_primitives.v1",
+                "paper_key": paper_key,
+                "source_note": source_note,
+                "source_title": items[0].get("source_title", Path(source_note).stem),
+                "primitives": {
+                    "central_claim": central_claim,
+                    "method_assumption": method_assumption,
+                    "strongest_baseline": strongest_baseline,
+                    "actual_baseline_result": actual_baseline_result,
+                    "missing_ablation": missing_ablation,
+                    "unmodeled_latent_variable": "",
+                    "evaluation_blind_spot": evaluation_blind_spot,
+                    "interface_boundary": "",
+                    "transfer_failure": "",
+                    "reusable_primitive": reusable_primitive,
+                    "contradiction": "",
+                },
+                "anchors": anchors,
+                "confidence": confidence,
+                "legacy_evidence_boundary": "legacy records without section/snippet/table/figure anchors are low confidence by default.",
+            }
+        )
+    return primitives
+
+
+def write_v2_primitives(run_date: str, records: list[dict[str, Any]], *, dry_run: bool) -> list[dict[str, Any]]:
+    ensure_v2_dirs(run_date)
+    primitives = build_paper_primitives(records)
+    for item in primitives:
+        write_json(
+            agenda_v2_path("paper-primitives", f"{item['paper_key']}.json"),
+            item,
+            dry_run=dry_run,
+        )
+    write_v2_jsonl(artifact_dir(run_date) / "paper-primitives-snapshot.jsonl", primitives, dry_run=dry_run)
+    mark_state(run_date, "reading_completed", "artifacts/paper-primitives-snapshot.jsonl", dry_run=dry_run)
+    return primitives
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--all", action="store_true", help="Extract from every done literature note.")
     parser.add_argument("--zotero-keys", default="", help="Comma-separated Zotero keys to extract.")
     parser.add_argument("--run-date", default="")
+    parser.add_argument("--write-v2-primitives", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
@@ -377,6 +499,9 @@ def main() -> int:
     merged = merge_evidence_records(load_evidence_matrix(), records)
     write_jsonl(EVIDENCE_MATRIX, merged, dry_run=False)
     write_paper_cards(records, dry_run=False)
+    if args.write_v2_primitives:
+        primitives = write_v2_primitives(run_date, records, dry_run=False)
+        safe_print(f"PAPER_PRIMITIVES: {len(primitives)}")
     safe_print(f"EVIDENCE_MATRIX: {rel(EVIDENCE_MATRIX)}")
     return 0
 

@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Research Seed v2 Selected Candidates",
+  "type": "object",
+  "required": ["schema_version", "run_date", "selected", "rejected"],
+  "properties": {
+    "schema_version": {"type": "string"},
+    "run_date": {"type": "string"},
+    "selected": {"type": "array"},
+    "rejected": {"type": "array"},
+    "selection_rules": {"type": "object"},
+    "artifact_hashes": {"type": "object"}
+  }
+}

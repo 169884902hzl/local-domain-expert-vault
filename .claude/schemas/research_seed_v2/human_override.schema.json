@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Research Seed v2 Human Override",
+  "type": "object",
+  "required": ["schema_version", "candidate_id", "run_id", "override_type", "reviewer", "created_at", "reason", "risk_acceptance", "expires_after_days", "allowed_publish_target", "cannot_weaken"],
+  "properties": {
+    "schema_version": {"type": "string"},
+    "candidate_id": {"type": "string"},
+    "run_id": {"type": "string"},
+    "override_type": {"type": "string"},
+    "reviewer": {"type": "string"},
+    "created_at": {"type": "string"},
+    "reason": {"type": "string"},
+    "risk_acceptance": {"type": "string"},
+    "expires_after_days": {"type": "integer"},
+    "allowed_publish_target": {"type": "string"},
+    "cannot_weaken": {"type": "array"}
+  }
+}

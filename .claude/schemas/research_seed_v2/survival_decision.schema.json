@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Research Seed v2 Survival Decision",
+  "type": "object",
+  "required": ["schema_version", "run_date", "status", "decisions"],
+  "properties": {
+    "schema_version": {"type": "string"},
+    "run_date": {"type": "string"},
+    "status": {"type": "string"},
+    "decisions": {"type": "array"},
+    "human_overrides_consumed": {"type": "array"},
+    "artifact_hashes": {"type": "object"}
+  }
+}

@@ -123,10 +123,24 @@ def ensure_agenda_dirs() -> None:
         REVIEWS_DIR / "codex_reviews",
         REVIEWS_DIR / "claude_reviews",
         REVIEWS_DIR / "gemini_prompts",
+        AGENDA_ROOT / "runs",
+        AGENDA_ROOT / "paper-primitives",
+        AGENDA_ROOT / "tensions",
+        AGENDA_ROOT / "greenhouse",
+        AGENDA_ROOT / "seed-candidates",
+        AGENDA_ROOT / "parked",
+        AGENDA_ROOT / "rescue",
+        AGENDA_ROOT / "overrides" / "human-overrides",
+        AGENDA_ROOT / "quarantine",
+        AGENDA_ROOT / "strategy",
+        AGENDA_ROOT / "pilots",
+        IDEA_BANK_DIR / "developing",
+        IDEA_BANK_DIR / "promoted",
+        IDEA_BANK_DIR / "pilot-ready",
+        IDEA_BANK_DIR / "rejected",
+        IDEA_BANK_DIR / "archived",
     ]:
         directory.mkdir(parents=True, exist_ok=True)
-    for state in IDEA_STATES:
-        (IDEA_BANK_DIR / state).mkdir(parents=True, exist_ok=True)
 
 
 def iter_topic_notes() -> list[Path]:

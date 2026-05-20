@@ -29,12 +29,9 @@ from research_agenda_common import (
     write_jsonl,
 )
 from research_agenda_extract import _structured_fields, extract_records, validate_records, write_paper_cards
-from research_agenda_ideate import generate_seed_report, write_greenhouse_archive, write_seed_folder
+from research_agenda_ideate import generate_seed_report
 from generate_knowledge_diagrams import build_paper_packet, render_paper_markdown
 from research_agenda_review import iter_idea_folders, review_folder
-from codex_seed_review import build_packet
-from run_model_debate import DEFAULT_OUTPUT_ROOT as DEBATE_OUTPUT_ROOT
-from run_model_debate import run_debate
 
 
 POOL_FILES = {
@@ -317,15 +314,15 @@ def render_readme() -> str:
             "",
             "This folder is the long-term research agenda system. It is not a daily idea dump.",
             "",
-            "Daily arXiv reading adds evidence, problem signals, transfer opportunities, and idea seeds. Ideas are promoted only after evidence, similar-work review, pilot design, and human approval.",
+            "Daily arXiv reading adds evidence, problem signals, and transfer opportunities. v2 raw candidates and formal seed publication are handled by the transactional state-machine scripts.",
             "",
             "## Workflow",
             "",
             "1. Read papers into `wiki/topics/` until they are `status: done`.",
             "2. Extract evidence into `evidence/evidence_matrix.jsonl`.",
             "3. Update `problem_pool/` and daily agenda delta.",
-            "4. Create or update idea folders under `idea_bank/seed/` or `idea_bank/developing/`.",
-            "5. Promote only after `audit_research_agenda.py` passes the gate.",
+            "4. Generate raw candidates with `research_agenda_ideate.py` into `runs/YYYY-MM-DD/artifacts/raw-candidates.json`.",
+            "5. Publish formal seeds only through `publish_research_run.py` after v2 review and survival artifacts pass validation.",
             "",
         ]
     )
@@ -666,13 +663,15 @@ def run_update(args: argparse.Namespace) -> int:
         except Exception as exc:
             sidecar_warnings.append(f"mechanism_graph_write_failed:{type(exc).__name__}:{exc}")
             safe_print(f"WARN mechanism_graph_write_failed:{type(exc).__name__}:{exc}")
+    if args.idea_generator != "none":
+        safe_print("WARN research_agenda_update_is_evidence_only: idea generation moved to research_agenda_ideate.py v2 raw-candidate stage")
     seed_report = generate_seed_report(
         merged,
         focus_keys=focus_keys,
         limit=args.max_generated,
         include_dynamic=args.include_dynamic,
         mode=args.idea_mode,
-        generator=args.idea_generator,
+        generator="none",
         generator_timeout=args.idea_timeout,
         raw_candidate_limit=args.raw_candidate_limit,
         min_raw_candidates=args.min_raw_candidates,
@@ -702,38 +701,14 @@ def run_update(args: argparse.Namespace) -> int:
 
     write_jsonl(EVIDENCE_MATRIX, merged, dry_run=False)
     write_paper_cards(new_records, dry_run=False)
-    if seed_report.get("generator") == "gemini-divergent":
-        write_greenhouse_archive(seed_report, run_date=args.run_date, dry_run=False)
     for filename in POOL_FILES:
         safe_write(PROBLEM_POOL_DIR / filename, render_pool_file(filename, merged), dry_run=False, backup=True)
-    for axis, evidence, recent in seeds:
-        write_seed_folder(axis, evidence, recent_count=recent, dry_run=False)
     safe_write(AGENDA_ROOT / "README.md", render_readme(), dry_run=False, backup=True)
     safe_write(AGENDA_ROOT / "agenda-dashboard.md", render_dashboard(merged, len(seeds), seed_report), dry_run=False, backup=True)
-    battle_result: dict[str, Any] = {"status": "not_run"}
-    if seed_report.get("generator") == "gemini-divergent":
-        try:
-            packet_path = REVIEWS_DIR / f"{args.run_date}-mandatory-model-battle-packet.json"
-            packet = build_packet(args.run_date)
-            safe_write(packet_path, json.dumps(packet, ensure_ascii=False, indent=2) + "\n", dry_run=False, backup=True)
-            battle_result = run_debate(
-                input_packet=packet_path,
-                codex_report=None,
-                output_root=DEBATE_OUTPUT_ROOT,
-                actions={"all"},
-                max_items=max(1, len(seed_report.get("greenhouse", [])) or args.raw_candidate_limit),
-                deepseek_model=args.deepseek_model,
-                gemini_model=args.gemini_model,
-                deepseek_timeout=args.deepseek_timeout,
-                gemini_timeout=args.idea_timeout,
-                dry_run=False,
-                run_date=args.run_date,
-                strict=True,
-            )
-        except Exception as exc:
-            battle_result = {"status": f"failed_exception:{type(exc).__name__}", "error": str(exc)}
-        if battle_result.get("status") != "success":
-            exit_code = max(exit_code, 2)
+    battle_result: dict[str, Any] = {
+        "status": "moved_to_v2_state_machine",
+        "boundary": "DeepSeek/Codex promotion review is handled by v2 run artifacts, not research_agenda_update.py.",
+    }
     delta_path = DAILY_DIR / f"{args.run_date}-agenda-delta.md"
     safe_write(
         delta_path,
@@ -776,7 +751,7 @@ def run_update(args: argparse.Namespace) -> int:
                 "candidate_group_counts": dict(_group_counts(seed_report)),
                 "portfolio_summary": _portfolio_summary(seed_report),
                 "created_by": "research_agenda_update.py",
-                "boundary": "Codex review is pending; no paper claim is accepted.",
+                "boundary": "Evidence/agenda update only; raw candidates and seed publication are handled by v2 state-machine scripts.",
             },
             ensure_ascii=False,
             indent=2,
@@ -802,7 +777,7 @@ def main() -> int:
     parser.add_argument("--raw-candidate-limit", type=int, default=8, help="Maximum raw Gemini greenhouse candidates to preserve.")
     parser.add_argument("--min-raw-candidates", type=int, default=6, help="Minimum raw Gemini candidates before one divergent retry is attempted.")
     parser.add_argument("--idea-mode", choices=["mechanism", "curated"], default="mechanism")
-    parser.add_argument("--idea-generator", choices=["template", "claude", "gemini-cli", "gemini-divergent", "none"], default="template")
+    parser.add_argument("--idea-generator", choices=["template", "claude", "gemini-cli", "gemini-divergent", "none"], default="none")
     parser.add_argument("--idea-timeout", type=int, default=1200)
     parser.add_argument("--gemini-model", default="gemini-3.1-pro-preview")
     parser.add_argument("--deepseek-model", default="deepseek/deepseek-v4-pro")

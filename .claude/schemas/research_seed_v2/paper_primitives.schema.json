@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Research Seed v2 Paper Primitives",
+  "type": "object",
+  "required": ["schema_version", "paper_key", "source_note", "primitives"],
+  "properties": {
+    "schema_version": {"type": "string"},
+    "paper_key": {"type": "string"},
+    "source_note": {"type": "string"},
+    "primitives": {"type": "object"},
+    "anchors": {"type": "object"},
+    "confidence": {"type": "object"},
+    "legacy_evidence_boundary": {"type": "string"}
+  }
+}

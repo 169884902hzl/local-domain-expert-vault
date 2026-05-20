@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Research Seed v2 Claim Graph Node",
+  "type": "object",
+  "required": ["schema_version", "node_id", "paper_key", "claim_type", "statement", "confidence"],
+  "properties": {
+    "schema_version": {"type": "string"},
+    "node_id": {"type": "string"},
+    "paper_key": {"type": "string"},
+    "claim_type": {"type": "string"},
+    "statement": {"type": "string"},
+    "confidence": {"type": "string"},
+    "anchor": {"type": "object"},
+    "supporting_node_ids": {"type": "array"}
+  }
+}

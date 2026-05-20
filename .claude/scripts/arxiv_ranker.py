@@ -62,6 +62,26 @@ EXPERIMENT_TERMS = [
 ]
 
 REPRO_TERMS = ["code", "github", "open-source", "open source", "dataset", "benchmark", "project page"]
+RESEARCH_VALUE_TERMS = [
+    "failure",
+    "limitation",
+    "negative result",
+    "benchmark",
+    "ablation",
+    "baseline",
+    "real robot",
+    "contact-rich",
+    "sim-to-real",
+    "generalization",
+    "long-horizon",
+    "closed-loop",
+]
+DIVERSITY_FEATURE_TERMS = {
+    "infrastructure_or_benchmark": ["benchmark", "dataset", "evaluation", "metric", "protocol"],
+    "interface_or_control_boundary": ["interface", "control", "closed-loop", "controller", "policy"],
+    "outside_analogy": ["biology", "cognitive", "human", "physics", "mechanics"],
+    "failure_or_negative_result": ["failure", "limitation", "negative result", "blind spot"],
+}
 
 VENUE_TERMS = [
     "icra",
@@ -244,6 +264,8 @@ class RankedPaper:
     penalties: list[str]
     focus_tracks: list[str] = field(default_factory=list)
     focus_matches: dict[str, list[str]] = field(default_factory=dict)
+    research_value_score: int = 0
+    diversity_features: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -255,6 +277,8 @@ class RankedPaper:
             "penalties": self.penalties,
             "focus_tracks": self.focus_tracks,
             "focus_matches": self.focus_matches,
+            "research_value_score": self.research_value_score,
+            "diversity_features": self.diversity_features,
         }
 
     @classmethod
@@ -268,6 +292,8 @@ class RankedPaper:
             penalties=list(data.get("penalties", []) or []),
             focus_tracks=list(data.get("focus_tracks", []) or []),
             focus_matches=dict(data.get("focus_matches", {}) or {}),
+            research_value_score=int(data.get("research_value_score", 0)),
+            diversity_features=list(data.get("diversity_features", []) or []),
         )
 
 
@@ -363,6 +389,17 @@ def _non_robotics_cv_hits(text: str) -> list[str]:
     return _count_matches(text, NON_ROBOTICS_CV_TERMS)
 
 
+def _research_value_features(text: str) -> tuple[int, list[str]]:
+    matches = _count_matches(text, RESEARCH_VALUE_TERMS)
+    score = min(30, len(matches) * 5)
+    features = [
+        label
+        for label, terms in DIVERSITY_FEATURE_TERMS.items()
+        if _count_matches(text, terms)
+    ]
+    return score, sorted(set(features))
+
+
 def _is_robotics_related(domain_labels: set[str], text: str, paper: ArxivPaper) -> bool:
     anchor_hits = _robotics_anchor_hits(text, paper)
     strong_anchor_hits = _strong_robotics_anchor_hits(text, paper)
@@ -398,6 +435,7 @@ def rank_paper(paper: ArxivPaper) -> RankedPaper:
     robotics_anchor_hits = _robotics_anchor_hits(text, paper)
     strong_robotics_anchor_hits = _strong_robotics_anchor_hits(text, paper)
     non_robotics_cv_hits = _non_robotics_cv_hits(text)
+    research_value_score, diversity_features = _research_value_features(text)
 
     domain_score = 0
     for label, terms in DOMAIN_TERMS.items():
@@ -436,6 +474,8 @@ def rank_paper(paper: ArxivPaper) -> RankedPaper:
         matched_terms.extend(repro_matches[:3])
         score += min(4 + len(repro_matches) * 2, 10)
         reasons.append("reproducibility_signal")
+    if research_value_score:
+        reasons.append(f"research_value_signal:{research_value_score}")
 
     venue_text = f"{paper.comment} {paper.journal_ref}".lower()
     venue_matches = _count_matches(venue_text, VENUE_TERMS)
@@ -500,6 +540,8 @@ def rank_paper(paper: ArxivPaper) -> RankedPaper:
         penalties=sorted(set(penalties)),
         focus_tracks=sorted(focus_matches),
         focus_matches={track: sorted(set(matches)) for track, matches in focus_matches.items()},
+        research_value_score=research_value_score,
+        diversity_features=diversity_features,
     )
 
 

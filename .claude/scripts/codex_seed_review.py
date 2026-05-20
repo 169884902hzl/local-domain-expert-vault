@@ -8,20 +8,52 @@ from datetime import date, datetime
 from datetime import timedelta
 import io
 import json
+import os
 from pathlib import Path
 import re
+import shutil
+import subprocess
+import sys
+import tempfile
 from typing import Any
 
 from kb_common import extract_frontmatter, parse_frontmatter_map, safe_print, safe_write, vault_path
 from research_agenda_common import DAILY_DIR, REVIEWS_DIR, rel, render_frontmatter, strip_quotes
 from research_agenda_common import agenda_path
 from research_agenda_review import iter_idea_folders, review_folder
+from research_seed_v2_common import (
+    artifact_dir,
+    artifact_hashes,
+    candidate_id,
+    ensure_v2_dirs,
+    read_json,
+    write_run_artifact,
+)
 
 
 MAX_SNIPPET_CHARS = 1800
 COMPACT_TOPIC_CHARS = 650
 REVIEW_TAGS = ["research-agenda", "seed-review", "codex-review", "automation"]
 CODEX_ALLOWED_ACTIONS = ["accept_for_user_review", "rewrite", "park", "reject_with_rescue"]
+EXECUTION_REVIEW_FIELDS = [
+    "no_hardware_pilot_feasibility",
+    "public_dataset_or_sim_availability",
+    "baseline_training_cost",
+    "metric_automation",
+    "data_leakage_risk",
+    "minimal_repo_plan",
+    "real_robot_pilot_complexity",
+    "reproducibility_path",
+    "compute_time_budget",
+]
+CODEX_EXECUTION_ACTIONS = {
+    "accept_for_user_review",
+    "rewrite_before_seed",
+    "park_for_weekly",
+    "reject_with_rescue",
+    "requires_human_decision",
+}
+CODEX_CONFIDENCE_VALUES = {"high", "medium", "low"}
 WEEKLY_TOP_TIER_ACTIONS = [
     "push_to_user_review",
     "rewrite_for_mechanism",
@@ -2456,6 +2488,303 @@ def review_rerun_range(output_root: Path, *, dry_run: bool) -> dict[str, str]:
     }
 
 
+def _v2_final_candidates(run_date: str) -> list[dict[str, Any]]:
+    selected = read_json(artifact_dir(run_date) / "selected-candidates.json").get("selected", [])
+    mutations_path = artifact_dir(run_date) / "gemini-mutations.json"
+    mutations = read_json(mutations_path).get("mutations", []) if mutations_path.exists() else []
+    mutated_parent_ids = {str(item.get("parent_candidate_id")) for item in mutations}
+    finals = [dict(item) for item in selected if candidate_id(item) not in mutated_parent_ids]
+    finals.extend(dict(item) for item in mutations)
+    return finals
+
+
+def _load_execution_provider_payload(path_value: str) -> dict[str, Any]:
+    if not path_value:
+        return {}
+    path = Path(path_value)
+    if not path.exists():
+        return {"_provider_error": f"codex_execution_review_json_missing:{path}"}
+    try:
+        payload = read_json(path)
+    except Exception as exc:
+        return {"_provider_error": f"codex_execution_review_json_invalid:{type(exc).__name__}:{exc}"}
+    return payload if isinstance(payload, dict) else {"_provider_error": "codex_execution_review_json_not_object"}
+
+
+def _extract_json_object(text: str) -> dict[str, Any]:
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        lines = stripped.splitlines()
+        if lines and lines[0].strip().startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        stripped = "\n".join(lines).strip()
+    decoder = json.JSONDecoder()
+    for index, char in enumerate(stripped):
+        if char != "{":
+            continue
+        try:
+            payload, _ = decoder.raw_decode(stripped[index:])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            return payload
+    raise ValueError("provider_output_json_object_not_found")
+
+
+def _render_codex_execution_prompt(run_date: str, candidates: list[dict[str, Any]]) -> str:
+    context = {
+        "schema_version": "codex_execution_review.v1",
+        "run_date": run_date,
+        "final_candidates": [{**item, "candidate_id": candidate_id(item)} for item in candidates],
+        "deepseek_review": read_json(artifact_dir(run_date) / "deepseek-review.json") if (artifact_dir(run_date) / "deepseek-review.json").exists() else {},
+        "novelty_scan": read_json(artifact_dir(run_date) / "novelty-scan.json") if (artifact_dir(run_date) / "novelty-scan.json").exists() else {},
+    }
+    return json.dumps(
+        {
+            "task": "Return strict JSON only. Do not use markdown fences or explanatory prose. Do not edit files or run commands.",
+            "required_output_shape": {
+                "schema_version": "codex_execution_review.v1",
+                "run_date": run_date,
+                "status": "success",
+                "provider_status": {"provider": "codex", "provider_backed": True, "mode": "codex-cli", "exit_code": 0},
+                "reviews": [
+                    {
+                        "candidate_id": "string",
+                        "candidate_title": "string",
+                        "status": "success",
+                        "action": "accept_for_user_review|rewrite_before_seed|park_for_weekly|reject_with_rescue|requires_human_decision",
+                        "no_hardware_pilot_feasibility": "string",
+                        "public_dataset_or_sim_availability": "string",
+                        "baseline_training_cost": "string",
+                        "metric_automation": "string",
+                        "data_leakage_risk": "string",
+                        "minimal_repo_plan": "string",
+                        "real_robot_pilot_complexity": "string",
+                        "reproducibility_path": "string",
+                        "compute_time_budget": "string",
+                        "blocking_issues": [],
+                        "nonblocking_risks": [],
+                        "rewrite_request": "",
+                        "rescue_signal": "",
+                        "confidence": "high|medium|low",
+                        "field_presence_only": False,
+                    }
+                ],
+            },
+            "validation_rules": [
+                "Return exactly one review per candidate_id.",
+                "Required execution fields must be concrete and non-empty.",
+                "field_presence_only must be false for any accepted review.",
+                "If execution is not truly reproducible, choose rewrite_before_seed, park_for_weekly, reject_with_rescue, or requires_human_decision.",
+            ],
+            "context": context,
+        },
+        ensure_ascii=False,
+        indent=2,
+        sort_keys=True,
+    )
+
+
+def _kill_process_tree(pid: int) -> None:
+    if sys.platform.startswith("win"):
+        try:
+            subprocess.run(["taskkill.exe", "/PID", str(pid), "/T", "/F"], text=True, capture_output=True, timeout=10)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        return
+    try:
+        os.kill(pid, 9)
+    except OSError:
+        pass
+
+
+def _provider_error_payload(error: str, *, status: str, provider_status: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "_provider_error": error,
+        "_provider_failure_status": status,
+        "_provider_status": {
+            **provider_status,
+            "provider": "codex",
+            "provider_backed": False,
+            "boundary": "Provider-backed success requires a completed Codex CLI call and validated execution review JSON.",
+        },
+    }
+
+
+def _run_codex_cli_provider(run_date: str, candidates: list[dict[str, Any]], *, timeout_sec: int) -> dict[str, Any]:
+    codex_path = shutil.which("codex.cmd") or shutil.which("codex") or shutil.which("codex.exe")
+    status: dict[str, Any] = {"mode": "codex-cli", "exit_code": None, "timed_out": False}
+    if not codex_path:
+        return _provider_error_payload("codex_cli_not_found", status="partial_provider_unavailable", provider_status=status)
+    output_path = Path(tempfile.gettempdir()) / f"codex-v2-execution-review-{run_date}-{os.getpid()}.json"
+    prompt = _render_codex_execution_prompt(run_date, candidates)
+    command = [
+        codex_path,
+        "exec",
+        "--skip-git-repo-check",
+        "--ephemeral",
+        "--cd",
+        str(vault_path()),
+        "--sandbox",
+        "read-only",
+        "-c",
+        'approval_policy="never"',
+        "--output-last-message",
+        str(output_path),
+        "-",
+    ]
+    try:
+        proc = subprocess.Popen(
+            command,
+            cwd=vault_path(),
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        stdout, _stderr = proc.communicate(prompt, timeout=timeout_sec)
+        status["exit_code"] = proc.returncode
+    except subprocess.TimeoutExpired:
+        _kill_process_tree(proc.pid)
+        status["timed_out"] = True
+        return _provider_error_payload(f"codex_cli_timeout:{timeout_sec}s", status="partial_provider_unavailable", provider_status=status)
+    except OSError as exc:
+        return _provider_error_payload(f"codex_cli_error:{type(exc).__name__}:{exc}", status="partial_provider_unavailable", provider_status=status)
+    if status["exit_code"] != 0:
+        return _provider_error_payload(f"codex_cli_nonzero_exit:{status['exit_code']}", status="partial_provider_unavailable", provider_status=status)
+    output_text = ""
+    if output_path.exists():
+        output_text = output_path.read_text(encoding="utf-8-sig", errors="replace")
+        try:
+            output_path.unlink()
+        except OSError:
+            pass
+    if not output_text.strip():
+        output_text = stdout or ""
+    try:
+        payload = _extract_json_object(output_text)
+    except Exception as exc:
+        return _provider_error_payload(f"codex_cli_invalid_json:{type(exc).__name__}:{exc}", status="partial_provider_invalid", provider_status=status)
+    payload["schema_version"] = "codex_execution_review.v1"
+    payload["run_date"] = run_date
+    payload["status"] = "success"
+    payload["provider_status"] = {
+        **dict(payload.get("provider_status", {})),
+        **status,
+        "provider": "codex",
+        "provider_backed": True,
+    }
+    return payload
+
+
+def _validate_execution_provider_reviews(candidates: list[dict[str, Any]], payload: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    provider = payload.get("provider_status", {})
+    if not provider.get("provider_backed"):
+        errors.append("provider_status_not_provider_backed")
+    if provider.get("provider") not in {"codex", "implementation_review"}:
+        errors.append(f"provider_not_codex_execution:{provider.get('provider')}")
+    reviews = [item for item in payload.get("reviews", []) if isinstance(item, dict)]
+    candidate_ids = [candidate_id(item) for item in candidates]
+    seen: dict[str, int] = {}
+    for review in reviews:
+        cid = str(review.get("candidate_id"))
+        seen[cid] = seen.get(cid, 0) + 1
+        if cid not in candidate_ids:
+            errors.append(f"unexpected_execution_review:{cid}")
+    for cid, count in seen.items():
+        if count > 1:
+            errors.append(f"duplicate_execution_review:{cid}")
+    by_id = {str(item.get("candidate_id")): item for item in reviews}
+    for item in candidates:
+        cid = candidate_id(item)
+        review = by_id.get(cid)
+        if not review:
+            errors.append(f"missing_execution_review:{cid}")
+            continue
+        if review.get("status") != "success":
+            errors.append(f"execution_review_not_success:{cid}:{review.get('status')}")
+        for field in EXECUTION_REVIEW_FIELDS:
+            if not str(review.get(field, "")).strip():
+                errors.append(f"execution_review_missing_field:{cid}:{field}")
+        if not str(review.get("candidate_title", "")).strip():
+            errors.append(f"execution_review_missing_field:{cid}:candidate_title")
+        if review.get("action") not in CODEX_EXECUTION_ACTIONS:
+            errors.append(f"execution_review_invalid_action:{cid}:{review.get('action')}")
+        if review.get("confidence") and review.get("confidence") not in CODEX_CONFIDENCE_VALUES:
+            errors.append(f"execution_review_invalid_confidence:{cid}:{review.get('confidence')}")
+        if review.get("action") == "accept_for_user_review" and review.get("field_presence_only"):
+            errors.append(f"field_presence_only_accept_disallowed:{cid}")
+    return errors
+
+
+def _fallback_execution_review(item: dict[str, Any]) -> dict[str, Any]:
+    cid = candidate_id(item)
+    return {
+        "candidate_id": cid,
+        "candidate_title": item.get("title", ""),
+        "status": "failed_fallback_only",
+        "action": "reject_with_rescue",
+        "execution_risks": ["provider_backed_codex_execution_review_missing"],
+        "no_hardware_pilot_feasibility": "not_verified",
+        "public_dataset_or_sim_availability": "not_verified",
+        "baseline_training_cost": "not_verified",
+        "metric_automation": "not_verified",
+        "data_leakage_risk": "not_verified",
+        "minimal_repo_plan": "not_verified",
+        "real_robot_pilot_complexity": "not_verified",
+        "reproducibility_path": "not_verified",
+        "compute_time_budget": "not_verified",
+        "field_presence_only": True,
+        "boundary": "Fallback artifact only; formal promotion requires provider-backed implementation review.",
+    }
+
+
+def execution_review(run_date: str, *, dry_run: bool, provider_review_json: str = "", provider: str = "json", timeout_sec: int = 1200) -> dict[str, str]:
+    ensure_v2_dirs(run_date)
+    candidates = _v2_final_candidates(run_date)
+    if provider == "codex-cli":
+        provider_payload = _run_codex_cli_provider(run_date, candidates, timeout_sec=timeout_sec)
+    elif provider_review_json:
+        provider_payload = _load_execution_provider_payload(provider_review_json)
+    else:
+        provider_payload = {}
+    if provider_payload and not provider_payload.get("_provider_error"):
+        provider_errors = _validate_execution_provider_reviews(candidates, provider_payload)
+        reviews = provider_payload.get("reviews", [])
+        status = "success" if not provider_errors and candidates else "partial_provider_invalid"
+        provider_status = {**dict(provider_payload.get("provider_status", {})), "validation_errors": provider_errors}
+        if status != "success":
+            provider_status["provider_backed"] = False
+    else:
+        reviews = [_fallback_execution_review(item) for item in candidates]
+        status = provider_payload.get("_provider_failure_status") or ("partial_provider_unavailable" if reviews else "partial_empty_selection")
+        provider_status = provider_payload.get("_provider_status") or {
+            "provider": "codex",
+            "provider_backed": False,
+            "mode": "field_presence_fallback_only",
+            "provider_error": provider_payload.get("_provider_error", "codex_execution_provider_unavailable"),
+            "required_fields": EXECUTION_REVIEW_FIELDS,
+            "boundary": "Field presence or polished prose is not an execution review and cannot promote.",
+        }
+        provider_status["provider_error"] = provider_payload.get("_provider_error", "codex_execution_provider_unavailable")
+    payload = {
+        "schema_version": "codex_execution_review.v1",
+        "run_date": run_date,
+        "status": status,
+        "reviews": reviews,
+        "provider_status": provider_status,
+        "artifact_hashes": artifact_hashes(run_date, ["selected-candidates.json", "gemini-mutations.json", "novelty-scan.json"]),
+        "boundary": "Execution review only; no files are moved and no formal seed is written.",
+    }
+    write_run_artifact(run_date, "codex-execution-review.json", payload, state="execution_reviewed", dry_run=dry_run)
+    return {"status": payload["status"], "reviews": str(len(reviews))}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -2491,6 +2820,14 @@ def main() -> int:
     rerun_parser.add_argument("--dry-run", action="store_true")
     rerun_parser.add_argument("--json", action="store_true")
 
+    execution_parser = subparsers.add_parser("execution-review")
+    execution_parser.add_argument("--run-date", required=True)
+    execution_parser.add_argument("--provider", choices=["json", "codex-cli", "none"], default="json")
+    execution_parser.add_argument("--provider-review-json", default=os.environ.get("CODEX_EXECUTION_REVIEW_JSON", ""))
+    execution_parser.add_argument("--timeout", type=int, default=1200)
+    execution_parser.add_argument("--dry-run", action="store_true")
+    execution_parser.add_argument("--json", action="store_true")
+
     args = parser.parse_args()
     if args.command == "prepare":
         result = prepare(args.run_date, dry_run=args.dry_run, catch_up=args.catch_up, catch_up_days=args.catch_up_days)
@@ -2503,6 +2840,14 @@ def main() -> int:
         result = greenhouse_weekly(args.end_date, args.days, dry_run=args.dry_run)
     elif args.command == "top-tier-weekly":
         result = top_tier_weekly(args.end_date, args.days, dry_run=args.dry_run)
+    elif args.command == "execution-review":
+        result = execution_review(
+            args.run_date,
+            dry_run=args.dry_run,
+            provider_review_json=args.provider_review_json,
+            provider=args.provider,
+            timeout_sec=args.timeout,
+        )
     else:
         output_root = Path(args.output_root)
         if not output_root.is_absolute():
@@ -2512,6 +2857,8 @@ def main() -> int:
         safe_print(json.dumps(result, ensure_ascii=False, indent=2))
     else:
         safe_print(" ".join(f"{key}={value}" for key, value in result.items()))
+    if args.command == "execution-review" and result.get("status") != "success":
+        return 2
     return 0
 
 

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Research Seed v2 Publish Result",
+  "type": "object",
+  "required": ["schema_version", "run_date", "status", "published", "blocked"],
+  "properties": {
+    "schema_version": {"type": "string"},
+    "run_date": {"type": "string"},
+    "status": {"type": "string"},
+    "published": {"type": "array"},
+    "bucketed": {"type": "array"},
+    "blocked": {"type": "array"},
+    "artifact_hashes": {"type": "object"}
+  }
+}

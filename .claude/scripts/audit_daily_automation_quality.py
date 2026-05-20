@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 from collections import Counter
 from datetime import date
 import json
@@ -10,6 +11,17 @@ import re
 from typing import Any
 
 from kb_common import safe_print, safe_write, vault_path
+from research_seed_v2_common import (
+    ARTIFACT_SCHEMAS,
+    FORMAL_SEED_REQUIRED_FILES,
+    PUBLISH_REQUIRED_ARTIFACTS,
+    artifact_dir,
+    run_dir,
+    validate_artifact,
+    validate_json_file,
+    v2_rel,
+)
+from validate_research_run import validate_run as validate_v2_run
 
 
 MIN_SUCCESSFUL_READS = 10
@@ -232,6 +244,241 @@ def _classify_mandatory_battle(run_date: str, agenda_delta_text: str) -> dict[st
 
 def _issue(level: str, code: str, detail: str, evidence: str = "") -> dict[str, str]:
     return {"level": level, "code": code, "detail": detail, "evidence": evidence}
+
+
+def _scan_for_direct_seed_writers() -> list[dict[str, str]]:
+    issues: list[dict[str, str]] = []
+    scripts_dir = vault_path(".claude", "scripts")
+    for path in sorted(scripts_dir.glob("*.py")):
+        if path.name in {"publish_research_run.py", "audit_daily_automation_quality.py"}:
+            continue
+        text = _read(path)
+        issues.extend(_scan_text_for_seed_writer(path, text))
+    return issues
+
+
+def _scan_scheduled_daily_rollout_policy() -> list[dict[str, str]]:
+    issues: list[dict[str, str]] = []
+    wrapper = vault_path(".claude", "scripts", "run_daily_arxiv_task.ps1")
+    text = _read(wrapper)
+    if re.search(r"--v2-publish-policy\s+['\"]?formal\b", text):
+        issues.append(
+            _issue(
+                "FAIL",
+                "v2_scheduled_formal_publish_configured",
+                "Scheduled daily wrapper is configured for formal v2 publish.",
+                _rel(wrapper),
+            )
+        )
+    if "--allow-formal-seed-publish" in text:
+        issues.append(
+            _issue(
+                "FAIL",
+                "v2_scheduled_formal_publish_allowed",
+                "Scheduled daily wrapper must not enable formal seed publish by default.",
+                _rel(wrapper),
+            )
+        )
+    return issues
+
+
+def _node_tokens(node: ast.AST) -> list[str]:
+    if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Div, ast.Add)):
+        return [*_node_tokens(node.left), *_node_tokens(node.right)]
+    if isinstance(node, ast.Constant):
+        return [str(node.value)]
+    if isinstance(node, ast.Name):
+        return [node.id]
+    if isinstance(node, ast.Attribute):
+        return [node.attr, *_node_tokens(node.value)]
+    if isinstance(node, ast.Call):
+        arg_tokens: list[str] = []
+        for arg in node.args:
+            arg_tokens.extend(_node_tokens(arg))
+        for keyword in node.keywords:
+            arg_tokens.extend(_node_tokens(keyword.value))
+        if isinstance(node.func, ast.Name):
+            return [f"{node.func.id}()", *arg_tokens]
+        if isinstance(node.func, ast.Attribute):
+            return [node.func.attr, *_node_tokens(node.func.value), *arg_tokens]
+    if isinstance(node, ast.Subscript):
+        return [*_node_tokens(node.value), *_node_tokens(node.slice)]
+    if isinstance(node, ast.JoinedStr):
+        return ["".join(str(part.value) for part in node.values if isinstance(part, ast.Constant))]
+    return []
+
+
+def _expr_may_target_seed(node: ast.AST, seed_vars: set[str]) -> bool:
+    tokens = _node_tokens(node)
+    lowered = [token.lower().replace("\\", "/") for token in tokens]
+    if any(token in seed_vars for token in tokens):
+        return True
+    joined = "/".join(lowered)
+    if "idea_bank/seed" in joined or "idea_bank" in joined and "/seed" in joined:
+        return True
+    has_seed = "seed" in lowered
+    has_dynamic_state = any(token in {"recommended", "state", "target_state"} for token in lowered)
+    if "idea_bank_dir" in lowered and (has_seed or has_dynamic_state):
+        return True
+    if "agenda_root()" in lowered and "idea_bank" in lowered and (has_seed or has_dynamic_state):
+        return True
+    return False
+
+
+def _call_name(node: ast.Call) -> str:
+    func = node.func
+    if isinstance(func, ast.Name):
+        return func.id
+    if isinstance(func, ast.Attribute):
+        base = ".".join(_node_tokens(func.value))
+        return f"{base}.{func.attr}" if base else func.attr
+    return ""
+
+
+def _scan_text_for_seed_writer(path: Path, text: str) -> list[dict[str, str]]:
+    issues: list[dict[str, str]] = []
+    if "write_seed_folder" in text and path.name not in {"audit_daily_automation_quality.py"}:
+        issues.append(
+            _issue("FAIL", "v2_direct_seed_writer_outside_publish", "Legacy write_seed_folder symbol appears outside publish_research_run.py.", _rel(path))
+        )
+    try:
+        tree = ast.parse(text.lstrip("\ufeff"), filename=str(path))
+    except SyntaxError as exc:
+        return issues + [_issue("WARN", "v2_seed_writer_scan_parse_failed", f"{type(exc).__name__}:{exc}", _rel(path))]
+    seed_vars: set[str] = set()
+    writer_calls = {"safe_write", "write_text", "write_json", "open", "mkdir", "rename", "replace", "move", "copy2", "rmtree"}
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Assign, ast.AnnAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            value = node.value
+            if value is not None and _expr_may_target_seed(value, seed_vars):
+                for target in targets:
+                    if isinstance(target, ast.Name):
+                        seed_vars.add(target.id)
+        if isinstance(node, ast.Call):
+            name = _call_name(node)
+            short = name.split(".")[-1]
+            if short not in writer_calls:
+                continue
+            call_parts = list(node.args) + [keyword.value for keyword in node.keywords]
+            target_exprs = call_parts
+            if isinstance(node.func, ast.Attribute):
+                target_exprs.append(node.func.value)
+            if any(_expr_may_target_seed(expr, seed_vars) for expr in target_exprs):
+                issues.append(
+                    _issue(
+                        "FAIL",
+                        "v2_direct_seed_writer_outside_publish",
+                        f"Potential formal seed mutation call `{name}` detected outside publish_research_run.py.",
+                        f"{_rel(path)}:{getattr(node, 'lineno', '?')}",
+                    )
+                )
+    return issues
+
+
+def _audit_v2_state_machine(run_date: str) -> tuple[dict[str, Any], list[dict[str, str]]]:
+    issues: list[dict[str, str]] = []
+    run_path = run_dir(run_date)
+    artifacts_path = artifact_dir(run_date)
+    publish_result = run_path / "publish" / "publish-result.json"
+    legacy_publish_result = artifacts_path / "publish-result.json"
+    if not publish_result.exists() and legacy_publish_result.exists():
+        publish_result = legacy_publish_result
+    manifest_path = run_path / "manifest.json"
+    manifest = _json_read(manifest_path)
+    validation: dict[str, Any]
+    if run_path.exists():
+        validation = validate_v2_run(run_date, strict_publish=publish_result.exists())
+        if validation.get("status") != "success":
+            for error in validation.get("errors", [])[:30]:
+                issues.append(_issue("FAIL", "v2_schema_or_hash_invalid", str(error), _rel(run_path)))
+        for artifact_name in ARTIFACT_SCHEMAS:
+            artifact_path = artifacts_path / artifact_name
+            if artifact_path.exists():
+                artifact_errors = validate_artifact(run_date, artifact_name)
+                for error in artifact_errors[:20]:
+                    issues.append(_issue("FAIL", "v2_artifact_schema_invalid", f"{artifact_name}: {error}", _rel(artifact_path)))
+    else:
+        validation = {
+            "schema_version": "research_run_validation.v1",
+            "run_date": run_date,
+            "status": "not_started",
+            "checked": [],
+            "errors": [],
+        }
+
+    if publish_result.exists():
+        publish_data = _json_read(publish_result)
+        published = publish_data.get("published", []) if isinstance(publish_data.get("published"), list) else []
+        policy = str(manifest.get("v2_publish_policy") or publish_data.get("v2_publish_policy") or "")
+        formal_allowed = manifest.get("formal_seed_publish_allowed") is True
+        manifest_formal_written = manifest.get("formal_seed_written") is True
+        if publish_data.get("v2_publish_policy") and policy and publish_data.get("v2_publish_policy") != policy:
+            issues.append(_issue("FAIL", "v2_publish_policy_mismatch", "Publish result policy disagrees with manifest policy.", _rel(publish_result)))
+        if published:
+            for artifact_name in PUBLISH_REQUIRED_ARTIFACTS:
+                if not (artifacts_path / artifact_name).exists():
+                    issues.append(_issue("FAIL", "v2_publish_required_artifact_missing", artifact_name, _rel(artifacts_path / artifact_name)))
+            if not manifest_formal_written:
+                issues.append(_issue("FAIL", "v2_manifest_not_marked_seed_written", "Publish result contains published seed but manifest formal_seed_written is false.", _rel(manifest_path)))
+            if policy != "formal":
+                issues.append(_issue("FAIL", "v2_formal_seed_written_policy_mismatch", "Formal seed was published while v2_publish_policy is not formal.", _rel(manifest_path)))
+            if not formal_allowed:
+                issues.append(_issue("FAIL", "v2_formal_seed_written_without_allow", "Formal seed was published without formal_seed_publish_allowed=true.", _rel(manifest_path)))
+            if manifest.get("backfill_mode") != "daily":
+                issues.append(_issue("FAIL", "v2_backfill_formal_seed_written", "Backfill run wrote a formal seed.", _rel(manifest_path)))
+        if manifest_formal_written and not published:
+            issues.append(_issue("FAIL", "v2_manifest_seed_written_without_publish_result", "Manifest says formal seed written but publish result has no published seed.", _rel(manifest_path)))
+        if publish_data.get("formal_seed_written") and not manifest_formal_written:
+            issues.append(_issue("FAIL", "v2_publish_result_manifest_seed_written_mismatch", "Publish result says formal seed written but manifest disagrees.", _rel(publish_result)))
+
+    seed_root = vault_path("projects", "research-agenda", "idea_bank", "seed")
+    v2_seed_count = 0
+    legacy_seed_count = 0
+    if seed_root.exists():
+        for seed_dir in sorted(path for path in seed_root.iterdir() if path.is_dir()):
+            v2_markers = [seed_dir / "artifact-hashes.json", seed_dir / "survival-decision.json"]
+            if any(path.exists() for path in v2_markers):
+                v2_seed_count += 1
+                missing = [name for name in FORMAL_SEED_REQUIRED_FILES if not (seed_dir / name).exists()]
+                for name in missing:
+                    issues.append(_issue("FAIL", "v2_seed_missing_required_artifact", f"{seed_dir.name} missing {name}", _rel(seed_dir / name)))
+            else:
+                legacy_seed_count += 1
+
+    override_root = vault_path("projects", "research-agenda", "overrides", "human-overrides", run_date)
+    override_count = 0
+    if override_root.exists():
+        for override_path in sorted(override_root.glob("*.json")):
+            override_count += 1
+            errors = validate_json_file(override_path, "human_override.v1")
+            data = _json_read(override_path)
+            if data.get("reviewer") != "human":
+                errors.append("reviewer_not_human")
+            for error in errors:
+                issues.append(_issue("FAIL", "v2_human_override_invalid", str(error), _rel(override_path)))
+
+    issues.extend(_scan_for_direct_seed_writers())
+    issues.extend(_scan_scheduled_daily_rollout_policy())
+    return (
+        {
+            "run_dir": _rel(run_path) if run_path.exists() else "",
+            "validation_status": validation.get("status", "not_started"),
+            "checked": validation.get("checked", []),
+            "errors": validation.get("errors", []),
+            "publish_result": _rel(publish_result) if publish_result.exists() else "",
+            "v2_publish_policy": manifest.get("v2_publish_policy", ""),
+            "formal_seed_publish_allowed": bool(manifest.get("formal_seed_publish_allowed", False)),
+            "scheduled_daily_switched": bool(manifest.get("scheduled_daily_switched", False)),
+            "publish_required_artifacts": PUBLISH_REQUIRED_ARTIFACTS,
+            "formal_seed_required_files": FORMAL_SEED_REQUIRED_FILES,
+            "v2_seed_count": v2_seed_count,
+            "legacy_seed_count": legacy_seed_count,
+            "human_override_count": override_count,
+            "boundary": "Only publish_research_run.py may create or modify formal seed folders.",
+        },
+        issues,
+    )
 
 
 def _readiness_from_label(label: str) -> str:
@@ -473,6 +720,9 @@ def audit_run(run_date: str) -> dict[str, Any]:
         elif data and data.get("schema_version") != expected_schema:
             issue_list.append(_issue("FAIL", "workflow_contract_schema_mismatch", f"{contract_json.name} schema is `{data.get('schema_version')}` expected `{expected_schema}`.", _rel(contract_json)))
 
+    v2_state_machine, v2_issues = _audit_v2_state_machine(run_date)
+    issue_list.extend(v2_issues)
+
     fail_count = sum(1 for item in issue_list if item["level"] == "FAIL")
     warn_count = sum(1 for item in issue_list if item["level"] == "WARN")
     if fail_count:
@@ -520,6 +770,7 @@ def audit_run(run_date: str) -> dict[str, Any]:
         },
         "codex_review": codex,
         "mandatory_model_battle": mandatory_battle,
+        "v2_state_machine": v2_state_machine,
         "contracts": [_rel(path) for path in contract_files if path.exists()],
         "notemd_sidecars": {
             "effective_date": SIDECAR_EFFECTIVE_DATE,
@@ -601,6 +852,21 @@ def render_markdown(report: dict[str, Any]) -> str:
         if isinstance(value, (list, dict)):
             value = json.dumps(value, ensure_ascii=False, sort_keys=True)
         lines.append(f"- {key}: {value}")
+    v2_state = report.get("v2_state_machine", {})
+    lines.extend(
+        [
+            "",
+            "## Research Seed V2",
+            "",
+            f"- validation_status: `{v2_state.get('validation_status', 'not_started')}`",
+            f"- run_dir: `{v2_state.get('run_dir', '')}`",
+            f"- publish_result: `{v2_state.get('publish_result', '')}`",
+            f"- v2_seed_count: {v2_state.get('v2_seed_count', 0)}",
+            f"- legacy_seed_count: {v2_state.get('legacy_seed_count', 0)}",
+            f"- human_override_count: {v2_state.get('human_override_count', 0)}",
+            f"- boundary: {v2_state.get('boundary', '')}",
+        ]
+    )
     battle = report.get("mandatory_model_battle", {})
     lines.extend(
         [

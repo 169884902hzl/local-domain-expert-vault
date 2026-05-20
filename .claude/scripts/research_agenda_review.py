@@ -5,7 +5,6 @@ import argparse
 from datetime import date
 import json
 import re
-import shutil
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +26,37 @@ PLACEHOLDER_TOKENS = [
 QUALITY_REJECT_PREFIXES = ["cross-gap between "]
 GENERATED_GATE_TOKENS = ["gate_status: generated_complete", "gate_status: complete", "gate_status: reviewed", "gate_status: reviewed_complete"]
 REVIEWED_GATE_TOKENS = ["gate_status: complete", "gate_status: reviewed", "gate_status: reviewed_complete"]
+FORMAL_SEED_STATE = "seed"
+MUTABLE_IDEA_STATE_DIRS = {state: IDEA_BANK_DIR / state for state in IDEA_STATES if state != FORMAL_SEED_STATE}
+
+
+def _is_formal_seed_folder(folder: Path) -> bool:
+    try:
+        folder.resolve().relative_to((IDEA_BANK_DIR / FORMAL_SEED_STATE).resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def _legacy_review_path(folder: Path) -> Path:
+    return IDEA_BANK_DIR.parent / "seed-candidates" / "legacy-review" / date.today().isoformat() / f"{folder.name}.json"
+
+
+def _write_legacy_review(result: dict[str, Any], reason: str) -> None:
+    source = Path(result["path"])
+    if not source.is_absolute():
+        source = Path.cwd() / source
+    target = _legacy_review_path(source)
+    payload = {
+        "schema_version": "legacy_seed_review.v1",
+        "created_at": date.today().isoformat(),
+        "source_path": str(source),
+        "review_result": result,
+        "reason": reason,
+        "boundary": "Formal seed folders are immutable outside publish_research_run.py; review output is stored here instead.",
+    }
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def _count_wikilinks(folder: Path) -> int:
@@ -215,7 +245,14 @@ def apply_recommendations(results: list[dict[str, Any]]) -> None:
         source = Path(result["path"])
         if not source.is_absolute():
             source = Path.cwd() / source
-        target = IDEA_BANK_DIR / recommended / source.name
+        if state == FORMAL_SEED_STATE or recommended == FORMAL_SEED_STATE or _is_formal_seed_folder(source):
+            _write_legacy_review(result, "formal_seed_folder_not_mutated")
+            continue
+        target_root = MUTABLE_IDEA_STATE_DIRS.get(recommended)
+        if target_root is None:
+            _write_legacy_review(result, f"unsupported_or_immutable_recommended_state:{recommended}")
+            continue
+        target = target_root / source.name
         if recommended == "rejected":
             _mark_state(source, recommended, result.get("quality_flags", []))
             if target.exists():
@@ -226,13 +263,15 @@ def apply_recommendations(results: list[dict[str, Any]]) -> None:
             _mark_state(target, recommended, result.get("quality_flags", []))
             continue
         try:
-            shutil.move(str(source), str(target))
+            source.replace(target)
             _mark_state(target, recommended, result.get("quality_flags", []))
         except PermissionError:
             _mark_state(source, recommended, result.get("quality_flags", []))
 
 
 def _mark_state(folder: Path, state: str, quality_flags: list[str]) -> None:
+    if _is_formal_seed_folder(folder):
+        raise RuntimeError(f"formal_seed_folder_write_blocked:{folder}")
     idea = folder / "idea.md"
     if idea.exists():
         text = idea.read_text(encoding="utf-8", errors="replace")
