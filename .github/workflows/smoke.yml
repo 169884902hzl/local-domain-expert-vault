@@ -36,6 +36,10 @@ jobs:
         shell: pwsh
         run: python -m pytest
 
+      - name: Run v2 state machine unittest suite
+        shell: pwsh
+        run: python -m unittest discover -s .claude/scripts/tests -p "test_*.py"
+
       - name: Audit local knowledge base
         shell: pwsh
         run: |
