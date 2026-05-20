@@ -127,7 +127,7 @@ Claudian 的主配置在：
 这两个名字很容易混在一起，但在本 vault 里职责不同：
 
 - **Claudian** 是 Obsidian 里的插件和交互层。你在 Obsidian 里问“有哪些论文”“精读这篇”“比较两篇论文”时，Claudian 读取 `.claudian/claudian-settings.json`，再把请求路由到 `.claude/commands/` 和本地脚本。
-- **Claude Code / Claude CLI** 是底层执行 worker。自动化脚本可以直接调用 `claude` CLI 来执行 `/read-paper` 风格的精读、文件更新和审计。公开版默认不会传 `--dangerously-skip-permissions`；只有你显式 opt-in 才会启用高权限模式。
+- **Claude Code / Claude CLI** 是底层执行 worker。自动化脚本可以直接调用 `claude` CLI 来执行 `/read-paper` 风格的精读、文件更新和审计。当前 research-agenda idea 发散链路会保留 `claude --dangerously-skip-permissions`，让 Claude Code 作为高自治 worker 连续处理候选 idea；`daily_arxiv_pipeline.py` 的 Claude 精读 worker 仍是单独 opt-in。
 
 换句话说：Claudian 是 Obsidian 内的研究入口；Claude Code 是能被 Claudian 或计划任务调用的命令行执行者。
 
@@ -154,7 +154,7 @@ Claudian 的主配置在：
 
 如果你已经理解 `.claude/commands/` 和 `.claude/scripts/` 会做什么，并且愿意让 agent 自动读写 vault 文件，可以在 Claudian UI 里手动切到更高权限模式。不要把高权限配置直接提交到公开仓库。
 
-Claude CLI 的 `--dangerously-skip-permissions` 也不再是公开默认值。发布版脚本只有在你显式传入 `--allow-dangerous-claude`，或设置 `LOCAL_FIRST_VAULT_ALLOW_DANGEROUS_CLAUDE=1` 时，才会把该参数传给 Claude。这个 opt-in 只适合你完全理解本机权限边界并愿意承担自动读写风险的本地环境。
+Claude CLI 的 `--dangerously-skip-permissions` 是高自治执行模式。当前 `research_agenda_ideate.py` 会按工作流设计直接使用它；`daily_arxiv_pipeline.py` 只有在你显式传入 `--allow-dangerous-claude`，或设置 `LOCAL_FIRST_VAULT_ALLOW_DANGEROUS_CLAUDE=1` 时，才会把该参数传给 Claude。使用前请确认你完全理解本机权限边界并愿意承担自动读写风险。
 
 不管使用什么权限模式，都不要让 agent 看到真实 API key 文本；用系统环境变量或本机 CLI 登录状态提供凭据。
 

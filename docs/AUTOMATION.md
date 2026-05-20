@@ -247,7 +247,7 @@ python .claude/scripts/daily_arxiv_pipeline.py `
 
 这些输出默认不提交 Git。
 
-公开版默认不会给 Claude CLI 传 `--dangerously-skip-permissions`。如果你在自己的本机环境中已经理解 Claude 权限边界，并且确实要恢复高自治读写模式，可以显式 opt in：
+权限边界需要分两层看：`research_agenda_ideate.py` 的 Claude refinement 路径会直接使用 `claude --dangerously-skip-permissions`，这是当前 idea 发散工作流的高自治执行模式；运行它之前请确认你理解本机 vault 的读写边界。`daily_arxiv_pipeline.py` 的 Claude 精读 worker 仍是单独 opt-in，如果你确实要让 daily pipeline 也以高自治模式调用 Claude，可以显式传入：
 
 ```powershell
 python .claude/scripts/daily_arxiv_pipeline.py --once --allow-dangerous-claude
@@ -259,7 +259,7 @@ python .claude/scripts/daily_arxiv_pipeline.py --once --allow-dangerous-claude
 $env:LOCAL_FIRST_VAULT_ALLOW_DANGEROUS_CLAUDE = "1"
 ```
 
-这个开关只影响本机运行，不应该写入公开仓库配置。
+这个开关只影响 `daily_arxiv_pipeline.py` 的本机运行，不应该写入公开仓库配置。
 
 ## 8. Gemini CLI
 

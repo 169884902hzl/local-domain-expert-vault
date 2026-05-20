@@ -556,7 +556,7 @@ Claudian 的公开配置已经放在：
 
 其中 `.claudian/claudian-settings.json` 包含本 vault 的核心 system prompt：本地证据优先、Zotero 导入走脚本、精读必须 finalize、批量处理要写进度、`raw/` 默认只追加。公开包已经清空个人用户名、CLI 绝对路径、环境变量和 host-specific 配置。你需要在自己的 Claudian 设置里重新选择 provider、登录账号并确认权限模式。
 
-公开脚本默认不绕过 Claude 权限。高自治模式需要你在本机显式传入 `--allow-dangerous-claude`，或临时设置 `LOCAL_FIRST_VAULT_ALLOW_DANGEROUS_CLAUDE=1`；不要把这个开关写进公开配置。
+本 vault 的 idea 发散链路会调用 `claude --dangerously-skip-permissions`，这是当前工作流为了让 Claude Code 作为自动化 worker 连续读写、归纳和改写研究 idea 草案而保留的高自治模式。运行前请确认你理解 `.claude/commands/` 和 `.claude/scripts/` 的行为边界；不要把真实 API key、token 或私有路径写入仓库。`daily_arxiv_pipeline.py` 的 Claude 精读 worker 仍保留 `--allow-dangerous-claude` / `LOCAL_FIRST_VAULT_ALLOW_DANGEROUS_CLAUDE=1` 作为单独 opt-in。
 
 ## 自动化流程
 

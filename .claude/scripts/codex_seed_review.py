@@ -185,6 +185,8 @@ def _compact_text(value: Any, *, max_chars: int) -> str:
 def _readiness_from_label(label: str) -> str:
     if label == "promoted_to_seed":
         return "seed_ready"
+    if label == "speculative_preserve":
+        return "speculative_weekly_review"
     if label == "rewrite_needed":
         return "rewrite_required"
     if label == "parked_for_weekly_review":
@@ -203,6 +205,7 @@ def _normalize_candidate_readiness(item: dict[str, Any]) -> dict[str, Any]:
     item.setdefault("readiness_tier", _readiness_from_label(str(item.get("greenhouse_label", "unlabeled"))))
     item.setdefault("promotion_decision", {
         "promoted_to_seed": "promote_to_seed",
+        "speculative_preserve": "preserve_for_weekly_breakthrough_review",
         "rewrite_needed": "rewrite_before_seed",
         "parked_for_weekly_review": "park_for_weekly_review",
         "blocked_with_rescue_signal": "rescue_signal_only",
@@ -542,11 +545,21 @@ def _collect_ideas() -> list[dict[str, Any]]:
             "readiness_tier": strip_quotes(fields.get("readiness_tier", "")) or _body_field(idea_path, "readiness_tier"),
             "promotion_decision": strip_quotes(fields.get("promotion_decision", "")) or _body_field(idea_path, "promotion_decision"),
             "candidate_group": strip_quotes(fields.get("candidate_group", "")) or _body_field(idea_path, "candidate_group"),
+            "origin_type": strip_quotes(fields.get("origin_type", "")) or _body_field(idea_path, "origin_type"),
+            "research_claim_type": strip_quotes(fields.get("research_claim_type", "")) or _body_field(idea_path, "research_claim_type"),
+            "bottleneck_type": strip_quotes(fields.get("bottleneck_type", "")) or _body_field(idea_path, "bottleneck_type"),
+            "evidence_mode": strip_quotes(fields.get("evidence_mode", "")) or _body_field(idea_path, "evidence_mode"),
+            "risk_class": strip_quotes(fields.get("risk_class", "")) or _body_field(idea_path, "risk_class"),
+            "world_model_role": strip_quotes(fields.get("world_model_role", "")) or _body_field(idea_path, "world_model_role"),
+            "portfolio_slot": strip_quotes(fields.get("portfolio_slot", "")) or _body_field(idea_path, "portfolio_slot"),
             "research_quality_score": strip_quotes(fields.get("research_quality_score", "")) or _body_field(idea_path, "research_quality_score"),
             "evidence_support_score": strip_quotes(fields.get("evidence_support_score", "")) or _body_field(idea_path, "evidence_support_score"),
             "support_score": strip_quotes(fields.get("support_score", "")) or _body_field(idea_path, "support_score"),
             "originality_score": strip_quotes(fields.get("originality_score", "")) or _body_field(idea_path, "originality_score"),
             "engineering_value_score": strip_quotes(fields.get("engineering_value_score", "")) or _body_field(idea_path, "engineering_value_score"),
+            "sharpness_score": strip_quotes(fields.get("sharpness_score", "")) or _body_field(idea_path, "sharpness_score"),
+            "evidence_execution_score": strip_quotes(fields.get("evidence_execution_score", "")) or _body_field(idea_path, "evidence_execution_score"),
+            "ordinaryness_penalty": strip_quotes(fields.get("ordinaryness_penalty", "")) or _body_field(idea_path, "ordinaryness_penalty"),
             "contribution_shape": strip_quotes(fields.get("contribution_shape", "")) or _body_field(idea_path, "contribution_shape"),
             "decision_status": strip_quotes(fields.get("decision_status", "")) or _body_field(idea_path, "decision_status"),
                 "claim_status": strip_quotes(fields.get("claim_status", "")) or _body_field(idea_path, "claim_status"),
@@ -581,6 +594,16 @@ def _compact_greenhouse_candidate(item: dict[str, Any]) -> dict[str, Any]:
         "support_score",
         "originality_score",
         "engineering_value_score",
+        "sharpness_score",
+        "evidence_execution_score",
+        "ordinaryness_penalty",
+        "origin_type",
+        "research_claim_type",
+        "bottleneck_type",
+        "evidence_mode",
+        "risk_class",
+        "world_model_role",
+        "portfolio_slot",
         "idea_archetype",
         "contribution_shape",
         "problem",
@@ -670,11 +693,21 @@ def _compact_seed_candidate(item: dict[str, Any]) -> dict[str, Any]:
         "readiness_tier": item.get("readiness_tier", ""),
         "promotion_decision": item.get("promotion_decision", ""),
         "candidate_group": item.get("candidate_group", ""),
+        "origin_type": item.get("origin_type", ""),
+        "research_claim_type": item.get("research_claim_type", ""),
+        "bottleneck_type": item.get("bottleneck_type", ""),
+        "evidence_mode": item.get("evidence_mode", ""),
+        "risk_class": item.get("risk_class", ""),
+        "world_model_role": item.get("world_model_role", ""),
+        "portfolio_slot": item.get("portfolio_slot", ""),
         "research_quality_score": item.get("research_quality_score", ""),
         "evidence_support_score": item.get("evidence_support_score", ""),
         "support_score": item.get("support_score", ""),
         "originality_score": item.get("originality_score", ""),
         "engineering_value_score": item.get("engineering_value_score", ""),
+        "sharpness_score": item.get("sharpness_score", ""),
+        "evidence_execution_score": item.get("evidence_execution_score", ""),
+        "ordinaryness_penalty": item.get("ordinaryness_penalty", ""),
         "contribution_shape": item.get("contribution_shape", ""),
         "claim_status": item.get("claim_status", ""),
         "idea_excerpt": _compact_text(item.get("idea_excerpt", ""), max_chars=900),
@@ -957,6 +990,11 @@ def build_packet(run_date: str) -> dict[str, Any]:
                 "wild_engineering": "larger engineering or architecture leap; lighter evidence can be acceptable if pathology, mechanism, baseline, and falsification are sharp.",
             },
             "score_split": "support_score, originality_score, and engineering_value_score are separate; Codex should not collapse them into evidence volume.",
+            "portfolio_taxonomy": "Use origin_type, research_claim_type, bottleneck_type, evidence_mode, risk_class, world_model_role, and portfolio_slot to judge portfolio balance. Failure/recovery should not dominate the whole set.",
+            "sharpness_execution_split": "Use sharpness_score and evidence_execution_score separately. A high-sharpness low-evidence candidate should be preserved or parked, not rejected solely for weak evidence.",
+            "world_model_boundary": "A world-model idea is reviewable only if it states role, predicted state, physical invariant, decision boundary, and hallucination test.",
+            "deepseek_role": "Mandatory DeepSeek/OpenCode battle is a scientific adversary and rescue proposer: novelty attack, baseline attack, mechanism attack, evaluation attack, scope attack, and rescue mutation.",
+            "codex_execution_role": "Codex should focus on feasibility, dataset/simulation availability, reproducible evaluation, baseline cost, hidden leakage, no-hardware pilot, and minimal repo/experiment plan. Do not reject breakthrough ideas merely for being hard.",
             "mechanism_nonobviousness_boundary": "script score is only a field-depth heuristic; Codex must judge actual non-obviousness from mechanism, interface, strongest baseline, and killer experiment.",
             "anti_combination_boundary": "Codex must explicitly test whether each candidate is more than A+B. A candidate without a convincing anti_combination_test should be rewrite/park even if evidence is strong.",
             "adversarial_generation_boundary": "Codex must inspect naive_combination_version, strongest_baseline_kill_path, and post_kill_mutation. Accept only if the final idea clearly mutated after the strongest baseline killed the naive A+B version.",
@@ -982,12 +1020,13 @@ def build_packet(run_date: str) -> dict[str, Any]:
         "focus_tracks": _compact_focus_tracks(_focus_track_files()),
         "greenhouse_path": greenhouse.get("path", ""),
         "greenhouse_generator_metadata": greenhouse.get("generator_metadata", {}),
+        "portfolio_summary": greenhouse.get("portfolio_summary", {}),
         "mandatory_model_battle": mandatory_battle,
         "raw_gemini_candidates": raw_candidates,
         "parked_or_rewrite_candidates": [
             item
             for item in raw_candidates
-            if item.get("greenhouse_label") in {"parked_for_weekly_review", "rewrite_needed", "blocked_with_rescue_signal"}
+            if item.get("greenhouse_label") in {"speculative_preserve", "parked_for_weekly_review", "rewrite_needed", "blocked_with_rescue_signal"}
         ],
         "today_mechanism_seed_candidates": today_mechanism_compact,
         "formal_seed_titles": all_seed_titles,
@@ -997,6 +1036,11 @@ def build_packet(run_date: str) -> dict[str, Any]:
             "formal_seed_titles": len(all_seed_titles),
             "candidate_group_evidence_bound": sum(1 for item in raw_candidates if item.get("candidate_group") == "evidence_bound"),
             "candidate_group_wild_engineering": sum(1 for item in raw_candidates if item.get("candidate_group") == "wild_engineering"),
+            "origin_types": dict(Counter(str(item.get("origin_type", "unclassified") or "unclassified") for item in raw_candidates)),
+            "research_claim_types": dict(Counter(str(item.get("research_claim_type", "unclassified") or "unclassified") for item in raw_candidates)),
+            "risk_classes": dict(Counter(str(item.get("risk_class", "unclassified") or "unclassified") for item in raw_candidates)),
+            "portfolio_slots": dict(Counter(str(item.get("portfolio_slot", "unclassified") or "unclassified") for item in raw_candidates)),
+            "speculative_preserve": sum(1 for item in raw_candidates if item.get("greenhouse_label") == "speculative_preserve"),
         },
     }
 
@@ -1027,9 +1071,13 @@ Required judgment criteria:
 - creativity preservation: if a candidate is risky but contains a useful engineering pathology or interface, preserve the rescue signal instead of rejecting it outright.
 - candidate groups: compare `evidence_bound` and `wild_engineering` fairly. Do not penalize a wild_engineering candidate merely because it has lighter evidence; penalize it only if pathology, mechanism, baseline, or falsification is weak.
 - score split: use `support_score`, `originality_score`, and `engineering_value_score` separately. High support with low originality is not a top-tier idea; low support with high engineering value may be a rescue or rewrite candidate.
+- portfolio taxonomy: inspect `origin_type`, `research_claim_type`, `bottleneck_type`, `evidence_mode`, `risk_class`, and `portfolio_slot`. Penalize visible failure/recovery mode collapse, but do not require every strong idea to start from a physical failure scene.
+- sharpness/execution split: use `sharpness_score`, `evidence_execution_score`, and `ordinaryness_penalty`. If sharpness is high but evidence is light, preserve as speculative or park unless it is incoherent, non-falsifiable, already known, or impossible to test.
+- world model role: if `research_claim_type=world_model_simulation`, check `world_model_role`, predicted state, physical invariant, decision boundary, hallucination test, and baseline kill. Vague "predict future then choose safe action" should be rewrite or reject_with_rescue.
 - potential/readiness split: `quality_tier` and `potential_tier` mean potential only. They are not seed readiness. Use `readiness_tier`, `promotion_decision`, `greenhouse_label`, and your own review to decide accept/rewrite/park/rescue.
 - source filtering: inspect `greenhouse_generator_metadata.rejected_drafts_summary` when present. It is not a candidate list, but it reveals whether Gemini killed weak drafts before output. If many weak drafts were killed and few candidates survived, judge the survivors strictly instead of demanding filler.
 - mandatory model battle: inspect `mandatory_model_battle`. From 2026-05-14 onward, OpenCode DeepSeek adversarial battle is required before a clean daily idea stage. If it is missing or failed, report the daily idea stage as partial and focus your review on rescue/mutation rather than acceptance.
+- DeepSeek role: treat DeepSeek as scientific adversary and rescue proposer. Look for novelty attack, baseline attack, mechanism attack, evaluation attack, scope attack, and rescue mutation. Do not read the battle as a simple winner-take-all vote.
 - anti-combination test: explicitly ask whether the idea is just A+B. If yes, action must be `rewrite`, `park`, or `reject_with_rescue`.
 - adversarial generation trace: inspect `naive_combination_version`, `strongest_baseline_kill_path`, and `post_kill_mutation`. The accepted mechanism must be the post-kill mutation. If the mutation only renames or slightly wraps the naive A+B version, action must be `rewrite` or `park`.
 - interface innovation: do not accept candidates that only add an input, swap a module, or place a residual around RL tokens. The candidate must change a boundary, information flow, controlled variable, or feedback loop.
@@ -1048,6 +1096,7 @@ Required judgment criteria:
 - not-a-paper condition: if what_would_make_this_not_a_paper is likely true, do not accept; preserve rescue signal instead.
 - rescue mutation: if the idea is not ready, preserve a concrete mutation path rather than only rejecting it.
 - claim compression: prefer candidates that can be written as one falsifiable paper claim, not a vague combination slogan.
+- Codex role: focus on execution reality, not aesthetic creativity ranking. Judge no-hardware pilot, data/simulation availability, reproducible metric, hidden leakage, baseline cost, minimal repo plan, and real-robot pilot complexity. A breakthrough idea cannot be rejected solely because it is hard.
 
 Top-Tier Bar:
 
@@ -1062,6 +1111,9 @@ Top-Tier Bar:
 - method-improvement bar: if contribution_shape is `method_improvement`, decide whether it is `mechanism_improving_method` or only `incremental_patch`.
 - novelty pressure: use only packet novelty_pressure / local similar-work evidence; do not claim confirmed novelty, and do not automatically demote a candidate solely because local pressure is high.
 - potential tier: S/A means high potential, not seed readiness. A candidate still needs readiness_tier, promotion_decision, baseline survival, and Codex judgment before `accept_for_user_review`.
+- portfolio balance: identify whether the greenhouse collapsed into one stress regime. A portfolio with too many safety/recovery patches should be called out even if individual candidates are plausible.
+- breakthrough preservation: if `risk_class=breakthrough`, do not reject solely for light evidence. Reject only for incoherence, non-falsifiability, obvious prior art, impossible experiment, or safety/ethics infeasibility.
+- execution bar: for every accept_for_user_review, name the no-hardware pilot, strongest feasible baseline, expected repo artifact, and smallest real-robot follow-up.
 
 Required output format, Markdown only, no frontmatter:
 
@@ -1551,6 +1603,10 @@ def _weekly_rubric_scores(item: dict[str, Any]) -> dict[str, int]:
         rescue += 1
     rescue = min(5, rescue)
     breakthrough = min(5, round((non_obvious + pathology + baseline + experiment + novelty_signal) / 5))
+    if _as_int(item.get("sharpness_score")) >= 16:
+        breakthrough = max(breakthrough, 4)
+    elif _as_int(item.get("sharpness_score")) >= 12:
+        breakthrough = max(breakthrough, 3)
     if any(marker in text for marker in GENERIC_COMBINATION_MARKERS) and non_obvious < 3:
         breakthrough = max(0, breakthrough - 1)
     return {
@@ -1602,6 +1658,9 @@ def _has_rerun_accept_bar(item: dict[str, Any], scores: dict[str, int]) -> bool:
 def _weekly_action(item: dict[str, Any], scores: dict[str, int]) -> str:
     tier = str(item.get("potential_tier", item.get("quality_tier", "")) or "")
     label = str(item.get("greenhouse_label", "") or "")
+    if str(item.get("risk_class", "")) == "breakthrough" and scores["non_obvious_mechanism"] >= 3:
+        if scores["killer_experiment_clarity"] >= 3 or str(item.get("minimum_no_hardware_pilot", "")).strip():
+            return "park_for_weekly_followup"
     decisive = (
         scores["breakthrough_potential"] >= 3
         and scores["baseline_survivability"] >= 3
@@ -1671,6 +1730,16 @@ def _weekly_candidate_review(item: dict[str, Any], ideas: list[dict[str, Any]]) 
         "support_score": item.get("support_score"),
         "originality_score": item.get("originality_score"),
         "engineering_value_score": item.get("engineering_value_score"),
+        "sharpness_score": item.get("sharpness_score"),
+        "evidence_execution_score": item.get("evidence_execution_score"),
+        "ordinaryness_penalty": item.get("ordinaryness_penalty"),
+        "origin_type": item.get("origin_type", ""),
+        "research_claim_type": item.get("research_claim_type", ""),
+        "bottleneck_type": item.get("bottleneck_type", ""),
+        "evidence_mode": item.get("evidence_mode", ""),
+        "risk_class": item.get("risk_class", ""),
+        "world_model_role": item.get("world_model_role", ""),
+        "portfolio_slot": item.get("portfolio_slot", ""),
         "idea_archetype": item.get("idea_archetype", ""),
         "contribution_shape": item.get("contribution_shape", ""),
         "weekly_action": action,
@@ -1763,6 +1832,65 @@ def _artifact_plan(item: dict[str, Any]) -> str:
     return "minimal_reproducible_pilot_script_plus_ablation_table"
 
 
+def _entropy(counter: Counter[str]) -> float:
+    total = sum(counter.values())
+    if total <= 0:
+        return 0.0
+    entropy = 0.0
+    for count in counter.values():
+        if count <= 0:
+            continue
+        probability = count / total
+        entropy -= probability * __import__("math").log2(probability)
+    return round(entropy, 3)
+
+
+def _weekly_genealogy_metrics(raw_candidates: list[dict[str, Any]], reviews: list[dict[str, Any]]) -> dict[str, Any]:
+    claim_counts = Counter(str(item.get("research_claim_type", "unclassified") or "unclassified") for item in raw_candidates)
+    origin_counts = Counter(str(item.get("origin_type", "unclassified") or "unclassified") for item in raw_candidates)
+    bottleneck_counts = Counter(str(item.get("bottleneck_type", "unclassified") or "unclassified") for item in raw_candidates)
+    rejection_reasons = Counter()
+    for item in reviews:
+        for note in item.get("adversarial_notes", []):
+            rejection_reasons[str(note)] += 1
+    survived_breakthroughs = [
+        item.get("title", "")
+        for item in reviews
+        if item.get("risk_class") == "breakthrough"
+        and item.get("weekly_action") in {"push_to_user_review", "rewrite_for_mechanism", "park_for_weekly_followup"}
+    ][:8]
+    benchmark_opportunities = [
+        item.get("title", "")
+        for item in reviews
+        if item.get("research_claim_type") in {"evaluation_benchmark", "data_curriculum"}
+        and item.get("weekly_action") != "reject_with_rescue"
+    ][:8]
+    repeated_bottlenecks = [
+        {"bottleneck_type": name, "count": count}
+        for name, count in bottleneck_counts.most_common()
+        if count >= 2 and name != "unclassified"
+    ][:8]
+    return {
+        "category_entropy": _entropy(claim_counts),
+        "origin_type_distribution": dict(origin_counts),
+        "research_claim_type_distribution": dict(claim_counts),
+        "bottleneck_type_distribution": dict(bottleneck_counts),
+        "rejection_reason_histogram": dict(rejection_reasons.most_common(12)),
+        "sharpness_vs_evidence_scatter": [
+            {
+                "title": item.get("title", ""),
+                "sharpness_score": item.get("sharpness_score"),
+                "evidence_execution_score": item.get("evidence_execution_score"),
+                "weekly_action": item.get("weekly_action"),
+            }
+            for item in reviews[:20]
+        ],
+        "survived_breakthrough_bets": survived_breakthroughs,
+        "benchmark_metric_opportunities": benchmark_opportunities,
+        "repeated_bottleneck_clusters": repeated_bottlenecks,
+    }
+
+
 def build_weekly_top_tier_packet(end_date: str, days: int) -> dict[str, Any]:
     payloads = _iter_greenhouse_payloads(end_date, days)
     ideas = _collect_ideas()
@@ -1791,6 +1919,11 @@ def build_weekly_top_tier_packet(end_date: str, days: int) -> dict[str, Any]:
     potential_counts = Counter(str(item.get("potential_tier", item.get("quality_tier", "unrated"))) for item in raw_candidates)
     readiness_counts = Counter(str(item.get("readiness_tier", _readiness_from_label(str(item.get("greenhouse_label", "unlabeled"))))) for item in raw_candidates)
     group_counts = Counter(str(item.get("candidate_group", "unclassified") or "unclassified") for item in raw_candidates)
+    origin_counts = Counter(str(item.get("origin_type", "unclassified") or "unclassified") for item in raw_candidates)
+    claim_counts = Counter(str(item.get("research_claim_type", "unclassified") or "unclassified") for item in raw_candidates)
+    risk_counts = Counter(str(item.get("risk_class", "unclassified") or "unclassified") for item in raw_candidates)
+    slot_counts = Counter(str(item.get("portfolio_slot", "unclassified") or "unclassified") for item in raw_candidates)
+    genealogy = _weekly_genealogy_metrics(raw_candidates, candidate_reviews)
     return {
         "end_date": end_date,
         "window_days": days,
@@ -1813,6 +1946,7 @@ def build_weekly_top_tier_packet(end_date: str, days: int) -> dict[str, Any]:
         "source_greenhouse_files": [{"run_date": item.get("run_date", ""), "path": item.get("path", "")} for item in payloads],
         "raw_gemini_candidates": raw_candidates,
         "candidate_reviews": candidate_reviews,
+        "genealogy_metrics": genealogy,
         "formal_seed_titles": [
             {"title": item.get("title", ""), "path": item.get("path", ""), "state": item.get("state", "")}
             for item in ideas
@@ -1822,6 +1956,7 @@ def build_weekly_top_tier_packet(end_date: str, days: int) -> dict[str, Any]:
             "source_files": len(payloads),
             "raw_candidates": len(raw_candidates),
             "promoted_to_seed": label_counts.get("promoted_to_seed", 0),
+            "speculative_preserve": label_counts.get("speculative_preserve", 0),
             "parked_for_weekly_review": label_counts.get("parked_for_weekly_review", 0),
             "rewrite_needed": label_counts.get("rewrite_needed", 0),
             "blocked_with_rescue_signal": label_counts.get("blocked_with_rescue_signal", 0),
@@ -1830,6 +1965,10 @@ def build_weekly_top_tier_packet(end_date: str, days: int) -> dict[str, Any]:
             "potential_tiers": dict(potential_counts),
             "readiness_tiers": dict(readiness_counts),
             "candidate_groups": dict(group_counts),
+            "origin_types": dict(origin_counts),
+            "research_claim_types": dict(claim_counts),
+            "risk_classes": dict(risk_counts),
+            "portfolio_slots": dict(slot_counts),
             "weekly_actions": dict(action_counts),
         },
     }
@@ -1850,6 +1989,7 @@ def _format_hits(hits: list[dict[str, Any]]) -> str:
 def render_weekly_top_tier_review(packet: dict[str, Any]) -> str:
     end_date = str(packet.get("end_date", date.today().isoformat()))
     counts = packet.get("counts", {})
+    genealogy = packet.get("genealogy_metrics", {})
     reviews = packet.get("candidate_reviews", [])
     status = "done" if reviews else "partial"
     frontmatter = render_frontmatter(
@@ -1870,6 +2010,11 @@ def render_weekly_top_tier_review(packet: dict[str, Any]) -> str:
         f"- source_greenhouse_files: {counts.get('source_files', 0)}",
         f"- raw_candidates: {counts.get('raw_candidates', 0)}",
         f"- candidate_groups: {json.dumps(counts.get('candidate_groups', {}), ensure_ascii=False, sort_keys=True)}",
+        f"- origin_types: {json.dumps(counts.get('origin_types', {}), ensure_ascii=False, sort_keys=True)}",
+        f"- research_claim_types: {json.dumps(counts.get('research_claim_types', {}), ensure_ascii=False, sort_keys=True)}",
+        f"- risk_classes: {json.dumps(counts.get('risk_classes', {}), ensure_ascii=False, sort_keys=True)}",
+        f"- portfolio_slots: {json.dumps(counts.get('portfolio_slots', {}), ensure_ascii=False, sort_keys=True)}",
+        f"- category_entropy: {genealogy.get('category_entropy', 0)}",
         f"- quality_tier_semantics: `{counts.get('quality_tier_semantics', 'potential_only_not_seed_readiness')}`",
         f"- potential_tiers: {json.dumps(counts.get('potential_tiers', {}), ensure_ascii=False, sort_keys=True)}",
         f"- readiness_tiers: {json.dumps(counts.get('readiness_tiers', {}), ensure_ascii=False, sort_keys=True)}",
@@ -1888,6 +2033,13 @@ def render_weekly_top_tier_review(packet: dict[str, Any]) -> str:
                 "",
                 f"- action: `{item.get('weekly_action')}`",
                 f"- candidate_group: `{item.get('candidate_group', 'unclassified')}`",
+                f"- origin_type: `{item.get('origin_type', '-')}`",
+                f"- research_claim_type: `{item.get('research_claim_type', '-')}`",
+                f"- bottleneck_type: `{item.get('bottleneck_type', '-')}`",
+                f"- evidence_mode: `{item.get('evidence_mode', '-')}`",
+                f"- risk_class: `{item.get('risk_class', '-')}`",
+                f"- world_model_role: `{item.get('world_model_role', '-')}`",
+                f"- portfolio_slot: `{item.get('portfolio_slot', '-')}`",
                 f"- idea_archetype: `{item.get('idea_archetype', '-')}`",
                 f"- greenhouse_label: `{item.get('greenhouse_label')}`",
                 f"- quality_tier: `{item.get('quality_tier')}`",
@@ -1896,7 +2048,7 @@ def render_weekly_top_tier_review(packet: dict[str, Any]) -> str:
                 f"- readiness_tier: `{item.get('readiness_tier', _readiness_from_label(str(item.get('greenhouse_label', 'unlabeled'))))}`",
                 f"- promotion_decision: `{item.get('promotion_decision', 'not_ready')}`",
                 f"- weekly_score: {item.get('weekly_score')}",
-                f"- score_split: support={item.get('support_score', '-')} originality={item.get('originality_score', '-')} engineering={item.get('engineering_value_score', '-')}",
+                f"- score_split: support={item.get('support_score', '-')} originality={item.get('originality_score', '-')} engineering={item.get('engineering_value_score', '-')} sharpness={item.get('sharpness_score', '-')} execution={item.get('evidence_execution_score', '-')} ordinaryness_penalty={item.get('ordinaryness_penalty', '-')}",
                 f"- rubric_scores: {json.dumps(item.get('weekly_rubric_scores', {}), ensure_ascii=False, sort_keys=True)}",
                 f"- adversarial_notes: {', '.join(item.get('adversarial_notes', []))}",
                 f"- non_obvious_claim: {item.get('non_obvious_claim') or 'needs rewrite'}",
@@ -1924,6 +2076,15 @@ def render_weekly_top_tier_review(packet: dict[str, Any]) -> str:
         lines.append(f"- nabc: {json.dumps(item.get('nabc', {}), ensure_ascii=False, sort_keys=True)}")
         lines.append(f"- artifact_or_reproducibility_plan: {item.get('artifact_or_reproducibility_plan')}")
         lines.append("")
+    lines.extend(["## Idea Genealogy Review", ""])
+    lines.append(f"- origin_type_distribution: {json.dumps(genealogy.get('origin_type_distribution', {}), ensure_ascii=False, sort_keys=True)}")
+    lines.append(f"- research_claim_type_distribution: {json.dumps(genealogy.get('research_claim_type_distribution', {}), ensure_ascii=False, sort_keys=True)}")
+    lines.append(f"- bottleneck_type_distribution: {json.dumps(genealogy.get('bottleneck_type_distribution', {}), ensure_ascii=False, sort_keys=True)}")
+    lines.append(f"- rejection_reason_histogram: {json.dumps(genealogy.get('rejection_reason_histogram', {}), ensure_ascii=False, sort_keys=True)}")
+    lines.append(f"- survived_breakthrough_bets: {json.dumps(genealogy.get('survived_breakthrough_bets', []), ensure_ascii=False)}")
+    lines.append(f"- benchmark_metric_opportunities: {json.dumps(genealogy.get('benchmark_metric_opportunities', []), ensure_ascii=False)}")
+    lines.append(f"- repeated_bottleneck_clusters: {json.dumps(genealogy.get('repeated_bottleneck_clusters', []), ensure_ascii=False, sort_keys=True)}")
+    lines.append("")
     lines.extend(["## Novelty Pressure", ""])
     pressure_items = [
         item for item in reviews

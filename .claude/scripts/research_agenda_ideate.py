@@ -4,7 +4,6 @@ from __future__ import annotations
 import argparse
 import json
 import itertools
-import os
 import re
 import sqlite3
 import subprocess
@@ -34,7 +33,6 @@ from research_agenda_common import (
 MIN_MECHANISM_SOURCES = 5
 MIN_STRONG_MECHANISM_SOURCES = 2
 PLACEHOLDER_TOKENS = ["todo", "tbd", "need_to_verify", "seed_pending_review", "cross-gap between"]
-DANGEROUS_CLAUDE_ENV = "LOCAL_FIRST_VAULT_ALLOW_DANGEROUS_CLAUDE"
 STRONG_CLAIM_TYPES = {"paper_summary", "problem", "limitation", "open_question", "method"}
 SUPPORT_CLAIM_TYPES = {"metric", "sensor", "robot_setup", "task", "evidence_note"}
 SOURCE_AVAILABILITY_PATTERNS = [
@@ -86,6 +84,13 @@ DIVERGENT_REQUIRED_FIELDS = [
 ]
 DIVERGENT_QUALITY_FIELDS = [
     "candidate_group",
+    "origin_type",
+    "research_claim_type",
+    "bottleneck_type",
+    "evidence_mode",
+    "risk_class",
+    "world_model_role",
+    "portfolio_slot",
     "idea_archetype",
     "contribution_shape",
     "physical_failure_scene",
@@ -133,6 +138,9 @@ DIVERGENT_QUALITY_FIELDS = [
     "two_week_sprint",
     "promotion_reason",
     "rescue_signal",
+    "sharpness_score",
+    "evidence_execution_score",
+    "ordinaryness_penalty",
 ]
 QUALITY_RUBRIC_WEIGHTS = {
     "mechanism_nonobviousness": 20,
@@ -367,10 +375,91 @@ VALID_IDEA_ARCHETYPES = {
     "control_policy_mechanism",
     "instrumentation_or_sensing",
 }
+VALID_ORIGIN_TYPES = {
+    "physical_scene",
+    "engineering_bottleneck",
+    "scientific_deadlock",
+    "representation_mismatch",
+    "objective_mismatch",
+    "evaluation_blind_spot",
+    "paper_assumption_contradiction",
+}
+VALID_RESEARCH_CLAIM_TYPES = {
+    "representation",
+    "interface_boundary",
+    "objective_optimization",
+    "data_curriculum",
+    "evaluation_benchmark",
+    "sensing_observability",
+    "world_model_simulation",
+    "embodiment_control_codesign",
+    "continual_transfer",
+    "safety_recovery",
+}
+VALID_BOTTLENECK_TYPES = {
+    "partial_observability",
+    "contact_topology",
+    "action_multimodality",
+    "distribution_shift",
+    "evaluation_blindness",
+    "data_sparsity_bias",
+    "latency_real_time",
+    "irreversibility_safety",
+    "objective_mismatch",
+    "system_boundary_mismatch",
+}
+VALID_EVIDENCE_MODES = {
+    "offline_replay",
+    "simulation",
+    "public_dataset",
+    "small_real_robot_test",
+    "human_study_teleop",
+    "synthetic_benchmark",
+    "negative_result_diagnostic",
+}
+VALID_RISK_CLASSES = {"grounded", "mechanism", "breakthrough"}
+VALID_WORLD_MODEL_ROLES = {
+    "none",
+    "counterfactual_evaluator",
+    "latent_state_teacher",
+    "planning_critic_or_shield",
+    "data_generator_or_curriculum",
+    "digital_twin_calibration_loop",
+    "evaluation_surrogate",
+}
+NON_FAILURE_ORIGIN_TYPES = {
+    "scientific_deadlock",
+    "representation_mismatch",
+    "objective_mismatch",
+    "evaluation_blind_spot",
+    "paper_assumption_contradiction",
+}
+SCIENTIFIC_DEADLOCK_MARKERS = [
+    "assumption",
+    "latent",
+    "representation",
+    "objective",
+    "loss",
+    "metric",
+    "benchmark",
+    "evaluation",
+    "boundary",
+    "distribution",
+    "transfer",
+    "generalization",
+    "deadlock",
+    "blind spot",
+    "unmodeled",
+]
 
 
 def _taxonomy_token(value: Any) -> str:
     return str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+
+
+def _taxonomy_or_default(value: Any, valid: set[str], default: str) -> str:
+    token = _taxonomy_token(value)
+    return token if token in valid else default
 
 
 def _normalize_idea_archetype(axis: dict[str, Any]) -> str:
@@ -413,6 +502,152 @@ def _normalize_idea_archetype(axis: dict[str, Any]) -> str:
     if shape in {"architecture", "system"}:
         return "closed_loop_system"
     return ""
+
+
+def _axis_text(axis: dict[str, Any]) -> str:
+    return " ".join(str(axis.get(field, "")) for field in [*DIVERGENT_REQUIRED_FIELDS, *DIVERGENT_QUALITY_FIELDS]).lower()
+
+
+def _infer_research_claim_type(axis: dict[str, Any]) -> str:
+    token = _taxonomy_token(axis.get("research_claim_type"))
+    if token in VALID_RESEARCH_CLAIM_TYPES:
+        return token
+    text = _axis_text(axis)
+    shape = _taxonomy_token(axis.get("contribution_shape"))
+    archetype = _taxonomy_token(axis.get("idea_archetype"))
+    if "world model" in text or "digital twin" in text or "simulator" in text:
+        return "world_model_simulation"
+    if shape in {"evaluation_protocol", "benchmark"} or archetype == "evaluation_metric":
+        return "evaluation_benchmark"
+    if shape == "dataset" or archetype == "data_or_labeling_strategy":
+        return "data_curriculum"
+    if archetype == "instrumentation_or_sensing" or any(token in text for token in ["tactile", "sensor", "observability", "calibration"]):
+        return "sensing_observability"
+    if archetype == "representation_shift" or any(token in text for token in ["latent", "representation", "belief state", "contact topology"]):
+        return "representation"
+    if archetype == "interface_invention" or shape == "control_interface" or any(token in text for token in ["boundary", "contract", "interface"]):
+        return "interface_boundary"
+    if any(token in text for token in ["loss", "objective", "optimization", "critic training"]):
+        return "objective_optimization"
+    if any(token in text for token in ["transfer", "continual", "lifelong", "cross-embodiment", "cross task"]):
+        return "continual_transfer"
+    if any(token in text for token in ["embodiment", "controller", "co-design", "latency"]):
+        return "embodiment_control_codesign"
+    if archetype == "failure_model" or any(token in text for token in ["recovery", "shield", "safety", "irreversible"]):
+        return "safety_recovery"
+    return "interface_boundary"
+
+
+def _infer_origin_type(axis: dict[str, Any], claim_type: str) -> str:
+    token = _taxonomy_token(axis.get("origin_type"))
+    if token in VALID_ORIGIN_TYPES:
+        return token
+    text = _axis_text(axis)
+    if claim_type == "evaluation_benchmark" or any(token in text for token in ["metric blind", "evaluation blind", "success rate hides", "benchmark gap"]):
+        return "evaluation_blind_spot"
+    if claim_type == "objective_optimization" or any(token in text for token in ["loss", "objective mismatch", "optimization space"]):
+        return "objective_mismatch"
+    if claim_type == "representation" or any(token in text for token in ["latent mismatch", "representation mismatch", "unmodeled latent"]):
+        return "representation_mismatch"
+    if any(token in text for token in ["assumption conflict", "contradiction", "paper assumption"]):
+        return "paper_assumption_contradiction"
+    if any(token in text for token in ["deadlock", "sota", "cannot tell", "science question"]):
+        return "scientific_deadlock"
+    if any(token in text for token in ["occlusion", "slip", "collision", "drift", "failure", "contact"]):
+        return "physical_scene"
+    return "engineering_bottleneck"
+
+
+def _infer_bottleneck_type(axis: dict[str, Any]) -> str:
+    token = _taxonomy_token(axis.get("bottleneck_type"))
+    if token in VALID_BOTTLENECK_TYPES:
+        return token
+    text = _axis_text(axis)
+    if any(token in text for token in ["occlusion", "hidden", "partial observ", "unobserv"]):
+        return "partial_observability"
+    if any(token in text for token in ["contact", "topology", "rope", "cable", "dlo", "tangle"]):
+        return "contact_topology"
+    if any(token in text for token in ["multimodal", "bimanual", "coordination", "diffusion"]):
+        return "action_multimodality"
+    if any(token in text for token in ["shift", "sim-to-real", "cross-task", "cross embodiment", "transfer"]):
+        return "distribution_shift"
+    if any(token in text for token in ["metric", "benchmark", "evaluation", "success rate"]):
+        return "evaluation_blindness"
+    if any(token in text for token in ["data", "demo", "rare", "bias", "curriculum"]):
+        return "data_sparsity_bias"
+    if any(token in text for token in ["latency", "real-time", "rate", "milliseconds"]):
+        return "latency_real_time"
+    if any(token in text for token in ["irreversible", "unsafe", "safety", "damage", "recovery"]):
+        return "irreversibility_safety"
+    if any(token in text for token in ["loss", "objective", "critic", "optimization"]):
+        return "objective_mismatch"
+    return "system_boundary_mismatch"
+
+
+def _infer_evidence_mode(axis: dict[str, Any]) -> str:
+    token = _taxonomy_token(axis.get("evidence_mode"))
+    if token in VALID_EVIDENCE_MODES:
+        return token
+    text = _axis_text(axis)
+    if any(token in text for token in ["offline", "replay", "logs", "log replay"]):
+        return "offline_replay"
+    if any(token in text for token in ["simulation", "simulator", "toy dynamics", "synthetic"]):
+        return "simulation"
+    if any(token in text for token in ["public dataset", "open x", "droid", "bridge", "dataset"]):
+        return "public_dataset"
+    if any(token in text for token in ["teleop", "human study", "operator"]):
+        return "human_study_teleop"
+    if any(token in text for token in ["negative result", "diagnostic", "falsify"]):
+        return "negative_result_diagnostic"
+    if any(token in text for token in ["benchmark", "stress suite", "synthetic benchmark"]):
+        return "synthetic_benchmark"
+    return "small_real_robot_test"
+
+
+def _infer_risk_class(axis: dict[str, Any], claim_type: str, origin_type: str) -> str:
+    token = _taxonomy_token(axis.get("risk_class"))
+    if token in VALID_RISK_CLASSES:
+        return token
+    text = _axis_text(axis)
+    if any(token in text for token in ["breakthrough", "anti-roadmap", "field-changing", "new research line", "violates"]):
+        return "breakthrough"
+    if claim_type in {"representation", "interface_boundary", "objective_optimization", "world_model_simulation"} or origin_type in NON_FAILURE_ORIGIN_TYPES:
+        return "mechanism"
+    return "grounded"
+
+
+def _infer_world_model_role(axis: dict[str, Any]) -> str:
+    token = _taxonomy_token(axis.get("world_model_role"))
+    if token in VALID_WORLD_MODEL_ROLES:
+        return token
+    text = _axis_text(axis)
+    if not any(token in text for token in ["world model", "digital twin", "simulator", "simulation", "generative video"]):
+        return "none"
+    if any(token in text for token in ["counterfactual", "rank", "evaluate", "evaluator"]):
+        return "counterfactual_evaluator"
+    if any(token in text for token in ["teacher", "distill", "latent state", "belief"]):
+        return "latent_state_teacher"
+    if any(token in text for token in ["critic", "shield", "reject", "deny", "safety"]):
+        return "planning_critic_or_shield"
+    if any(token in text for token in ["data", "curriculum", "rare transition", "generate"]):
+        return "data_generator_or_curriculum"
+    if any(token in text for token in ["calibration", "friction", "material", "delay"]):
+        return "digital_twin_calibration_loop"
+    return "evaluation_surrogate"
+
+
+def _portfolio_slot(claim_type: str, risk_class: str) -> str:
+    if risk_class == "breakthrough":
+        return "breakthrough_anti_roadmap"
+    if claim_type in {"representation", "interface_boundary", "objective_optimization"}:
+        return "mechanism"
+    if claim_type in {"data_curriculum", "evaluation_benchmark"}:
+        return "measurement_data"
+    if claim_type == "world_model_simulation":
+        return "world_model"
+    if claim_type in {"continual_transfer", "embodiment_control_codesign"}:
+        return "transfer_embodiment"
+    return "grounded_engineering"
 
 
 AXES = [
@@ -942,6 +1177,13 @@ def _normalize_mechanism_axis(axis: dict[str, Any]) -> dict[str, Any]:
     domains = _as_string_list(axis.get("domains"))
     keywords = _as_string_list(axis.get("keywords"))
     strong_keywords = _as_string_list(axis.get("strong_keywords")) or keywords
+    claim_type = _infer_research_claim_type(axis)
+    origin_type = _infer_origin_type(axis, claim_type)
+    bottleneck_type = _infer_bottleneck_type(axis)
+    evidence_mode = _infer_evidence_mode(axis)
+    risk_class = _infer_risk_class(axis, claim_type, origin_type)
+    world_model_role = _infer_world_model_role(axis)
+    portfolio_slot = _as_str(axis.get("portfolio_slot", "")).strip() or _portfolio_slot(claim_type, risk_class)
     return {
         "generation_rule": axis.get("generation_rule", "mechanism_cluster"),
         "generator_status": axis.get("generator_status", "template"),
@@ -958,6 +1200,13 @@ def _normalize_mechanism_axis(axis: dict[str, Any]) -> dict[str, Any]:
         "hypothesis": _as_str(axis.get("hypothesis", axis.get("working_hypothesis", ""))).strip(),
         "evidence_links": _as_str(axis.get("evidence_links", "")).strip(),
         "speculative_jump": _as_str(axis.get("speculative_jump", "")).strip(),
+        "origin_type": origin_type,
+        "research_claim_type": claim_type,
+        "bottleneck_type": bottleneck_type,
+        "evidence_mode": evidence_mode,
+        "risk_class": risk_class,
+        "world_model_role": world_model_role,
+        "portfolio_slot": portfolio_slot,
         "idea_archetype": _as_str(axis.get("idea_archetype", "")).strip(),
         "contribution_shape": _as_str(axis.get("contribution_shape", "")).strip(),
         "physical_failure_scene": _as_str(axis.get("physical_failure_scene", "")).strip(),
@@ -1021,6 +1270,9 @@ def _normalize_mechanism_axis(axis: dict[str, Any]) -> dict[str, Any]:
         "engineering_value_score": axis.get("engineering_value_score"),
         "research_quality_score": axis.get("research_quality_score"),
         "research_quality_components": axis.get("research_quality_components", {}),
+        "sharpness_score": axis.get("sharpness_score"),
+        "evidence_execution_score": axis.get("evidence_execution_score"),
+        "ordinaryness_penalty": axis.get("ordinaryness_penalty"),
         "quality_tier": axis.get("quality_tier"),
         "potential_score": axis.get("potential_score", axis.get("research_quality_score")),
         "potential_tier": axis.get("potential_tier", axis.get("quality_tier")),
@@ -1065,12 +1317,33 @@ def _gate_mechanism_candidate(axis: dict[str, Any], evidence: list[dict[str, Any
     if "reject" not in axis.get("falsification", "").lower() and "if " not in axis.get("falsification", "").lower():
         issues.append("falsification_not_concrete")
     if axis.get("generation_rule") == "gemini_divergent":
+        origin_type = str(axis.get("origin_type", "engineering_bottleneck"))
+        claim_type = str(axis.get("research_claim_type", ""))
         physical_scene = axis.get("physical_failure_scene", "").strip().lower()
-        if len(physical_scene) < 80 or _component_from_markers(physical_scene, PHYSICAL_SCENE_MARKERS, 6, min_hits_for_full=2) < 3:
-            issues.append("physical_failure_scene_missing_or_abstract")
+        if origin_type in {"physical_scene", "engineering_bottleneck"}:
+            if len(physical_scene) < 80 or _component_from_markers(physical_scene, PHYSICAL_SCENE_MARKERS, 6, min_hits_for_full=2) < 3:
+                issues.append("physical_failure_scene_missing_or_abstract")
+        elif len(physical_scene) < 80 or _component_from_markers(physical_scene, SCIENTIFIC_DEADLOCK_MARKERS, 6, min_hits_for_full=2) < 3:
+            issues.append("non_physical_origin_not_grounded")
         pathology = axis.get("engineering_pathology", "").strip().lower()
-        if len(pathology) < 80 or _component_from_markers(pathology, ENGINEERING_PATHOLOGY_MARKERS, 6, min_hits_for_full=2) < 3:
+        pathology_markers = ENGINEERING_PATHOLOGY_MARKERS if origin_type in {"physical_scene", "engineering_bottleneck"} else SCIENTIFIC_DEADLOCK_MARKERS
+        if len(pathology) < 80 or _component_from_markers(pathology, pathology_markers, 6, min_hits_for_full=2) < 3:
             issues.append("engineering_pathology_missing_or_abstract")
+        if claim_type == "world_model_simulation":
+            if str(axis.get("world_model_role", "none")) == "none":
+                issues.append("world_model_role_missing")
+            wm_text = " ".join(
+                axis.get(field, "").strip().lower()
+                for field in [
+                    "mechanism",
+                    "interface_innovation",
+                    "killer_experiment",
+                    "what_would_make_this_not_a_paper",
+                    "falsification_discriminates_mechanism",
+                ]
+            )
+            if not any(marker in wm_text for marker in ["latent", "invariant", "decision boundary", "hallucination", "critic", "teacher", "calibration"]):
+                issues.append("world_model_role_under_specified")
         non_obvious = axis.get("non_obvious_claim", "").strip().lower()
         if len(non_obvious) < 45 or not any(marker in non_obvious for marker in ["instead", "not ", "only", "before", "because", "unlike", "rather than", "interface"]):
             issues.append("non_obvious_claim_missing_or_weak")
@@ -1143,7 +1416,11 @@ RESCUEABLE_GATE_ISSUES = {
     "baseline_not_concrete",
     "falsification_not_concrete",
     "physical_failure_scene_missing_or_abstract",
+    "non_physical_origin_not_grounded",
     "engineering_pathology_missing_or_abstract",
+    "world_model_role_missing",
+    "world_model_role_under_specified",
+    "portfolio_failure_recovery_cap_exceeded",
     "non_obvious_claim_missing_or_weak",
     "naive_combination_version_missing",
     "strongest_baseline_kill_path_missing",
@@ -1217,6 +1494,13 @@ def _jsonable_candidate(axis: dict[str, Any], evidence: list[dict[str, Any]], re
         "hypothesis": axis.get("hypothesis"),
         "evidence_links": axis.get("evidence_links"),
         "speculative_jump": axis.get("speculative_jump"),
+        "origin_type": axis.get("origin_type"),
+        "research_claim_type": axis.get("research_claim_type"),
+        "bottleneck_type": axis.get("bottleneck_type"),
+        "evidence_mode": axis.get("evidence_mode"),
+        "risk_class": axis.get("risk_class"),
+        "world_model_role": axis.get("world_model_role"),
+        "portfolio_slot": axis.get("portfolio_slot"),
         "idea_archetype": axis.get("idea_archetype"),
         "contribution_shape": axis.get("contribution_shape"),
         "physical_failure_scene": axis.get("physical_failure_scene"),
@@ -1276,6 +1560,9 @@ def _jsonable_candidate(axis: dict[str, Any], evidence: list[dict[str, Any]], re
         "support_score": axis.get("support_score"),
         "originality_score": axis.get("originality_score"),
         "engineering_value_score": axis.get("engineering_value_score"),
+        "sharpness_score": axis.get("sharpness_score"),
+        "evidence_execution_score": axis.get("evidence_execution_score"),
+        "ordinaryness_penalty": axis.get("ordinaryness_penalty"),
         "novelty_pressure": axis.get("novelty_pressure", {}),
         "novelty_hits": axis.get("novelty_hits", []),
         "evidence_support_score": axis.get("evidence_support_score"),
@@ -1555,23 +1842,36 @@ def _render_divergent_prompt(
             "Return JSON only with key candidates.",
             "Top-level JSON may contain only candidates and rejected_drafts_summary.",
             f"Try to return {min_candidates}-{limit} surviving candidates, but survival quality overrides count. Return fewer candidates if the internal survival filter kills weak drafts.",
-            "Each candidate needs exactly these fields: title, candidate_group, problem, physical_failure_scene, engineering_pathology, mechanism, interface, interface_innovation, optimization_space, loss_placement, decoder_boundary, manifold_safety, hypothesis, evidence_links, speculative_jump, idea_archetype, contribution_shape, non_obvious_claim, naive_combination_version, strongest_baseline_kill_path, post_kill_mutation, anti_combination_test, top_tier_rationale, engineering_loop, method_improvement_claim, original_method_failure, replacement_or_coupled_technique, why_improvement_not_patch, why_now, strongest_baseline, baseline_failure_mode, killer_experiment, novelty_risk, reviewer_kill_shot, rescue_mutation, claim_compression, online_or_offline_mode, minimum_no_hardware_pilot, baseline_kill_table, what_would_make_this_not_a_paper, reviewer_pre_mortem, falsification_discriminates_mechanism, lab_fit, hardware_assumptions, negative_claim_boundary, version_evolution_story, core_insight, pipeline_steps, defense_patches, baseline_matrix, metric_suite, risk_assumptions, competition_map, two_week_sprint, promotion_reason, rescue_signal, nearest_pressure, pilot, baselines, metrics, falsification.",
+            "Each candidate needs exactly these fields: title, candidate_group, origin_type, research_claim_type, bottleneck_type, evidence_mode, risk_class, world_model_role, portfolio_slot, problem, physical_failure_scene, engineering_pathology, mechanism, interface, interface_innovation, optimization_space, loss_placement, decoder_boundary, manifold_safety, hypothesis, evidence_links, speculative_jump, idea_archetype, contribution_shape, non_obvious_claim, naive_combination_version, strongest_baseline_kill_path, post_kill_mutation, anti_combination_test, top_tier_rationale, engineering_loop, method_improvement_claim, original_method_failure, replacement_or_coupled_technique, why_improvement_not_patch, why_now, strongest_baseline, baseline_failure_mode, killer_experiment, novelty_risk, reviewer_kill_shot, rescue_mutation, claim_compression, online_or_offline_mode, minimum_no_hardware_pilot, baseline_kill_table, what_would_make_this_not_a_paper, reviewer_pre_mortem, falsification_discriminates_mechanism, lab_fit, hardware_assumptions, negative_claim_boundary, version_evolution_story, core_insight, pipeline_steps, defense_patches, baseline_matrix, metric_suite, risk_assumptions, competition_map, two_week_sprint, promotion_reason, rescue_signal, nearest_pressure, pilot, baselines, metrics, falsification.",
             "candidate_group must be either evidence_bound or wild_engineering.",
+            "origin_type must be one of physical_scene, engineering_bottleneck, scientific_deadlock, representation_mismatch, objective_mismatch, evaluation_blind_spot, paper_assumption_contradiction.",
+            "research_claim_type must be one of representation, interface_boundary, objective_optimization, data_curriculum, evaluation_benchmark, sensing_observability, world_model_simulation, embodiment_control_codesign, continual_transfer, safety_recovery.",
+            "bottleneck_type must be one of partial_observability, contact_topology, action_multimodality, distribution_shift, evaluation_blindness, data_sparsity_bias, latency_real_time, irreversibility_safety, objective_mismatch, system_boundary_mismatch.",
+            "evidence_mode must be one of offline_replay, simulation, public_dataset, small_real_robot_test, human_study_teleop, synthetic_benchmark, negative_result_diagnostic.",
+            "risk_class must be one of grounded, mechanism, breakthrough. world_model_role must be none unless research_claim_type is world_model_simulation.",
             "Generate both groups: about half evidence_bound candidates tightly grounded in today's papers, and about half wild_engineering candidates that make a larger engineering, architecture, control-interface, or evaluation leap while still naming evidence and falsification.",
-            "Think in this order: real robot pathology -> causal mechanism/interface -> why obvious baselines fail -> killer experiment -> only then title.",
+            "Before generating candidates, privately extract paper-level research primitives: central claim, hidden assumption, strongest baseline, unmodeled latent variable, evaluation blind spot, interface boundary, transfer failure, reusable primitive. Do not output this primitive table unless it is embedded compactly in candidate fields.",
+            "Before final candidates, privately build a tension map: assumption conflicts, evaluation gaps, missing latent variables, interface boundary mismatches, strong baselines that kill naive drafts, benchmark opportunities, representation/action-abstraction opportunities, and anti-roadmap bets.",
+            "Generate 16 private drafts across grounded, mechanism, measurement/data, world-model, transfer/embodiment, and breakthrough passes, then output only the best 6-8 as a balanced portfolio.",
+            "Treat the daily set as a research portfolio, not a single theme. Target this mix: 2 grounded engineering ideas, 2 mechanism ideas, 1 measurement/data idea, 1 world-model idea, 1 transfer/embodiment idea, and 1 breakthrough/anti-roadmap bet. Overlap is allowed, but portfolio_slot must say the primary slot.",
+            "Hard cap: no more than 2 candidates may start from visible physical failure/recovery. At least 3 candidates must use origin_type scientific_deadlock, representation_mismatch, objective_mismatch, evaluation_blind_spot, or paper_assumption_contradiction.",
+            "A breakthrough bet is high-risk and high-upside: it should change a representation, memory/world-model abstraction, planning interface, optimization objective, dataset/evaluation paradigm, or robot-system contract. It must not be just another safety shield, failure detector, or recovery trigger.",
+            "Think in this order: concrete robot episode or experimental bottleneck -> causal mechanism/interface -> why obvious baselines fail -> killer experiment -> only then title.",
             "Before writing the final mechanism, do an adversarial generation protocol inside each candidate: naive_combination_version -> strongest_baseline_kill_path -> post_kill_mutation. The final mechanism must be the post-kill mutation, not the naive A+B version.",
             "Use cross-cluster recombination, engineering-system imagination, and mechanism-level reasoning. You may make a speculative jump if you label it explicitly and make it testable.",
-            "Prefer real robotics pathologies such as occlusion, latency, contact instability, calibration drift, depth noise, viewpoint failure, reset cost, and sim-to-real mismatch.",
+            "Use real robotics pathologies such as occlusion, latency, contact instability, calibration drift, depth noise, viewpoint failure, reset cost, and sim-to-real mismatch as grounding, but also deliberately explore non-recovery contributions: memory composition, planning abstraction, representation learning, loss placement, dataset design, benchmark design, and evaluation metrics.",
             "For evidence_bound candidates, connect at least two newly_read_evidence sources with local evidence from the matrix clusters.",
             "For wild_engineering candidates, at least one newly_read_evidence source is enough if the engineering_pathology is sharp and the speculative_jump is explicit.",
             "At least two wild_engineering candidates should deliberately avoid RL Token / VLA / Sim-to-Real unless those topics are truly central in today's evidence.",
             "Use examples like active sensing with a wrist camera, bimanual viewpoint servoing, tactile topology recovery, wrench envelopes, latent force recovery, or hidden-stiffness evaluation only as inspiration; do not copy them.",
             "For any active-viewpoint, active-vision, wrist-camera orbit, or view servo idea, the strongest baseline is usually classical next-best-view, information gain, occupancy/geometry-driven active vision, or a simple depth-discontinuity heuristic; do not use end-to-end RL active vision as the strongest baseline unless those classical baselines are explicitly inapplicable.",
             "Do not produce 'add module X to model Y', 'combine A with B', 'use LLM to reason over Z', or 'stack SOTA methods' unless the anti_combination_test explains the new causal interface that makes it nontrivial.",
-            "Do not start from 'paper A has method X, paper B has interface Y'. Start from a robot failure episode first; only then decide which papers provide tools or pressure.",
+            "Do not start from 'paper A has method X, paper B has interface Y'. Start from a robot episode, experimental bottleneck, or scientific deadlock first; only then decide which papers provide tools or pressure.",
             "For RL-token candidates, do not assume the token space supports prediction, planning, memory, or correction. First state what information is preserved, what is compressed away, and how errors or off-manifold deltas would be detected.",
-            "The physical_failure_scene field must describe a concrete robot episode in physical terms: sensors, object, contact/occlusion/latency/noise, timing or geometry, and how the robot actually fails. Do not write an abstract algorithmic gap here.",
-            "The engineering_pathology field must name the concrete robot-system failure or bottleneck that makes the idea worth testing.",
+            "The physical_failure_scene field must describe a concrete robot episode in physical terms: sensors, object, contact/occlusion/latency/noise, timing or geometry, and how the robot actually fails or where the experimental bottleneck appears. For breakthrough candidates, this may be a concrete limitation in memory, planning, representation, data, or evaluation, not necessarily a terminal safety failure.",
+            "The engineering_pathology field must name the concrete robot-system failure, bottleneck, measurement gap, scaling limit, or evaluation deadlock that makes the idea worth testing.",
+            "If origin_type is not physical_scene, physical_failure_scene must still describe the concrete experimental bottleneck, scientific deadlock, representation mismatch, objective mismatch, evaluation blind spot, or paper-assumption contradiction. Do not invent a visible robot failure just to fill the field.",
+            "World-model candidates are legal only when world_model_role is one of counterfactual_evaluator, latent_state_teacher, planning_critic_or_shield, data_generator_or_curriculum, digital_twin_calibration_loop, or evaluation_surrogate. They must state predicted state, physical invariant, decision boundary, hallucination test, strongest baseline kill, no-hardware pilot, and minimal real-world test.",
             "The interface_innovation field must say what changes at the VLA/RL-token/control interface. A new input, residual, or module is insufficient unless the boundary, information flow, and controlled variable are changed.",
             "The optimization_space field must choose where learning/control happens: latent/token/action/observation/critic/evaluation space, and why that space is the right one.",
             "The loss_placement field must say where the objective is applied and what it avoids; for RL-token ideas, discuss whether the loss is pre-decoder, post-decoder, critic-only, actor-side, or latent-to-latent.",
@@ -1586,6 +1886,7 @@ def _render_divergent_prompt(
             "The anti_combination_test field must answer: if a skeptical reviewer says this is just A+B, what is the precise mechanism or experiment that proves otherwise?",
             "The top_tier_rationale field must say which contribution shape could survive an RSS/CoRL/ICRA/RA-L style review and what would still make it fail.",
             "The engineering_loop field must describe the sense-plan-act-learn/evaluate loop or robot-system loop affected by the idea.",
+            "For breakthrough candidates, top_tier_rationale must explicitly say why the idea could open a new research line rather than merely improve reliability; reviewer_pre_mortem must still be ruthless.",
             "For method_improvement candidates, method_improvement_claim must state the original method being improved, original_method_failure must name the failure mechanism, replacement_or_coupled_technique must state the new technique or coupling, and why_improvement_not_patch must explain why this is not a trivial engineering patch.",
             "Do not reject a candidate merely because it improves an existing method. Method improvement can be strong if it changes a failure mechanism, interface, constraint, feedback loop, or evaluation signal under a ruthless baseline.",
             "The strongest_baseline field must name the baseline most likely to kill the idea.",
@@ -1647,8 +1948,12 @@ def _render_divergent_prompt(
             "bar": "doctoral research seed, not daily idea dump",
             "reject_simple_combinations": True,
             "prefer": [
+                "research_claim_type diversity over topic-name diversity",
+                "ideas that change representation, interface, objective, metric, data distribution, or system boundary",
                 "new causal mechanism",
                 "new control or sensing interface",
+                "1-2 high-risk breakthrough bets that could open a research line",
+                "portfolio diversity across representation, memory/world-models, planning, objectives, evaluation, and engineering systems",
                 "new evaluation protocol that exposes hidden failure",
                 "method improvement that changes a failure mechanism or interface",
                 "engineering pathology with a closed-loop system fix",
@@ -1660,11 +1965,14 @@ def _render_divergent_prompt(
                 "lab-fit advantage using Franka, bimanual setup, wrist cameras, FlexiTac, or DLO/cable tasks",
             ],
             "avoid": [
+                "failure/recovery mode collapse",
+                "visible physical failure as the origin for every candidate",
                 "incremental loss addition",
                 "parameter tweak without a failure mechanism",
                 "generic VLA/RL-token framing",
                 "LLM reasoner as a magic box",
                 "benchmark without a new failure metric",
+                "world model future prediction without latent state, invariant, decision boundary, and hallucination test",
                 "idea that cannot be killed by a pilot",
                 "online robot system when an offline replay, benchmark, or analysis-tool version is the correct first paper",
                 "S/A tier assignment when the strongest reviewer objection already kills the paper claim",
@@ -1700,9 +2008,11 @@ def _render_quality_rescue_prompt(
             str(item.get("title", "")) for item in previous_candidates if isinstance(item, dict)
         ],
         "manual_style_reference": [
-            "Start from a robot failure that would annoy an experimentalist.",
+            "Start from a robot failure, experimental bottleneck, or scientific deadlock that would annoy an experimentalist.",
+            "Use origin_type to prevent mode collapse: physical_scene is allowed, but representation_mismatch, objective_mismatch, evaluation_blind_spot, and paper_assumption_contradiction are equally valid origins.",
+            "Classify every candidate by research_claim_type, bottleneck_type, evidence_mode, risk_class, and portfolio_slot before writing the title.",
             "Invent or alter the sensing/control/evaluation interface, not just the model name.",
-            "Describe the physical failure episode before naming any source paper.",
+            "Describe the concrete robot episode or bottleneck before naming any source paper.",
             "Choose the optimization space and loss placement before choosing the network module.",
             "For RL-token ideas, decide whether the signal enters latent/token/action/critic space and whether it crosses the decoder boundary.",
             "Reject A+B ideas unless the interface_innovation and falsification_discriminates_mechanism fields prove a new causal mechanism.",
@@ -1717,6 +2027,7 @@ def _render_quality_rescue_prompt(
             "Choose online_control only when online execution is the actual contribution; otherwise use offline_replay, benchmark, dataset, or analysis_tool.",
             "Compress the claim into one falsifiable sentence.",
             "Keep risky ideas alive via rescue_mutation instead of deleting them.",
+            "World-model ideas must state their role, predicted state, physical invariant, decision boundary, and hallucination test; otherwise kill or rewrite them.",
         ],
     }
     packet["rules"] = [
@@ -1728,6 +2039,9 @@ def _render_quality_rescue_prompt(
         [
             f"Return {min_raw_candidates}-{raw_limit} new candidates; do not repeat previous_candidate_titles.",
             "At least half should be wild_engineering unless the evidence truly forbids it.",
+            "Keep the portfolio diverse: preserve 2-3 failure/recovery ideas if they are strong, but include 1-2 breakthrough bets that change representation, memory/world-model abstraction, planning interface, objective/loss placement, dataset design, or evaluation paradigm.",
+            "Hard cap the rescue pass: at most 2 visible physical failure/recovery candidates; at least 3 candidates must originate from scientific deadlock, representation mismatch, objective mismatch, evaluation blind spot, or paper-assumption contradiction.",
+            "A breakthrough bet must not be another failure detector or recovery shield with stronger language; it needs a different research object or contribution shape.",
             "Avoid the automatic-run failure mode: generic RL Token, generic VLA, generic Sim-to-Real, shallow module replacement, shallow extra-input critic, and simple A+B stacking.",
             "Avoid the newly observed failure mode: calling an uncertainty mask plus camera orbit an interface innovation while ignoring classical next-best-view and information-gain active vision.",
             "Do not assign S/A unless physical_failure_scene, interface_innovation, optimization_space, falsification_discriminates_mechanism, and lab_fit are all specific.",
@@ -1750,16 +2064,10 @@ def _extract_json_object(text: str) -> dict[str, Any] | None:
 
 
 def _refine_with_claude(
-    candidates: list[tuple[int, dict[str, Any], list[dict[str, Any]], int]],
-    *,
-    timeout: int,
-    allow_dangerous_claude: bool = False,
+    candidates: list[tuple[int, dict[str, Any], list[dict[str, Any]], int]], *, timeout: int
 ) -> tuple[list[dict[str, Any]], str]:
     prompt = _render_generation_prompt(candidates)
-    command = ["claude"]
-    if allow_dangerous_claude or os.environ.get(DANGEROUS_CLAUDE_ENV, "").lower() in {"1", "true", "yes", "on"}:
-        command.append("--dangerously-skip-permissions")
-    command.extend(["-p", prompt])
+    command = ["claude", "--dangerously-skip-permissions", "-p", prompt]
     try:
         proc = subprocess.run(command, text=True, encoding="utf-8", errors="replace", capture_output=True, timeout=timeout)
     except FileNotFoundError:
@@ -2023,12 +2331,25 @@ def _quality_label_from_tier(tier: str, issues: list[str], promoted: bool) -> st
     return "parked_for_weekly_review"
 
 
+def _is_visible_failure_recovery_candidate(axis: dict[str, Any]) -> bool:
+    text = _axis_text(axis)
+    return (
+        str(axis.get("origin_type", "")) == "physical_scene"
+        and (
+            str(axis.get("research_claim_type", "")) == "safety_recovery"
+            or any(marker in text for marker in ["failure", "recovery", "shield", "irreversible", "unsafe"])
+        )
+    )
+
+
 QUALITY_TIER_SEMANTICS = "potential_only_not_seed_readiness"
 
 
 def _readiness_tier_from_label(label: str) -> str:
     if label == "promoted_to_seed":
         return "seed_ready"
+    if label == "speculative_preserve":
+        return "speculative_weekly_review"
     if label == "rewrite_needed":
         return "rewrite_required"
     if label == "parked_for_weekly_review":
@@ -2041,6 +2362,8 @@ def _readiness_tier_from_label(label: str) -> str:
 def _promotion_decision_from_label(label: str) -> str:
     if label == "promoted_to_seed":
         return "promote_to_seed"
+    if label == "speculative_preserve":
+        return "preserve_for_weekly_breakthrough_review"
     if label == "rewrite_needed":
         return "rewrite_before_seed"
     if label == "parked_for_weekly_review":
@@ -2061,14 +2384,82 @@ def _annotate_readiness(item: dict[str, Any], tier: str | None = None) -> dict[s
     return item
 
 
-def _quality_sort_key(item: tuple[int, dict[str, Any], list[dict[str, Any]], int]) -> tuple[int, int, int, int]:
+def _quality_sort_key(item: tuple[int, dict[str, Any], list[dict[str, Any]], int]) -> tuple[int, int, int, int, int, int]:
     score, axis, evidence, recent = item
     return (
         int(axis.get("research_quality_score", 0)),
+        int(axis.get("sharpness_score", 0)),
+        int(axis.get("evidence_execution_score", 0)),
         _strong_source_count(evidence, axis),
         recent,
         score,
     )
+
+
+def _sharpness_score(axis: dict[str, Any]) -> int:
+    claim_type = str(axis.get("research_claim_type", ""))
+    risk_class = str(axis.get("risk_class", ""))
+    text = _axis_text(axis)
+    score = 0
+    if len(str(axis.get("claim_compression", "")).strip()) >= 50 or len(str(axis.get("non_obvious_claim", "")).strip()) >= 80:
+        score += 4
+    if claim_type in {"representation", "interface_boundary", "objective_optimization", "evaluation_benchmark", "world_model_simulation"}:
+        score += 5
+    elif claim_type in {"data_curriculum", "sensing_observability", "embodiment_control_codesign"}:
+        score += 3
+    if str(axis.get("origin_type", "")) in NON_FAILURE_ORIGIN_TYPES:
+        score += 3
+    if any(marker in text for marker in ["blind spot", "deadlock", "assumption", "boundary", "metric", "evaluation", "unmodeled"]):
+        score += 1
+    if risk_class == "breakthrough" or any(marker in text for marker in ["new research line", "field", "paradigm", "anti-roadmap"]):
+        score += 4
+    if len(str(axis.get("anti_combination_test", "")).strip()) >= 80 and len(str(axis.get("post_kill_mutation", "")).strip()) >= 80:
+        score += 3
+    return min(20, score)
+
+
+def _evidence_execution_score(axis: dict[str, Any], evidence: list[dict[str, Any]], recent: int) -> int:
+    score = 0
+    if len(str(axis.get("strongest_baseline", "")).strip()) >= 35 or len(str(axis.get("strongest_baseline_kill_path", "")).strip()) >= 80:
+        score += 4
+    if len(str(axis.get("killer_experiment", "")).strip()) >= 60 or len(str(axis.get("falsification_discriminates_mechanism", "")).strip()) >= 80:
+        score += 4
+    if len(str(axis.get("minimum_no_hardware_pilot", "")).strip()) >= 60:
+        score += 3
+    if any(marker in str(axis.get("online_or_offline_mode", "")).lower() for marker in ["offline", "benchmark", "dataset", "analysis_tool", "hybrid"]):
+        score += 1
+    if len(str(axis.get("lab_fit", "")).strip()) >= 70 and len(str(axis.get("hardware_assumptions", "")).strip()) >= 50:
+        score += 3
+    if _source_count(evidence) >= 3:
+        score += 2
+    if recent >= 1:
+        score += 1
+    if len(str(axis.get("rescue_mutation", "")).strip()) >= 60 or len(str(axis.get("post_kill_mutation", "")).strip()) >= 80:
+        score += 3
+    return min(20, score)
+
+
+def _ordinaryness_penalty(axis: dict[str, Any]) -> int:
+    text = _axis_text(axis)
+    penalty = 0
+    if any(marker in text for marker in ["combine", "integrate", "plug", "add module", "wrapper"]) and len(str(axis.get("anti_combination_test", "")).strip()) < 100:
+        penalty -= 5
+    if str(axis.get("world_model_role", "none")) != "none":
+        wm_support = " ".join(
+            str(axis.get(field, ""))
+            for field in ["mechanism", "interface_innovation", "killer_experiment", "what_would_make_this_not_a_paper"]
+        ).lower()
+        if not any(marker in wm_support for marker in ["latent", "invariant", "decision boundary", "hallucination", "critic", "teacher", "calibration"]):
+            penalty -= 4
+    if any(marker in text for marker in ["add tactile", "add camera", "add sensor"]) and "observability" not in text:
+        penalty -= 4
+    if str(axis.get("research_claim_type", "")) == "evaluation_benchmark" and not any(marker in text for marker in ["blind spot", "metric", "stress", "protocol"]):
+        penalty -= 4
+    if str(axis.get("research_claim_type", "")) == "safety_recovery" and not any(marker in text for marker in ["risk model", "control boundary", "contract", "irreversible"]):
+        penalty -= 3
+    if any(marker in text for marker in ["fine-tune vla", "finetune vla", "fine tune vla"]) and not any(marker in text for marker in ["objective", "interface", "distribution", "metric"]):
+        penalty -= 5
+    return max(-10, penalty)
 
 
 def _apply_research_quality(
@@ -2239,9 +2630,16 @@ def _apply_research_quality(
         + components["baseline_killer"] * 2
         + components["experimentability"] * 3,
     )
-    quality_score = sum(components.values())
+    sharpness = _sharpness_score(axis)
+    evidence_execution = _evidence_execution_score(axis, evidence, recent)
+    ordinaryness = _ordinaryness_penalty(axis)
+    quality_score = max(0, sum(components.values()) + ordinaryness)
     if str(axis.get("candidate_group", "")) == "wild_engineering":
         quality_score = min(100, quality_score + 4)
+    if sharpness < 8:
+        quality_score = min(quality_score, 81)
+    if evidence_execution < 6 and sharpness >= 16:
+        quality_score = min(quality_score, 67)
     tier = _quality_tier(quality_score)
     return {
         **axis,
@@ -2249,6 +2647,9 @@ def _apply_research_quality(
         "support_score": support_score,
         "originality_score": originality_score,
         "engineering_value_score": engineering_value_score,
+        "sharpness_score": sharpness,
+        "evidence_execution_score": evidence_execution,
+        "ordinaryness_penalty": ordinaryness,
         "research_quality_score": quality_score,
         "research_quality_components": components,
         "quality_tier": tier,
@@ -2462,7 +2863,6 @@ def generate_seed_report(
     min_raw_candidates: int = DEFAULT_MIN_RAW_CANDIDATES,
     gemini_model: str = "gemini-3.1-pro-preview",
     run_date: str | None = None,
-    allow_dangerous_claude: bool = False,
 ) -> dict[str, Any]:
     records = _merge_focus_track_records(records)
     focus = {key.upper() for key in focus_keys}
@@ -2489,6 +2889,7 @@ def generate_seed_report(
             "quality_rubric_weights": QUALITY_RUBRIC_WEIGHTS,
             "workflow_contracts": WORKFLOW_CONTRACTS,
             "generator_metadata": {},
+            "portfolio_summary": {},
             "free_divergence": free_divergence,
             "free_divergence_start_date": FREE_DIVERGENCE_START_DATE,
             "gemini_model": gemini_model,
@@ -2500,11 +2901,7 @@ def generate_seed_report(
     else:
         candidates = _mechanism_candidates(records, focus_keys=focus)
         if generator == "claude" and candidates:
-            refined, generator_status = _refine_with_claude(
-                candidates,
-                timeout=generator_timeout,
-                allow_dangerous_claude=allow_dangerous_claude,
-            )
+            refined, generator_status = _refine_with_claude(candidates, timeout=generator_timeout)
             if not refined:
                 return base_report(generator_status)
             by_cluster = {axis.get("cluster_id"): (score, axis, evidence, recent) for score, axis, evidence, recent in candidates}
@@ -2556,14 +2953,35 @@ def generate_seed_report(
             candidates = []
 
     preserve_greenhouse = generator == "gemini-divergent"
+    visible_failure_recovery_seen = 0
     for score, axis, evidence, recent in candidates:
         axis = _normalize_mechanism_axis(axis) if mode == "mechanism" else axis
         issues = _gate_mechanism_candidate(axis, evidence, recent, focus_keys=focus) if mode == "mechanism" else []
+        if preserve_greenhouse and _is_visible_failure_recovery_candidate(axis):
+            visible_failure_recovery_seen += 1
+            if visible_failure_recovery_seen > 2:
+                issues.append("portfolio_failure_recovery_cap_exceeded")
         item = _jsonable_candidate(axis, evidence, recent, issues=issues)
         item["score"] = score
         item["evidence_support_score"] = axis.get("evidence_support_score", score)
         tier = str(axis.get("quality_tier", "B" if generator != "gemini-divergent" else "C"))
+        speculative_preserve = (
+            preserve_greenhouse
+            and int(axis.get("sharpness_score") or 0) >= 16
+            and int(axis.get("evidence_execution_score") or 0) < 6
+        )
         if issues:
+            if speculative_preserve and all(
+                issue.startswith("too_few_") or issue in {"no_recent_focus_evidence", "portfolio_failure_recovery_cap_exceeded"}
+                for issue in issues
+            ):
+                item["park_reason"] = "speculative_preserve_high_sharpness_low_evidence"
+                item["greenhouse_label"] = "speculative_preserve"
+                _annotate_readiness(item, tier)
+                if preserve_greenhouse:
+                    greenhouse.append(item)
+                parked.append(item)
+                continue
             if _is_rescueable_gate_failure(issues):
                 item["park_reason"] = _rescue_reason(issues)
                 item["greenhouse_label"] = _quality_label_from_tier(tier, issues, promoted=False)
@@ -2579,6 +2997,8 @@ def generate_seed_report(
             blocked.append(item)
             continue
         eligible_for_seed = generator != "gemini-divergent" or tier in QUALITY_PROMOTION_TIERS
+        if preserve_greenhouse and int(axis.get("sharpness_score") or 0) < 8:
+            eligible_for_seed = False
         if eligible_for_seed and len(high_quality) < limit:
             axis["greenhouse_label"] = _quality_label_from_tier(tier, [], promoted=True)
             _annotate_readiness(axis, tier)
@@ -2588,6 +3008,14 @@ def generate_seed_report(
             if preserve_greenhouse:
                 greenhouse.append(item)
         else:
+            if speculative_preserve:
+                item["park_reason"] = "speculative_preserve_high_sharpness_low_evidence"
+                item["greenhouse_label"] = "speculative_preserve"
+                _annotate_readiness(item, tier)
+                if preserve_greenhouse:
+                    greenhouse.append(item)
+                parked.append(item)
+                continue
             if not eligible_for_seed:
                 item["park_reason"] = f"quality_tier_{tier}_not_promotable"
             else:
@@ -2606,6 +3034,7 @@ def generate_seed_report(
             reason = "no_top_tier_seed_today"
         else:
             reason = "no_candidate_passed_mechanism_gate" if blocked else "no_evidence_cluster_met_minimum_threshold"
+    portfolio_summary = _portfolio_summary(greenhouse)
     return {
         "mode": mode,
         "generator": generator,
@@ -2619,6 +3048,7 @@ def generate_seed_report(
         "quality_rubric_weights": QUALITY_RUBRIC_WEIGHTS,
         "workflow_contracts": WORKFLOW_CONTRACTS,
         "generator_metadata": generator_metadata,
+        "portfolio_summary": portfolio_summary,
         "free_divergence": free_divergence,
         "free_divergence_start_date": FREE_DIVERGENCE_START_DATE,
         "gemini_model": gemini_model,
@@ -2701,7 +3131,17 @@ def _render_idea(axis: dict[str, Any], evidence: list[dict[str, Any]], *, recent
         f'readiness_tier: "{axis.get("readiness_tier", "untriaged")}"',
         f'promotion_decision: "{axis.get("promotion_decision", "not_ready")}"',
         f'candidate_group: "{axis.get("candidate_group", "")}"',
+        f'origin_type: "{axis.get("origin_type", "")}"',
+        f'research_claim_type: "{axis.get("research_claim_type", "")}"',
+        f'bottleneck_type: "{axis.get("bottleneck_type", "")}"',
+        f'evidence_mode: "{axis.get("evidence_mode", "")}"',
+        f'risk_class: "{axis.get("risk_class", "")}"',
+        f'world_model_role: "{axis.get("world_model_role", "")}"',
+        f'portfolio_slot: "{axis.get("portfolio_slot", "")}"',
         f"research_quality_score: {axis.get('research_quality_score', 0)}",
+        f"sharpness_score: {axis.get('sharpness_score', 0)}",
+        f"evidence_execution_score: {axis.get('evidence_execution_score', 0)}",
+        f"ordinaryness_penalty: {axis.get('ordinaryness_penalty', 0)}",
         f"evidence_support_score: {axis.get('evidence_support_score', 0)}",
         f"support_score: {axis.get('support_score', 0)}",
         f"originality_score: {axis.get('originality_score', 0)}",
@@ -2719,7 +3159,17 @@ def _render_idea(axis: dict[str, Any], evidence: list[dict[str, Any]], *, recent
         f"- readiness_tier: {axis.get('readiness_tier', 'untriaged')}",
         f"- promotion_decision: {axis.get('promotion_decision', 'not_ready')}",
         f"- candidate_group: {axis.get('candidate_group', '-')}",
+        f"- origin_type: {axis.get('origin_type', '-')}",
+        f"- research_claim_type: {axis.get('research_claim_type', '-')}",
+        f"- bottleneck_type: {axis.get('bottleneck_type', '-')}",
+        f"- evidence_mode: {axis.get('evidence_mode', '-')}",
+        f"- risk_class: {axis.get('risk_class', '-')}",
+        f"- world_model_role: {axis.get('world_model_role', '-')}",
+        f"- portfolio_slot: {axis.get('portfolio_slot', '-')}",
         f"- research_quality_score: {axis.get('research_quality_score', 0)}",
+        f"- sharpness_score: {axis.get('sharpness_score', 0)}",
+        f"- evidence_execution_score: {axis.get('evidence_execution_score', 0)}",
+        f"- ordinaryness_penalty: {axis.get('ordinaryness_penalty', 0)}",
         f"- evidence_support_score: {axis.get('evidence_support_score', 0)}",
         f"- support_score: {axis.get('support_score', 0)}",
         f"- originality_score: {axis.get('originality_score', 0)}",
@@ -2971,9 +3421,45 @@ def _greenhouse_counts(items: list[dict[str, Any]]) -> Counter[str]:
     return Counter(str(item.get("greenhouse_label", "unlabeled")) for item in items)
 
 
+def _portfolio_summary(items: list[dict[str, Any]]) -> dict[str, Any]:
+    origin_counts = Counter(str(item.get("origin_type", "unclassified") or "unclassified") for item in items)
+    claim_counts = Counter(str(item.get("research_claim_type", "unclassified") or "unclassified") for item in items)
+    bottleneck_counts = Counter(str(item.get("bottleneck_type", "unclassified") or "unclassified") for item in items)
+    evidence_mode_counts = Counter(str(item.get("evidence_mode", "unclassified") or "unclassified") for item in items)
+    risk_counts = Counter(str(item.get("risk_class", "unclassified") or "unclassified") for item in items)
+    slot_counts = Counter(str(item.get("portfolio_slot", "unclassified") or "unclassified") for item in items)
+    world_model_roles = Counter(str(item.get("world_model_role", "none") or "none") for item in items)
+    visible_failure_recovery = sum(1 for item in items if _is_visible_failure_recovery_candidate(item))
+    non_failure_origins = sum(1 for item in items if str(item.get("origin_type", "")) in NON_FAILURE_ORIGIN_TYPES)
+    warnings: list[str] = []
+    if visible_failure_recovery > 2:
+        warnings.append(f"visible_failure_recovery_cap_exceeded:{visible_failure_recovery}")
+    if non_failure_origins < 3 and items:
+        warnings.append(f"non_failure_origin_under_target:{non_failure_origins}")
+    if not any(str(item.get("risk_class", "")) == "breakthrough" for item in items) and items:
+        warnings.append("missing_breakthrough_bet")
+    if not any(str(item.get("research_claim_type", "")) == "world_model_simulation" for item in items) and items:
+        warnings.append("missing_world_model_slot")
+    if not any(str(item.get("research_claim_type", "")) in {"data_curriculum", "evaluation_benchmark"} for item in items) and items:
+        warnings.append("missing_measurement_data_slot")
+    return {
+        "origin_type_counts": dict(origin_counts),
+        "research_claim_type_counts": dict(claim_counts),
+        "bottleneck_type_counts": dict(bottleneck_counts),
+        "evidence_mode_counts": dict(evidence_mode_counts),
+        "risk_class_counts": dict(risk_counts),
+        "portfolio_slot_counts": dict(slot_counts),
+        "world_model_role_counts": dict(world_model_roles),
+        "visible_failure_recovery_candidates": visible_failure_recovery,
+        "non_failure_origin_candidates": non_failure_origins,
+        "warnings": warnings,
+    }
+
+
 def render_greenhouse_markdown(run_date: str, report: dict[str, Any]) -> str:
     items = report.get("greenhouse", [])
     counts = _greenhouse_counts(items)
+    portfolio = report.get("portfolio_summary") or _portfolio_summary(items)
     lines = [
         f"# Gemini Divergent Greenhouse - {run_date}",
         "",
@@ -2988,6 +3474,7 @@ def render_greenhouse_markdown(run_date: str, report: dict[str, Any]) -> str:
         f"- evidence_bound_candidates: {sum(1 for item in items if item.get('candidate_group') == 'evidence_bound')}",
         f"- wild_engineering_candidates: {sum(1 for item in items if item.get('candidate_group') == 'wild_engineering')}",
         f"- promoted_to_seed: {counts.get('promoted_to_seed', 0)}",
+        f"- speculative_preserve: {counts.get('speculative_preserve', 0)}",
         f"- parked_for_weekly_review: {counts.get('parked_for_weekly_review', 0)}",
         f"- rewrite_needed: {counts.get('rewrite_needed', 0)}",
         f"- blocked_with_rescue_signal: {counts.get('blocked_with_rescue_signal', 0)}",
@@ -2995,12 +3482,14 @@ def render_greenhouse_markdown(run_date: str, report: dict[str, Any]) -> str:
         f"- readiness_seed_ready: {sum(1 for item in items if item.get('readiness_tier') == 'seed_ready')}",
         f"- readiness_rewrite_required: {sum(1 for item in items if item.get('readiness_tier') == 'rewrite_required')}",
         f"- readiness_weekly_review: {sum(1 for item in items if item.get('readiness_tier') == 'weekly_review')}",
+        f"- readiness_speculative_weekly_review: {sum(1 for item in items if item.get('readiness_tier') == 'speculative_weekly_review')}",
         f"- readiness_rescue_only: {sum(1 for item in items if item.get('readiness_tier') == 'rescue_only')}",
         f"- quality_tier_S: {sum(1 for item in items if item.get('quality_tier') == 'S')}",
         f"- quality_tier_A: {sum(1 for item in items if item.get('quality_tier') == 'A')}",
         f"- quality_tier_B: {sum(1 for item in items if item.get('quality_tier') == 'B')}",
         f"- quality_tier_C: {sum(1 for item in items if item.get('quality_tier') == 'C')}",
         f"- quality_rubric_weights: {json.dumps(report.get('quality_rubric_weights', QUALITY_RUBRIC_WEIGHTS), ensure_ascii=False, sort_keys=True)}",
+        f"- portfolio_summary: {json.dumps(portfolio, ensure_ascii=False, sort_keys=True)}",
         "",
         "## Source Filter",
         "",
@@ -3039,10 +3528,20 @@ def render_greenhouse_markdown(run_date: str, report: dict[str, Any]) -> str:
                 "",
                 f"- greenhouse_label: {item.get('greenhouse_label', 'unlabeled')}",
                 f"- candidate_group: {item.get('candidate_group', '-')}",
+                f"- origin_type: {item.get('origin_type', '-')}",
+                f"- research_claim_type: {item.get('research_claim_type', '-')}",
+                f"- bottleneck_type: {item.get('bottleneck_type', '-')}",
+                f"- evidence_mode: {item.get('evidence_mode', '-')}",
+                f"- risk_class: {item.get('risk_class', '-')}",
+                f"- world_model_role: {item.get('world_model_role', '-')}",
+                f"- portfolio_slot: {item.get('portfolio_slot', '-')}",
                 f"- evidence_support_score: {item.get('evidence_support_score', item.get('score', '-'))}",
                 f"- support_score: {item.get('support_score', '-')}",
                 f"- originality_score: {item.get('originality_score', '-')}",
                 f"- engineering_value_score: {item.get('engineering_value_score', '-')}",
+                f"- sharpness_score: {item.get('sharpness_score', '-')}",
+                f"- evidence_execution_score: {item.get('evidence_execution_score', '-')}",
+                f"- ordinaryness_penalty: {item.get('ordinaryness_penalty', '-')}",
                 f"- research_quality_score: {item.get('research_quality_score', '-')}",
                 f"- research_quality_components: {json.dumps(item.get('research_quality_components', {}), ensure_ascii=False, sort_keys=True)}",
                 f"- quality_tier: {item.get('quality_tier', '-')}",
@@ -3093,6 +3592,7 @@ def render_greenhouse_markdown(run_date: str, report: dict[str, Any]) -> str:
             "",
             "- Greenhouse candidates preserve creative raw ideas for review.",
             "- Only promoted_to_seed candidates are written to `idea_bank/seed/`.",
+            "- speculative_preserve means high-sharpness / low-evidence candidates are kept for weekly breakthrough review, not accepted.",
             "- Parked/rewrite/blocked candidates are not paper claims and are not deleted.",
         ]
     )
@@ -3114,6 +3614,7 @@ def write_greenhouse_archive(report: dict[str, Any], *, run_date: str, dry_run: 
         "quality_rubric_weights": report.get("quality_rubric_weights", QUALITY_RUBRIC_WEIGHTS),
         "workflow_contracts": report.get("workflow_contracts", WORKFLOW_CONTRACTS),
         "generator_metadata": report.get("generator_metadata", {}),
+        "portfolio_summary": report.get("portfolio_summary", _portfolio_summary(report.get("greenhouse", []))),
         "raw_gemini_candidates": report.get("greenhouse", []),
         "high_quality_seed_candidates": [
             _jsonable_candidate(axis, evidence, recent)
@@ -3144,6 +3645,7 @@ def _report_json(report: dict[str, Any]) -> dict[str, Any]:
         "quality_rubric_weights": report.get("quality_rubric_weights", QUALITY_RUBRIC_WEIGHTS),
         "workflow_contracts": report.get("workflow_contracts", WORKFLOW_CONTRACTS),
         "generator_metadata": report.get("generator_metadata", {}),
+        "portfolio_summary": report.get("portfolio_summary", _portfolio_summary(report.get("greenhouse", []))),
         "free_divergence": report.get("free_divergence", False),
         "free_divergence_start_date": report.get("free_divergence_start_date", FREE_DIVERGENCE_START_DATE),
         "gemini_model": report.get("gemini_model", ""),
@@ -3163,11 +3665,6 @@ def main() -> int:
     parser.add_argument("--generator", choices=["template", "claude", "gemini-cli", "gemini-divergent", "none"], default="template")
     parser.add_argument("--generator-timeout", type=int, default=1200)
     parser.add_argument("--gemini-model", default="gemini-3.1-pro-preview")
-    parser.add_argument(
-        "--allow-dangerous-claude",
-        action="store_true",
-        help=f"Opt in to passing --dangerously-skip-permissions to Claude. The public default is safe; env {DANGEROUS_CLAUDE_ENV}=1 also opts in.",
-    )
     parser.add_argument("--run-date", default=today())
     parser.add_argument("--include-dynamic", action="store_true", help="Deprecated: also generate generic cross-domain gap candidates in curated mode.")
     parser.add_argument("--dry-run", action="store_true")
@@ -3190,7 +3687,6 @@ def main() -> int:
         min_raw_candidates=args.min_raw_candidates,
         gemini_model=args.gemini_model,
         run_date=args.run_date,
-        allow_dangerous_claude=args.allow_dangerous_claude,
     )
     if args.json:
         safe_print(json.dumps(_report_json(report), ensure_ascii=False, indent=2))

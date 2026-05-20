@@ -63,10 +63,28 @@ def _group_counts(seed_report: dict[str, Any]) -> Counter[str]:
     return Counter(str(item.get("candidate_group", "unclassified") or "unclassified") for item in seed_report.get("greenhouse", []))
 
 
+def _portfolio_summary(seed_report: dict[str, Any]) -> dict[str, Any]:
+    summary = seed_report.get("portfolio_summary")
+    if isinstance(summary, dict) and summary:
+        return summary
+    greenhouse = seed_report.get("greenhouse", [])
+    return {
+        "origin_type_counts": dict(Counter(str(item.get("origin_type", "unclassified") or "unclassified") for item in greenhouse)),
+        "research_claim_type_counts": dict(Counter(str(item.get("research_claim_type", "unclassified") or "unclassified") for item in greenhouse)),
+        "bottleneck_type_counts": dict(Counter(str(item.get("bottleneck_type", "unclassified") or "unclassified") for item in greenhouse)),
+        "evidence_mode_counts": dict(Counter(str(item.get("evidence_mode", "unclassified") or "unclassified") for item in greenhouse)),
+        "risk_class_counts": dict(Counter(str(item.get("risk_class", "unclassified") or "unclassified") for item in greenhouse)),
+        "portfolio_slot_counts": dict(Counter(str(item.get("portfolio_slot", "unclassified") or "unclassified") for item in greenhouse)),
+        "warnings": [],
+    }
+
+
 def _readiness_tier(item: dict[str, Any]) -> str:
     label = str(item.get("greenhouse_label", "unlabeled"))
     if label == "promoted_to_seed":
         return str(item.get("readiness_tier", "seed_ready"))
+    if label == "speculative_preserve":
+        return str(item.get("readiness_tier", "speculative_weekly_review"))
     if label == "rewrite_needed":
         return str(item.get("readiness_tier", "rewrite_required"))
     if label == "parked_for_weekly_review":
@@ -326,6 +344,7 @@ def render_dashboard(records: list[dict[str, Any]], seed_count: int, seed_report
     generated_experiment_ready = sum(1 for item in maturity if item.get("has_generated_experiment_plan"))
     seed_report = seed_report or {}
     group_counts = _group_counts(seed_report)
+    portfolio = _portfolio_summary(seed_report)
     lines = [
         render_frontmatter(
             "Research Agenda Dashboard",
@@ -369,6 +388,12 @@ def render_dashboard(records: list[dict[str, Any]], seed_count: int, seed_report
             f"- free_divergence_start_date: {seed_report.get('free_divergence_start_date', '-')}",
             f"- candidate_group_evidence_bound: {group_counts.get('evidence_bound', 0)}",
             f"- candidate_group_wild_engineering: {group_counts.get('wild_engineering', 0)}",
+            f"- portfolio_origin_type_counts: {json.dumps(portfolio.get('origin_type_counts', {}), ensure_ascii=False, sort_keys=True)}",
+            f"- portfolio_research_claim_type_counts: {json.dumps(portfolio.get('research_claim_type_counts', {}), ensure_ascii=False, sort_keys=True)}",
+            f"- portfolio_bottleneck_type_counts: {json.dumps(portfolio.get('bottleneck_type_counts', {}), ensure_ascii=False, sort_keys=True)}",
+            f"- portfolio_risk_class_counts: {json.dumps(portfolio.get('risk_class_counts', {}), ensure_ascii=False, sort_keys=True)}",
+            f"- portfolio_slot_counts: {json.dumps(portfolio.get('portfolio_slot_counts', {}), ensure_ascii=False, sort_keys=True)}",
+            f"- portfolio_warnings: {json.dumps(portfolio.get('warnings', []), ensure_ascii=False)}",
             f"- parked_candidates: {len(seed_report.get('parked', []))}",
             f"- blocked_candidates: {len(seed_report.get('blocked', []))}",
             f"- quality_tier_S: {sum(1 for item in seed_report.get('greenhouse', []) if item.get('quality_tier') == 'S')}",
@@ -383,6 +408,7 @@ def render_dashboard(records: list[dict[str, Any]], seed_count: int, seed_report
             f"- readiness_seed_ready: {sum(1 for item in seed_report.get('greenhouse', []) if _readiness_tier(item) == 'seed_ready')}",
             f"- readiness_rewrite_required: {sum(1 for item in seed_report.get('greenhouse', []) if _readiness_tier(item) == 'rewrite_required')}",
             f"- readiness_weekly_review: {sum(1 for item in seed_report.get('greenhouse', []) if _readiness_tier(item) == 'weekly_review')}",
+            f"- readiness_speculative_weekly_review: {sum(1 for item in seed_report.get('greenhouse', []) if _readiness_tier(item) == 'speculative_weekly_review')}",
             f"- readiness_rescue_only: {sum(1 for item in seed_report.get('greenhouse', []) if _readiness_tier(item) == 'rescue_only')}",
             f"- no_high_quality_seed_today_reason: {seed_report.get('no_high_quality_seed_today_reason') or '-'}",
             "",
@@ -434,6 +460,7 @@ def render_daily_delta(
     update_scope = "full_matrix_rebuild" if rebuild_all else "daily_focus_update"
     evidence_heading = "Rebuilt Evidence Sample" if rebuild_all else "Newly Read Evidence"
     group_counts = _group_counts(seed_report)
+    portfolio = _portfolio_summary(seed_report)
     snippet_coverage = sum(1 for record in new_records if record.get("source_snippet"))
     mechanism_graph_paths = mechanism_graph_paths or []
     sidecar_warnings = sidecar_warnings or []
@@ -468,6 +495,13 @@ def render_daily_delta(
         f"- raw_gemini_candidates: {len(seed_report.get('greenhouse', []))}",
         f"- candidate_group_evidence_bound: {group_counts.get('evidence_bound', 0)}",
         f"- candidate_group_wild_engineering: {group_counts.get('wild_engineering', 0)}",
+        f"- portfolio_origin_type_counts: {json.dumps(portfolio.get('origin_type_counts', {}), ensure_ascii=False, sort_keys=True)}",
+        f"- portfolio_research_claim_type_counts: {json.dumps(portfolio.get('research_claim_type_counts', {}), ensure_ascii=False, sort_keys=True)}",
+        f"- portfolio_bottleneck_type_counts: {json.dumps(portfolio.get('bottleneck_type_counts', {}), ensure_ascii=False, sort_keys=True)}",
+        f"- portfolio_evidence_mode_counts: {json.dumps(portfolio.get('evidence_mode_counts', {}), ensure_ascii=False, sort_keys=True)}",
+        f"- portfolio_risk_class_counts: {json.dumps(portfolio.get('risk_class_counts', {}), ensure_ascii=False, sort_keys=True)}",
+        f"- portfolio_slot_counts: {json.dumps(portfolio.get('portfolio_slot_counts', {}), ensure_ascii=False, sort_keys=True)}",
+        f"- portfolio_warnings: {json.dumps(portfolio.get('warnings', []), ensure_ascii=False)}",
         f"- high_quality_seed_candidates: {len(seeds)}",
         f"- parked_candidates: {len(seed_report.get('parked', []))}",
         f"- blocked_candidates: {len(seed_report.get('blocked', []))}",
@@ -483,6 +517,7 @@ def render_daily_delta(
         f"- readiness_seed_ready: {sum(1 for item in seed_report.get('greenhouse', []) if _readiness_tier(item) == 'seed_ready')}",
         f"- readiness_rewrite_required: {sum(1 for item in seed_report.get('greenhouse', []) if _readiness_tier(item) == 'rewrite_required')}",
         f"- readiness_weekly_review: {sum(1 for item in seed_report.get('greenhouse', []) if _readiness_tier(item) == 'weekly_review')}",
+        f"- readiness_speculative_weekly_review: {sum(1 for item in seed_report.get('greenhouse', []) if _readiness_tier(item) == 'speculative_weekly_review')}",
         f"- readiness_rescue_only: {sum(1 for item in seed_report.get('greenhouse', []) if _readiness_tier(item) == 'rescue_only')}",
         f"- no_high_quality_seed_today_reason: {seed_report.get('no_high_quality_seed_today_reason') or '-'}",
         f"- mandatory_model_battle_status: {battle_result.get('status', 'not_run')}",
@@ -520,6 +555,11 @@ def render_daily_delta(
         lines.append(
             f"- {item.get('title')}: label={item.get('greenhouse_label', 'unlabeled')} "
             f"group={item.get('candidate_group', '-')} "
+            f"origin={item.get('origin_type', '-')} "
+            f"claim={item.get('research_claim_type', '-')} "
+            f"bottleneck={item.get('bottleneck_type', '-')} "
+            f"risk={item.get('risk_class', '-')} "
+            f"slot={item.get('portfolio_slot', '-')} "
             f"quality_tier={item.get('quality_tier', '-')} "
             f"potential_tier={item.get('potential_tier', item.get('quality_tier', '-'))} "
             f"readiness_tier={_readiness_tier(item)} "
@@ -529,6 +569,9 @@ def render_daily_delta(
             f"support_score={item.get('support_score', '-')} "
             f"originality_score={item.get('originality_score', '-')} "
             f"engineering_value_score={item.get('engineering_value_score', '-')} "
+            f"sharpness_score={item.get('sharpness_score', '-')} "
+            f"evidence_execution_score={item.get('evidence_execution_score', '-')} "
+            f"ordinaryness_penalty={item.get('ordinaryness_penalty', '-')} "
             f"novelty_pressure={item.get('novelty_pressure', {}).get('pressure', '-') if isinstance(item.get('novelty_pressure'), dict) else '-'} "
             f"issues={issues}"
         )
@@ -731,6 +774,7 @@ def run_update(args: argparse.Namespace) -> int:
                 "mandatory_model_battle_packet": battle_result.get("packet_path", ""),
                 "free_divergence": seed_report.get("free_divergence", False),
                 "candidate_group_counts": dict(_group_counts(seed_report)),
+                "portfolio_summary": _portfolio_summary(seed_report),
                 "created_by": "research_agenda_update.py",
                 "boundary": "Codex review is pending; no paper claim is accepted.",
             },
@@ -761,7 +805,7 @@ def main() -> int:
     parser.add_argument("--idea-generator", choices=["template", "claude", "gemini-cli", "gemini-divergent", "none"], default="template")
     parser.add_argument("--idea-timeout", type=int, default=1200)
     parser.add_argument("--gemini-model", default="gemini-3.1-pro-preview")
-    parser.add_argument("--deepseek-model", default="deepseek/deepseek-v4-pro(max)")
+    parser.add_argument("--deepseek-model", default="deepseek/deepseek-v4-pro")
     parser.add_argument("--deepseek-timeout", type=int, default=1200)
     parser.add_argument("--include-dynamic-ideas", dest="include_dynamic", action="store_true", help="Deprecated; only applies to curated mode.")
     parser.add_argument("--dry-run", action="store_true")
@@ -773,5 +817,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
 
