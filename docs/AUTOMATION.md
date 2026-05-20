@@ -21,7 +21,7 @@
 
 | 默认时间 | 任务名 | 入口脚本 | 输出位置 | 边界 |
 | --- | --- | --- | --- | --- |
-| 每天 12:00 | `DailyArxivEmbodiedAIScout` | `.claude/scripts/run_daily_arxiv_task.ps1` | `projects/arxiv-daily/scheduled-task.log` | 负责 arXiv mirror sync、daily pipeline、Gemini raw candidates、novelty/baseline scan、survival decision、默认 `seed-candidates-only` publish gate 和质量审计；默认 provider-free。DeepSeek/Codex provider-backed gates 只有显式 provider 参数后才完成；否则会 fail-closed / `partial`，不写 formal seed。 |
+| 每天 12:00 | `DailyArxivEmbodiedAIScout` | `.claude/scripts/run_daily_arxiv_task.ps1` | `projects/arxiv-daily/scheduled-task.log` | 负责 arXiv mirror sync、daily pipeline、Gemini raw candidates、multi-provider novelty/baseline scan、survival decision、默认 `seed-candidates-only` publish gate 和质量审计；默认 provider-free。DeepSeek/Codex provider-backed gates 只有显式 provider 参数后才完成；否则会 fail-closed / `partial`，不写 formal seed。Scheduled formal publish 仍未启用。 |
 | 每天 16:30 | `DailyCodexSeedReview` | `.claude/scripts/run_daily_codex_seed_review_task.ps1` | `projects/research-agenda/reviews/daily-codex-seed-review-task.log` 和 `YYYY-MM-DD-codex-seed-review.md` | 对当天或最近 7 天未审 seed packet 做 Codex execution review；不删除、不晋升、不声明 novelty，也不自动发布 formal seed。 |
 | 每周日 20:00 | `WeeklyResearchAgendaReview` | `.claude/scripts/run_weekly_agenda_review_task.ps1` | `projects/research-agenda/reviews/weekly-agenda-review-task.log`、`YYYY-MM-DD-weekly-agenda-review.md`、`YYYY-MM-DD-weekly-top-tier-review.md` | 汇总一周 agenda 状态、审计结果和 top-tier pressure test；不会自动移动 idea 文件夹。 |
 
@@ -265,7 +265,7 @@ $env:LOCAL_FIRST_VAULT_ALLOW_DANGEROUS_CLAUDE = "1"
 
 这个开关只影响 `daily_arxiv_pipeline.py` 的本机运行，不应该写入公开仓库配置。
 
-### v0.2.0/v0.2.1 research-seed 状态机和 publish policy
+### v0.2.0-v0.2.2 research-seed 状态机和 publish policy
 
 v0.2.0 的 daily automation 不再把 Gemini/local score 的输出直接当成正式 idea seed。它把每轮候选放进一个 transactional research-seed state machine：
 
@@ -313,13 +313,13 @@ Scheduled daily wrapper 另有 PowerShell 参数：
 
 - `--v2-publish-policy formal`
 - `--allow-formal-seed-publish`
-- novelty verification scope 不是 `local_only`，v0.2.1 最低接受 `local_plus_arxiv_api`
+- novelty verification scope 必须包含 broad external provider：`external_providers_used` 至少有 `openalex` 或 `semantic_scholar`；`local_plus_arxiv_api` 只允许进入 `seed-candidates/` 或 `parked/`
 - DeepSeek provider mode 是 `opencode`，Codex execution provider mode 是 `codex-cli`，除非显式手动设置 `--allow-test-provider-for-formal`
 - DeepSeek scientific review、novelty/baseline scan、Codex execution review、survival decision、artifact hash 等 hard gates 全部通过
 
 v0.2.1 里，`paper_intake_triage.py` 会输出 `selected_for_deep_read`，daily pipeline 用这些 stable `arxiv_id` 同时控制 Zotero import attempts 和 Claudian deep-read attempts。默认 target 是 3 篇，hard cap 是 4 篇；除非显式启用 `--legacy-import-fill`，旧的 `min_new_imports=10` 不再把 v2 import/read 数量拉回 10。
 
-Formal novelty verification 不能只依赖 local claim graph 或 local arXiv mirror。`novelty_scan.v1` 会记录 `verification_scope`、`external_providers_used` 和 `formal_promotion_allowed`。v0.2.1 的最低外部 scope 是 `local_plus_arxiv_api`；如果只用了 arXiv API，会记录 `formal_publish_risk=external_scope_arxiv_only_not_full_prior_art`。这只是最低 external arXiv probe，不是完整 prior-art verification。无人值守 scheduled formal publish 仍应要求更广的 prior-art artifact，例如 Semantic Scholar、OpenAlex 或人工 prior-art review。
+Formal novelty verification 不能只依赖 local claim graph、local arXiv mirror 或 arXiv API。`novelty_scan.v1` 会记录 `verification_scope`、`external_providers_used`、`provider_results`、`provider_errors` 和 `formal_promotion_allowed`。v0.2.2 新增 OpenAlex 和 optional Semantic Scholar prior-art probes；Semantic Scholar 只有在 `SEMANTIC_SCHOLAR_API_KEY` 或 `S2_API_KEY` 存在时启用，没有 key 时记录 `provider_unavailable` 并 fail closed。所有外部 provider 都有 timeout、rate limit 和位于 `projects/research-agenda/cache/` 的 runtime cache；cache 不应提交。只用了 arXiv API 时仍记录 `formal_publish_risk=external_scope_arxiv_only_not_full_prior_art`，这不是完整 prior-art verification，不能写 formal seed。
 
 Formal provider provenance 也更严格：`provider=json` 可以继续用于 seed-candidates-only fixture 和 CI，但 formal mode 默认拒绝它。只有手动传入 `--allow-test-provider-for-formal` 才能继续测试 formal path，并且 manifest / publish result / audit 会记录 `test_provider_used_for_formal=true` 和 `formal_publish_risk=test_provider_not_production_provenance`。
 
@@ -353,7 +353,7 @@ Audit invariants：
 - 不允许非 `publish_research_run.py` 的脚本创建、移动或修改 formal seed folder。
 - seed folder 必须有 DeepSeek review、novelty scan、Codex execution review、survival decision 和 artifact hashes。
 - formal publish 必须显式设置 formal policy 和 confirmation flag。
-- formal publish 必须通过外部/混合 novelty verification，不能用 local-only `likely_open` 晋升 formal seed。
+- formal publish 必须通过 OpenAlex 或 Semantic Scholar 参与的外部/混合 novelty verification；不能用 local-only 或 arXiv-only `likely_open` 晋升 formal seed。
 - scheduled wrapper 不得包含 `--v2-publish-policy formal`、`--allow-formal-seed-publish` 或 `--allow-test-provider-for-formal`。
 - `quality_tier`、`sharpness_score`、`evidence_execution_score` 和 `ordinaryness_penalty` 是 potential / display 字段，不是 promotion gates。
 - 没有 seed 是正常结果；未经审查就写 formal seed 是失败。

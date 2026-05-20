@@ -20,6 +20,13 @@ from research_seed_v2_common import (
 )
 
 
+BROAD_EXTERNAL_NOVELTY_PROVIDERS = {"openalex", "semantic_scholar"}
+
+
+def _has_broad_external_provider(providers: list[str]) -> bool:
+    return bool(BROAD_EXTERNAL_NOVELTY_PROVIDERS & set(providers))
+
+
 def _final_candidates(selected: list[dict[str, Any]], mutations: list[dict[str, Any]]) -> list[dict[str, Any]]:
     mutated_parent_ids = {str(item.get("parent_candidate_id")) for item in mutations}
     finals = [dict(item) for item in selected if candidate_id(item) not in mutated_parent_ids]
@@ -124,8 +131,12 @@ def decide(
                 blocks.append("formal_novelty_promotion_not_allowed")
             if verification_scope == "local_only":
                 blocks.append("formal_novelty_requires_external_or_hybrid_scope")
+            if verification_scope == "local_plus_arxiv_api":
+                blocks.append("formal_novelty_arxiv_only_scope_not_broad_prior_art")
             if not external_providers_used:
                 blocks.append("formal_novelty_requires_external_provider")
+            if not _has_broad_external_provider(external_providers_used):
+                blocks.append("formal_novelty_requires_openalex_or_semantic_scholar")
         if novelty_class == "unknown" and not override:
             blocks.append("unknown_novelty_without_human_override")
         if novelty_class not in {"likely_open", "partial_overlap", "unknown"}:

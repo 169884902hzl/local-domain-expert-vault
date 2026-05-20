@@ -17,7 +17,7 @@
 
 适合对象：需要长期追踪一个专业方向的研究生、PI / 实验室知识库维护者，以及希望把 LLM 变成“有本地文献记忆的领域专家”的研究者。
 
-当前公开版本：`v0.2.1`。`v0.1.0` 是首个可发行 local-first vault 版本，覆盖本地浏览、知识库审计、`kb_search.py` 检索、Zotero/Obsidian 配置说明、Paper Reading Workbench、arXiv mirror-first 自动化文档和 Windows 计划任务入口。`v0.2.0` 在此基础上加入 research-seed v2 状态机；`v0.2.1` 继续加固 scheduled formal publish 前的安全闸门，但仍不启用 scheduled formal publish。
+当前公开版本：`v0.2.2`。`v0.1.0` 是首个可发行 local-first vault 版本，覆盖本地浏览、知识库审计、`kb_search.py` 检索、Zotero/Obsidian 配置说明、Paper Reading Workbench、arXiv mirror-first 自动化文档和 Windows 计划任务入口。`v0.2.0` 在此基础上加入 research-seed v2 状态机；`v0.2.1` 继续加固 scheduled formal publish 前的安全闸门；`v0.2.2` 把 external novelty scan 从 arXiv-only probe 升级为 OpenAlex / optional Semantic Scholar 的 multi-provider prior-art probe，但仍不启用 scheduled formal publish。
 
 `v0.2.0` 是一次 workflow architecture upgrade：从 Gemini greenhouse + 后置审查 scaffold，升级为 transactional research-seed state machine。它改进的是状态控制、审查顺序、审计性和 rollout safety，不是声明系统已经能稳定产生已验证创新点。
 
@@ -90,6 +90,19 @@ v0.2.1 是 hardening release，不是 formal publish enablement。Scheduled dail
 - Formal seed publish 增加 lock、duplicate guard、no-overwrite staging 和 quarantine invariant；scheduled wrappers 仍不得包含 formal publish flags。
 
 这些改动只让未来手动 formal publish 更难误发，不证明系统已经能生成博士级研究选题。
+
+## v0.2.2: External Novelty Scan Hardening
+
+v0.2.2 把 `local_plus_arxiv_api` 从 formal 最低门槛降回“窄范围 arXiv probe”定位，并新增 OpenAlex + optional Semantic Scholar 的 external novelty/baseline scan。`novelty_baseline_scan.py` 仍保留 local claim graph、local arXiv mirror 和 arXiv API，但 formal publish gate 现在要求 broad external verification：`external_providers_used` 必须包含 `openalex` 或 `semantic_scholar`。
+
+关键边界：
+
+- OpenAlex / Semantic Scholar 是 external prior-art probes，不是完整人工 prior-art review。
+- Semantic Scholar 只有在 `SEMANTIC_SCHOLAR_API_KEY` 或 `S2_API_KEY` 存在时启用；没有 key 会记录 `provider_unavailable`，不会 fail open。
+- 所有外部 provider 都有 timeout、rate limit 和 runtime cache；cache 位于 `projects/research-agenda/cache/`，属于本地运行状态，不应提交。
+- arXiv-only 仍记录 `external_scope_arxiv_only_not_full_prior_art`；这类 candidate 只能进入 `seed-candidates/` 或 `parked/`，不能写 formal seed。
+- Scheduled formal publish 仍保持禁用，scheduled wrapper 仍不得加入 formal flags。
+- 生成的 candidates 仍不是已证明 doctoral-level novelty、publishability 或实验有效性。
 
 ## 它是什么 / 不是什么
 
@@ -211,7 +224,7 @@ Get-Content -Encoding UTF8 projects/research-agenda/reviews/weekly-agenda-review
 | Claude Code / Claude CLI | 脚本执行 worker | `research_agenda_ideate.py` 的 idea refinement 路径按当前工作流保留 `claude --dangerously-skip-permissions`；`daily_arxiv_pipeline.py` 的 Claude 精读 worker 仍是单独 opt-in。 |
 | Gemini CLI | raw candidate generator | Gemini 只负责提出高方差 raw candidates，不负责判断 novelty，不写 formal seed。 |
 | OpenCode / DeepSeek | provider-backed scientific review gate | DeepSeek / opencode 必须产出 `deepseek_review.v1` 且 `provider_backed=true`；deterministic fallback 不能算成功 review。 |
-| Novelty / baseline scan | prior-art and ordinaryness pressure | `novelty_baseline_scan.py` 检查 baseline、ordinaryness、near-neighbor pressure；unknown novelty 不会自动晋升。 |
+| Novelty / baseline scan | prior-art and ordinaryness pressure | `novelty_baseline_scan.py` 检查 baseline、ordinaryness、near-neighbor pressure；v0.2.2 加入 OpenAlex / optional Semantic Scholar probes，arXiv-only 不允许 formal seed，unknown novelty 不会自动晋升。 |
 | Codex / GPT | provider-backed execution review gate | Codex CLI 必须产出 `codex_execution_review.v1` 且 `provider_backed=true`；字段存在但没有 provider-backed review 不能 accept。 |
 | Survival decision | final pre-publish gate | `survival_decision.py` 汇总 scientific review、novelty scan、execution review 和 hard gates，决定 accepted / parked / rescue / blocked。 |
 
@@ -700,7 +713,7 @@ powershell -ExecutionPolicy Bypass -File .claude/scripts/run_daily_arxiv_task.ps
 python .claude/scripts/daily_arxiv_pipeline.py --once --source mirror-first --deepseek-provider opencode --codex-execution-provider codex-cli
 ```
 
-没有 provider 参数时，v2 review gates 会 fail-closed / `partial`，不会写 formal seed。这是安全默认值，不是 silent success，也不表示基础 vault 坏了。即使使用 `local_plus_arxiv_api`，它也只是最低外部 arXiv probe，不是完整 prior-art verification；无人值守 formal publish 需要更广的 prior-art artifact，例如 Semantic Scholar、OpenAlex 或人工 prior-art review。
+没有 provider 参数时，v2 review gates 会 fail-closed / `partial`，不会写 formal seed。这是安全默认值，不是 silent success，也不表示基础 vault 坏了。`local_plus_arxiv_api` 只是最低外部 arXiv probe，不是完整 prior-art verification；v0.2.2 的 formal gate 至少要求 OpenAlex 或 Semantic Scholar 成功参与。即使通过 broad external probe，候选也只是 reviewable seed candidate，不是已证明 doctoral-level novelty 或 publishable result。
 
 ### 4. 注册 Windows 计划任务
 

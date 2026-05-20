@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.2.2 - External Novelty Scan Hardening
+
+### Added
+
+- `novelty_baseline_scan.py` now keeps the local claim graph, local arXiv mirror, and arXiv API probe while adding OpenAlex and optional Semantic Scholar external prior-art probes.
+- Novelty scan artifacts now include nested `provider_results`, `provider_errors`, `nearest_works`, `strongest_baseline`, `verification_scope`, `formal_promotion_allowed`, and `formal_publish_risk` fields.
+- External provider calls use timeout, rate limiting, and runtime cache under the research-agenda cache path.
+
+### Changed
+
+- Formal publish now requires broad external verification: `external_providers_used` must include `openalex` or `semantic_scholar`.
+- arXiv-only `local_plus_arxiv_api` scans remain valid as narrow external probes, but they keep `external_scope_arxiv_only_not_full_prior_art` and cannot produce formal seeds.
+- `survival_decision.py`, `validate_research_run.py --strict-publish`, and `publish_research_run.py` all re-check the broad external provider requirement.
+
+### Safety
+
+- Provider failures do not fail open; when external providers are unavailable, novelty remains `unknown` or formal promotion is disallowed.
+- Semantic Scholar is optional and runs only with `SEMANTIC_SCHOLAR_API_KEY` or `S2_API_KEY`; missing keys are recorded as `provider_unavailable`.
+- Scheduled formal publish remains disabled. Scheduled wrappers still must not pass `--v2-publish-policy formal`, `--allow-formal-seed-publish`, or `--allow-test-provider-for-formal`.
+- Generated candidates remain review artifacts, not proven doctoral-level novelty, publishability, or experimental results.
+
 ## v0.2.1 - Scheduled Formal Publish Hardening Rehearsal
 
 ### Added

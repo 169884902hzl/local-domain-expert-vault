@@ -19,7 +19,7 @@ The public vault uses robotic manipulation as its example domain, especially DLO
 
 It is built for graduate students, PI/lab knowledge-base maintainers, and researchers who need long-term literature memory rather than another one-off summarizer.
 
-Current public version: `v0.2.1`. `v0.1.0` was the first releasable local-first vault: local browsing, knowledge-base audits, `kb_search.py` retrieval, Zotero/Obsidian setup documentation, Paper Reading Workbench, arXiv mirror-first automation docs, and the Windows scheduled-task entry point. `v0.2.0` adds the research-seed v2 state machine on top of that base; `v0.2.1` hardens the gates needed before any future scheduled formal publish, but still does not enable scheduled formal publish.
+Current public version: `v0.2.2`. `v0.1.0` was the first releasable local-first vault: local browsing, knowledge-base audits, `kb_search.py` retrieval, Zotero/Obsidian setup documentation, Paper Reading Workbench, arXiv mirror-first automation docs, and the Windows scheduled-task entry point. `v0.2.0` adds the research-seed v2 state machine on top of that base; `v0.2.1` hardens the gates needed before any future scheduled formal publish; `v0.2.2` upgrades the external novelty scan from an arXiv-only probe to OpenAlex plus optional Semantic Scholar prior-art probes, while still not enabling scheduled formal publish.
 
 `v0.2.0` is a major workflow architecture upgrade: the old Gemini greenhouse plus downstream-review scaffold is now a transactional research-seed state machine. It improves state control, review ordering, auditability, and rollout safety; it does not claim that generated ideas are automatically novel or publishable.
 
@@ -106,6 +106,19 @@ Key changes:
 - Formal seed publish adds a lock, duplicate guard, no-overwrite staging, and quarantine invariant; scheduled wrappers still must not include formal publish flags.
 
 These changes only make future manual formal publish tests harder to misuse. They do not prove that the system can generate doctoral-level research ideas.
+
+## v0.2.2: External Novelty Scan Hardening
+
+v0.2.2 demotes `local_plus_arxiv_api` back to a narrow arXiv probe and adds OpenAlex plus optional Semantic Scholar to the external novelty/baseline scan. `novelty_baseline_scan.py` still keeps the local claim graph, local arXiv mirror, and arXiv API path, but formal publish now requires broad external verification: `external_providers_used` must contain `openalex` or `semantic_scholar`.
+
+Key boundaries:
+
+- OpenAlex and Semantic Scholar are external prior-art probes, not a complete human prior-art review.
+- Semantic Scholar runs only when `SEMANTIC_SCHOLAR_API_KEY` or `S2_API_KEY` is configured; otherwise the scan records `provider_unavailable` and fails closed.
+- Every external provider has a timeout, rate limit, and runtime cache. The cache lives under `projects/research-agenda/cache/` and must remain uncommitted runtime state.
+- arXiv-only still records `external_scope_arxiv_only_not_full_prior_art`; those candidates may go to `seed-candidates/` or `parked/`, but cannot become formal seeds.
+- Scheduled formal publish remains disabled, and scheduled wrappers still must not add formal publish flags.
+- Generated candidates are not proven doctoral-level novelty, publishability, or experimental results.
 
 ## What this is / is not
 
@@ -230,7 +243,7 @@ The workflow does not ask several models the same question and average their ans
 | Claude Code / Claude CLI | Script execution worker | The `research_agenda_ideate.py` idea-refinement path intentionally keeps `claude --dangerously-skip-permissions` for the current high-autonomy workflow; the `daily_arxiv_pipeline.py` Claude reading worker remains a separate opt-in. |
 | Gemini CLI | Raw candidate generator | Gemini proposes high-variance raw candidates. It does not judge novelty and does not write formal seeds. |
 | OpenCode / DeepSeek | Provider-backed scientific review gate | DeepSeek / opencode must produce `deepseek_review.v1` with `provider_backed=true`; deterministic fallback is not enough. |
-| Novelty / baseline scan | Prior-art and ordinaryness pressure | `novelty_baseline_scan.py` checks baselines, ordinaryness, and near-neighbor pressure. Unknown novelty does not auto-promote. |
+| Novelty / baseline scan | Prior-art and ordinaryness pressure | `novelty_baseline_scan.py` checks baselines, ordinaryness, and near-neighbor pressure. v0.2.2 adds OpenAlex / optional Semantic Scholar probes; arXiv-only cannot become a formal seed, and unknown novelty does not auto-promote. |
 | Codex / GPT | Provider-backed execution review gate | Codex CLI must produce `codex_execution_review.v1` with `provider_backed=true`; field presence without provider-backed review cannot accept a candidate. |
 | Survival decision | Final pre-publish gate | `survival_decision.py` aggregates scientific review, novelty scan, execution review, and hard gates into accepted / parked / rescue / blocked outcomes. |
 

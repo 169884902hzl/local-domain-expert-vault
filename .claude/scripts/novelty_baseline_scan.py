@@ -2,7 +2,11 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
+import os
 import time
+from pathlib import Path
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -27,14 +31,19 @@ from research_seed_v2_common import (
 PROVIDER_POLICY = {
     "local_arxiv_mirror": {"mode": "always"},
     "local_notes_claim_graph": {"mode": "always"},
-    "arxiv_api": {"mode": "promotion_only", "delay_sec": 3.2, "max_queries_per_candidate": 5},
-    "semantic_scholar": {"mode": "promotion_only", "max_rps": 1, "requires_cache": True},
-    "openalex": {"mode": "fallback_or_strict", "requires_cache": True},
+    "arxiv_api": {"mode": "promotion_only", "delay_sec": 3.2, "max_queries_per_candidate": 5, "requires_cache": True},
+    "openalex": {"mode": "promotion_or_strict", "delay_sec": 0.25, "requires_cache": True},
+    "semantic_scholar": {"mode": "optional_with_api_key", "delay_sec": 1.0, "requires_cache": True},
     "web_search": {"mode": "strict_only", "max_queries_per_candidate": 2},
 }
 ARXIV_API = "https://export.arxiv.org/api/query"
+OPENALEX_API = "https://api.openalex.org/works"
+SEMANTIC_SCHOLAR_API = "https://api.semanticscholar.org/graph/v1/paper/search"
 ATOM = {"atom": "http://www.w3.org/2005/Atom"}
-FORMAL_VERIFICATION_SCOPES = {"local_plus_arxiv_api", "local_plus_s2_or_openalex", "strict_multi_provider"}
+ARXIV_ONLY_RISK = "external_scope_arxiv_only_not_full_prior_art"
+BROAD_EXTERNAL_PROVIDERS = {"openalex", "semantic_scholar"}
+FORMAL_VERIFICATION_SCOPES = {"local_plus_s2_or_openalex", "strict_multi_provider"}
+_RATE_LIMIT_LAST: dict[str, float] = {}
 
 
 def _final_candidates(selected: list[dict[str, Any]], mutations: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -63,6 +72,159 @@ def _overlap_score(a: str, b: str) -> float:
     if not left or not right:
         return 0.0
     return len(left & right) / max(1, min(len(left), len(right)))
+
+
+def _cache_root() -> Path:
+    return agenda_v2_path("cache", "external-novelty")
+
+
+def _cache_file(provider: str, url: str) -> Path:
+    digest = hashlib.sha256(f"{provider}\n{url}".encode("utf-8")).hexdigest()
+    return _cache_root() / provider / f"{digest}.json"
+
+
+def _cache_rel(path: Path) -> str:
+    try:
+        return str(path.relative_to(agenda_v2_path())).replace("\\", "/")
+    except ValueError:
+        return path.name
+
+
+def _rate_limit(provider: str, delay_sec: float) -> None:
+    delay_sec = max(0.0, delay_sec)
+    if delay_sec <= 0:
+        return
+    now = time.monotonic()
+    last = _RATE_LIMIT_LAST.get(provider)
+    if last is not None:
+        wait = delay_sec - (now - last)
+        if wait > 0:
+            time.sleep(wait)
+    _RATE_LIMIT_LAST[provider] = time.monotonic()
+
+
+def _fetch_url_cached(
+    provider: str,
+    url: str,
+    *,
+    timeout: int,
+    delay_sec: float,
+    headers: dict[str, str] | None = None,
+    response_type: str = "json",
+) -> tuple[Any, dict[str, Any]]:
+    cache_path = _cache_file(provider, url)
+    summary: dict[str, Any] = {
+        "provider": provider,
+        "status": "provider_unavailable",
+        "cached": False,
+        "cache_key": cache_path.stem,
+        "cache_path": _cache_rel(cache_path),
+        "records_scanned": 0,
+        "timeout_sec": timeout,
+        "rate_limit_delay_sec": delay_sec,
+    }
+    if cache_path.exists():
+        try:
+            cached = json.loads(cache_path.read_text(encoding="utf-8-sig"))
+            summary["status"] = "success"
+            summary["cached"] = True
+            return cached.get("payload"), summary
+        except Exception as exc:
+            summary["cache_error"] = f"{type(exc).__name__}:{exc}"
+    _rate_limit(provider, delay_sec)
+    request = urllib.request.Request(url, headers=headers or {})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            raw = response.read().decode("utf-8", errors="replace")
+    except Exception as exc:
+        summary["error"] = f"{type(exc).__name__}:{exc}"
+        return None, summary
+    try:
+        payload = json.loads(raw) if response_type == "json" else raw
+    except Exception as exc:
+        summary["error"] = f"invalid_{response_type}:{type(exc).__name__}:{exc}"
+        return None, summary
+    try:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        cache_path.write_text(
+            json.dumps(
+                {
+                    "provider": provider,
+                    "cached_at_unix": int(time.time()),
+                    "url_sha256": hashlib.sha256(url.encode("utf-8")).hexdigest(),
+                    "response_type": response_type,
+                    "payload": payload,
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+    except Exception as exc:
+        summary["cache_write_error"] = f"{type(exc).__name__}:{exc}"
+    summary["status"] = "success"
+    return payload, summary
+
+
+def _external_text_queries(item: dict[str, Any], max_queries: int) -> list[str]:
+    title = str(item.get("title") or "").strip()
+    mechanism = str(
+        item.get("mechanism")
+        or item.get("core_insight")
+        or item.get("novelty_remaining_delta")
+        or item.get("strongest_baseline")
+        or ""
+    ).strip()
+    queries: list[str] = []
+    if title:
+        queries.append(title[:180])
+    tokens = [token for token in _token_set(mechanism) if token not in {"with", "from", "that", "this", "under"}]
+    if tokens:
+        queries.append(" ".join(sorted(tokens, key=len, reverse=True)[:7]))
+    return queries[: max(0, max_queries)]
+
+
+def _provider_error(provider: str, summary: dict[str, Any]) -> dict[str, str] | None:
+    if summary.get("status") == "success" and not summary.get("error"):
+        return None
+    error = str(summary.get("error") or summary.get("status") or "provider_unavailable")
+    return {"provider": provider, "status": str(summary.get("status") or "provider_unavailable"), "error": error}
+
+
+def _has_broad_external_provider(providers: list[str]) -> bool:
+    return bool(BROAD_EXTERNAL_PROVIDERS & set(providers))
+
+
+def _verification_scope(external_providers_used: list[str]) -> str:
+    providers = set(external_providers_used)
+    broad = providers & BROAD_EXTERNAL_PROVIDERS
+    if broad and len(providers) >= 2:
+        return "strict_multi_provider"
+    if broad:
+        return "local_plus_s2_or_openalex"
+    if "arxiv_api" in providers:
+        return "local_plus_arxiv_api"
+    return "local_only"
+
+
+def _strongest_baseline(item: dict[str, Any], nearest_works: list[dict[str, Any]]) -> dict[str, Any]:
+    if nearest_works:
+        top = nearest_works[0]
+        return {
+            "source": str(top.get("source", "")),
+            "score": top.get("score", 0),
+            "title": str(top.get("title", "")),
+            "locator": str(top.get("locator", "")),
+            "evidence": str(top.get("evidence", ""))[:360],
+        }
+    return {
+        "source": "candidate_field",
+        "score": 0,
+        "title": str(item.get("strongest_baseline") or item.get("baselines") or ""),
+        "locator": "",
+        "evidence": "",
+    }
 
 
 def _scan_claim_graph(item: dict[str, Any], limit: int = 5) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -145,17 +307,26 @@ def _scan_arxiv_api(item: dict[str, Any], *, max_queries: int, timeout: int, del
     query_text = _candidate_text(item)
     queries = _arxiv_api_queries(item, max_queries)
     if not queries:
-        return [], {"records_scanned": 0, "provider": "arxiv_api", "error": "arxiv_api_no_query_terms"}
+        return [], {"records_scanned": 0, "provider": "arxiv_api", "status": "provider_unavailable", "cached": False, "error": "arxiv_api_no_query_terms"}
     scored: list[dict[str, Any]] = []
     scanned = 0
     errors: list[str] = []
+    cached = False
     for index, query in enumerate(queries):
-        if index:
-            time.sleep(max(0.0, delay_sec))
         params = urllib.parse.urlencode({"search_query": query, "start": 0, "max_results": 5})
+        raw, request_summary = _fetch_url_cached(
+            "arxiv_api",
+            f"{ARXIV_API}?{params}",
+            timeout=timeout,
+            delay_sec=delay_sec if index else 0.0,
+            response_type="text",
+        )
+        cached = cached or bool(request_summary.get("cached"))
+        if request_summary.get("error") or not isinstance(raw, str):
+            errors.append(str(request_summary.get("error") or "arxiv_api_empty_response"))
+            break
         try:
-            with urllib.request.urlopen(f"{ARXIV_API}?{params}", timeout=timeout) as response:
-                root = ET.fromstring(response.read())
+            root = ET.fromstring(raw)
         except Exception as exc:
             errors.append(f"{type(exc).__name__}:{exc}")
             break
@@ -175,9 +346,158 @@ def _scan_arxiv_api(item: dict[str, Any], *, max_queries: int, timeout: int, del
                         "evidence": summary[:360],
                     }
                 )
-    summary: dict[str, Any] = {"records_scanned": scanned, "provider": "arxiv_api", "queries": len(queries)}
+    summary: dict[str, Any] = {"records_scanned": scanned, "provider": "arxiv_api", "status": "success" if not errors else "provider_unavailable", "cached": cached, "queries": len(queries)}
     if errors:
         summary["error"] = ";".join(errors)
+    return sorted(scored, key=lambda row: row["score"], reverse=True)[:limit], summary
+
+
+def _openalex_abstract(work: dict[str, Any]) -> str:
+    inverted = work.get("abstract_inverted_index")
+    if not isinstance(inverted, dict):
+        return ""
+    positions: dict[int, str] = {}
+    for word, indexes in inverted.items():
+        if not isinstance(indexes, list):
+            continue
+        for index in indexes:
+            if isinstance(index, int):
+                positions[index] = str(word)
+    return " ".join(positions[index] for index in sorted(positions))
+
+
+def _scan_openalex(item: dict[str, Any], *, max_queries: int, timeout: int, delay_sec: float = 0.25, limit: int = 5) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    query_text = _candidate_text(item)
+    queries = _external_text_queries(item, max_queries)
+    if not queries:
+        return [], {"records_scanned": 0, "provider": "openalex", "status": "provider_unavailable", "cached": False, "error": "openalex_no_query_terms"}
+    scored: list[dict[str, Any]] = []
+    scanned = 0
+    errors: list[str] = []
+    cached = False
+    for query in queries:
+        params = {"search": query, "per-page": 5}
+        mailto = os.environ.get("OPENALEX_MAILTO", "").strip()
+        if mailto:
+            params["mailto"] = mailto
+        url = f"{OPENALEX_API}?{urllib.parse.urlencode(params)}"
+        payload, request_summary = _fetch_url_cached("openalex", url, timeout=timeout, delay_sec=delay_sec)
+        cached = cached or bool(request_summary.get("cached"))
+        if request_summary.get("error") or not isinstance(payload, dict):
+            errors.append(str(request_summary.get("error") or "openalex_empty_response"))
+            continue
+        rows = payload.get("results", [])
+        if not isinstance(rows, list):
+            errors.append("openalex_results_not_array")
+            continue
+        scanned += len(rows)
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            title = str(row.get("display_name") or row.get("title") or "")
+            abstract = _openalex_abstract(row)
+            score = _overlap_score(query_text, f"{title} {abstract}")
+            if score >= 0.18:
+                scored.append(
+                    {
+                        "source": "openalex",
+                        "score": round(score, 3),
+                        "title": title,
+                        "locator": str(row.get("doi") or row.get("id") or ""),
+                        "evidence": (abstract or str(row.get("publication_year") or ""))[:360],
+                    }
+                )
+    summary: dict[str, Any] = {
+        "records_scanned": scanned,
+        "provider": "openalex",
+        "status": "success" if scanned or not errors else "provider_unavailable",
+        "cached": cached,
+        "queries": len(queries),
+    }
+    if errors and not scanned:
+        summary["error"] = ";".join(errors)
+    elif errors:
+        summary["warnings"] = errors
+    return sorted(scored, key=lambda row: row["score"], reverse=True)[:limit], summary
+
+
+def _semantic_scholar_api_key() -> str:
+    return os.environ.get("SEMANTIC_SCHOLAR_API_KEY", "").strip() or os.environ.get("S2_API_KEY", "").strip()
+
+
+def _scan_semantic_scholar(
+    item: dict[str, Any],
+    *,
+    max_queries: int,
+    timeout: int,
+    api_key: str,
+    delay_sec: float = 1.0,
+    limit: int = 5,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    if not api_key:
+        return [], {
+            "records_scanned": 0,
+            "provider": "semantic_scholar",
+            "status": "provider_unavailable",
+            "cached": False,
+            "error": "semantic_scholar_api_key_missing",
+        }
+    query_text = _candidate_text(item)
+    queries = _external_text_queries(item, max_queries)
+    if not queries:
+        return [], {"records_scanned": 0, "provider": "semantic_scholar", "status": "provider_unavailable", "cached": False, "error": "semantic_scholar_no_query_terms"}
+    scored: list[dict[str, Any]] = []
+    scanned = 0
+    errors: list[str] = []
+    cached = False
+    fields = "title,abstract,url,year,venue,authors,externalIds"
+    headers = {"x-api-key": api_key}
+    for query in queries:
+        params = urllib.parse.urlencode({"query": query, "limit": 5, "fields": fields})
+        payload, request_summary = _fetch_url_cached(
+            "semantic_scholar",
+            f"{SEMANTIC_SCHOLAR_API}?{params}",
+            timeout=timeout,
+            delay_sec=delay_sec,
+            headers=headers,
+        )
+        cached = cached or bool(request_summary.get("cached"))
+        if request_summary.get("error") or not isinstance(payload, dict):
+            errors.append(str(request_summary.get("error") or "semantic_scholar_empty_response"))
+            continue
+        rows = payload.get("data", [])
+        if not isinstance(rows, list):
+            errors.append("semantic_scholar_data_not_array")
+            continue
+        scanned += len(rows)
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            title = str(row.get("title") or "")
+            abstract = str(row.get("abstract") or "")
+            score = _overlap_score(query_text, f"{title} {abstract}")
+            if score >= 0.18:
+                scored.append(
+                    {
+                        "source": "semantic_scholar",
+                        "score": round(score, 3),
+                        "title": title,
+                        "locator": str(row.get("paperId") or row.get("url") or ""),
+                        "evidence": abstract[:360],
+                    }
+                )
+    summary = {
+        "records_scanned": scanned,
+        "provider": "semantic_scholar",
+        "status": "success" if scanned or not errors else "provider_unavailable",
+        "cached": cached,
+        "queries": len(queries),
+        "api_key_present": True,
+    }
+    if errors and not scanned:
+        summary["error"] = ";".join(errors)
+    elif errors:
+        summary["warnings"] = errors
     return sorted(scored, key=lambda row: row["score"], reverse=True)[:limit], summary
 
 
@@ -212,6 +532,116 @@ def _classify(
     return "likely_open", True, "no_near_match_after_external_scan" if external_completed else "no_near_match_after_local_scan"
 
 
+def _build_candidate_scan(
+    item: dict[str, Any],
+    *,
+    target_policy: str,
+    strict_external: bool,
+    max_external_queries: int,
+    external_timeout: int,
+    semantic_scholar_mode: str = "auto",
+) -> dict[str, Any]:
+    cid = candidate_id(item)
+    guard = duplicate_guard(item)
+    claim_nearest, claim_summary = _scan_claim_graph(item)
+    arxiv_nearest, arxiv_summary = _scan_arxiv_mirror(item)
+    external_nearest: list[dict[str, Any]] = []
+    provider_results: dict[str, Any] = {}
+    provider_errors: list[dict[str, str]] = []
+    external_providers_used: list[str] = []
+    should_run_external = target_policy == "formal" or strict_external
+    if should_run_external:
+        external_scans: list[tuple[str, list[dict[str, Any]], dict[str, Any]]] = []
+        external_scans.append(
+            (
+                "arxiv_api",
+                *_scan_arxiv_api(
+                    item,
+                    max_queries=max_external_queries,
+                    timeout=external_timeout,
+                ),
+            )
+        )
+        external_scans.append(
+            (
+                "openalex",
+                *_scan_openalex(
+                    item,
+                    max_queries=max_external_queries,
+                    timeout=external_timeout,
+                ),
+            )
+        )
+        if semantic_scholar_mode != "never":
+            external_scans.append(
+                (
+                    "semantic_scholar",
+                    *_scan_semantic_scholar(
+                        item,
+                        max_queries=max_external_queries,
+                        timeout=external_timeout,
+                        api_key=_semantic_scholar_api_key(),
+                    ),
+                )
+            )
+        for provider, nearest, summary in external_scans:
+            provider_results[provider] = summary
+            if summary.get("status") == "success" and not summary.get("error"):
+                external_nearest.extend(nearest)
+                external_providers_used.append(provider)
+            error = _provider_error(provider, summary)
+            if error:
+                provider_errors.append(error)
+    nearest_works = sorted([*claim_nearest, *arxiv_nearest, *external_nearest], key=lambda row: row["score"], reverse=True)[:8]
+    remaining_delta = str(item.get("novelty_remaining_delta") or item.get("non_obvious_claim") or item.get("core_insight") or "")
+    local_scan_evidence = {
+        "local_notes_claim_graph": claim_summary,
+        "local_arxiv_mirror": arxiv_summary,
+    }
+    evidence_summary = {**local_scan_evidence, **provider_results}
+    external_completed = bool(external_providers_used)
+    classification, promotion_allowed, reason = _classify(
+        guard=guard,
+        nearest_works=nearest_works,
+        evidence_summary=evidence_summary,
+        remaining_delta=remaining_delta,
+        strict_external=strict_external or target_policy == "formal",
+        external_completed=external_completed,
+    )
+    verification_scope = _verification_scope(external_providers_used)
+    formal_promotion_allowed = (
+        promotion_allowed
+        and verification_scope in FORMAL_VERIFICATION_SCOPES
+        and _has_broad_external_provider(external_providers_used)
+        and classification in {"likely_open", "partial_overlap"}
+    )
+    formal_publish_risk = ARXIV_ONLY_RISK if verification_scope == "local_plus_arxiv_api" else ""
+    return {
+        "candidate_id": cid,
+        "candidate_title": item.get("title", ""),
+        "status": "completed" if external_completed else "completed_local_only",
+        "novelty_classification": classification,
+        "novelty_remaining_delta": remaining_delta,
+        "promotion_allowed": promotion_allowed,
+        "formal_promotion_allowed": formal_promotion_allowed,
+        "verification_scope": verification_scope,
+        "external_providers_used": external_providers_used,
+        "provider_results": provider_results,
+        "provider_errors": provider_errors,
+        "formal_publish_risk": formal_publish_risk,
+        "classification_reason": reason,
+        "nearest_works": nearest_works,
+        "strongest_baseline": _strongest_baseline(item, nearest_works),
+        "local_scan_evidence": local_scan_evidence,
+        "external_scan_evidence": provider_results,
+        "no_near_match_evidence": evidence_summary if classification == "likely_open" and not nearest_works else {},
+        "duplicate_guard": guard,
+        "providers_used": ["local_arxiv_mirror", "local_notes_claim_graph", "local_seed_like_dirs", *external_providers_used],
+        "requires_human_unknown_override": classification == "unknown",
+        "final_candidate_id": cid,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run-date", required=True)
@@ -219,6 +649,7 @@ def main() -> int:
     parser.add_argument("--strict-external", action="store_true", help="Require external scan; local-only results become unknown.")
     parser.add_argument("--max-external-queries", type=int, default=1)
     parser.add_argument("--external-timeout", type=int, default=12)
+    parser.add_argument("--semantic-scholar-mode", choices=["auto", "never"], default="auto")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
@@ -228,66 +659,15 @@ def main() -> int:
     mutations = read_json(mutations_path).get("mutations", []) if mutations_path.exists() else []
     scans: list[dict[str, Any]] = []
     for item in _final_candidates(selected, mutations):
-        cid = candidate_id(item)
-        guard = duplicate_guard(item)
-        claim_nearest, claim_summary = _scan_claim_graph(item)
-        arxiv_nearest, arxiv_summary = _scan_arxiv_mirror(item)
-        external_nearest: list[dict[str, Any]] = []
-        external_summary: dict[str, Any] = {}
-        external_providers_used: list[str] = []
-        if args.target_policy == "formal" or args.strict_external:
-            external_nearest, external_summary = _scan_arxiv_api(
-                item,
-                max_queries=args.max_external_queries,
-                timeout=args.external_timeout,
-            )
-            if not external_summary.get("error"):
-                external_providers_used.append("arxiv_api")
-        nearest_works = sorted([*claim_nearest, *arxiv_nearest, *external_nearest], key=lambda row: row["score"], reverse=True)[:8]
-        remaining_delta = str(item.get("novelty_remaining_delta") or item.get("non_obvious_claim") or item.get("core_insight") or "")
-        evidence_summary = {
-            "local_notes_claim_graph": claim_summary,
-            "local_arxiv_mirror": arxiv_summary,
-        }
-        external_completed = bool(external_providers_used)
-        classification, promotion_allowed, reason = _classify(
-            guard=guard,
-            nearest_works=nearest_works,
-            evidence_summary=evidence_summary,
-            remaining_delta=remaining_delta,
-            strict_external=args.strict_external or args.target_policy == "formal",
-            external_completed=external_completed,
-        )
-        verification_scope = "local_plus_arxiv_api" if external_completed else "local_only"
-        formal_promotion_allowed = (
-            promotion_allowed
-            and verification_scope in FORMAL_VERIFICATION_SCOPES
-            and bool(external_providers_used)
-            and classification in {"likely_open", "partial_overlap"}
-        )
-        formal_publish_risk = "external_scope_arxiv_only_not_full_prior_art" if verification_scope == "local_plus_arxiv_api" else ""
         scans.append(
-            {
-                "candidate_id": cid,
-                "candidate_title": item.get("title", ""),
-                "status": "completed" if external_completed else "completed_local_only",
-                "novelty_classification": classification,
-                "novelty_remaining_delta": remaining_delta,
-                "promotion_allowed": promotion_allowed,
-                "formal_promotion_allowed": formal_promotion_allowed,
-                "verification_scope": verification_scope,
-                "external_providers_used": external_providers_used,
-                "formal_publish_risk": formal_publish_risk,
-                "classification_reason": reason,
-                "nearest_works": nearest_works,
-                "local_scan_evidence": evidence_summary,
-                "external_scan_evidence": {"arxiv_api": external_summary} if external_summary else {},
-                "no_near_match_evidence": evidence_summary if classification == "likely_open" and not nearest_works else {},
-                "duplicate_guard": guard,
-                "providers_used": ["local_arxiv_mirror", "local_notes_claim_graph", "local_seed_like_dirs", *external_providers_used],
-                "requires_human_unknown_override": classification == "unknown",
-                "final_candidate_id": cid,
-            }
+            _build_candidate_scan(
+                item,
+                target_policy=args.target_policy,
+                strict_external=args.strict_external,
+                max_external_queries=args.max_external_queries,
+                external_timeout=args.external_timeout,
+                semantic_scholar_mode=args.semantic_scholar_mode,
+            )
         )
     payload_status = "partial_empty_selection"
     if scans:

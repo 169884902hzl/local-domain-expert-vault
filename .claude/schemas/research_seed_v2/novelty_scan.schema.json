@@ -11,7 +11,20 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["candidate_id", "novelty_classification", "promotion_allowed", "formal_promotion_allowed", "verification_scope", "external_providers_used", "nearest_works", "duplicate_guard"],
+        "required": [
+          "candidate_id",
+          "novelty_classification",
+          "promotion_allowed",
+          "formal_promotion_allowed",
+          "verification_scope",
+          "external_providers_used",
+          "provider_results",
+          "provider_errors",
+          "formal_publish_risk",
+          "nearest_works",
+          "strongest_baseline",
+          "duplicate_guard"
+        ],
         "properties": {
           "candidate_id": {"type": "string", "minLength": 1},
           "candidate_title": {"type": "string"},
@@ -21,10 +34,22 @@
           "promotion_allowed": {"type": "boolean"},
           "formal_promotion_allowed": {"type": "boolean"},
           "verification_scope": {"type": "string", "enum": ["local_only", "local_plus_arxiv_api", "local_plus_s2_or_openalex", "strict_multi_provider"]},
-          "external_providers_used": {"type": "array", "items": {"type": "string"}},
+          "external_providers_used": {"type": "array", "items": {"type": "string", "enum": ["arxiv_api", "openalex", "semantic_scholar"]}},
+          "provider_results": {
+            "type": "object",
+            "additionalProperties": {"$ref": "#/$defs/provider_result"}
+          },
+          "provider_errors": {
+            "type": "array",
+            "items": {"$ref": "#/$defs/provider_error"}
+          },
           "formal_publish_risk": {"type": "string"},
           "classification_reason": {"type": "string"},
-          "nearest_works": {"type": "array"},
+          "nearest_works": {
+            "type": "array",
+            "items": {"$ref": "#/$defs/nearest_work"}
+          },
+          "strongest_baseline": {"$ref": "#/$defs/nearest_work"},
           "local_scan_evidence": {"type": "object"},
           "external_scan_evidence": {"type": "object"},
           "duplicate_guard": {"type": "object"}
@@ -33,5 +58,48 @@
     },
     "provider_policy": {"type": "object"},
     "artifact_hashes": {"type": "object"}
+  },
+  "$defs": {
+    "provider_result": {
+      "type": "object",
+      "required": ["provider", "status", "records_scanned", "cached"],
+      "properties": {
+        "provider": {"type": "string", "enum": ["arxiv_api", "openalex", "semantic_scholar"]},
+        "status": {"type": "string", "enum": ["success", "provider_unavailable"]},
+        "records_scanned": {"type": "integer", "minimum": 0},
+        "cached": {"type": "boolean"},
+        "queries": {"type": "integer", "minimum": 0},
+        "timeout_sec": {"type": "integer", "minimum": 0},
+        "rate_limit_delay_sec": {"type": "number", "minimum": 0},
+        "api_key_present": {"type": "boolean"},
+        "cache_key": {"type": "string"},
+        "cache_path": {"type": "string"},
+        "error": {"type": "string"},
+        "warnings": {"type": "array", "items": {"type": "string"}}
+      },
+      "additionalProperties": true
+    },
+    "provider_error": {
+      "type": "object",
+      "required": ["provider", "status", "error"],
+      "properties": {
+        "provider": {"type": "string", "enum": ["arxiv_api", "openalex", "semantic_scholar"]},
+        "status": {"type": "string"},
+        "error": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+    "nearest_work": {
+      "type": "object",
+      "required": ["source", "score", "title"],
+      "properties": {
+        "source": {"type": "string"},
+        "score": {"type": "number"},
+        "title": {"type": "string"},
+        "locator": {"type": "string"},
+        "evidence": {"type": "string"}
+      },
+      "additionalProperties": true
+    }
   }
 }

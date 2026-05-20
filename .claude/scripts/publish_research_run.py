@@ -33,6 +33,9 @@ from research_seed_v2_common import (
 from validate_research_run import validate_run as validate_run_artifacts
 
 
+BROAD_EXTERNAL_NOVELTY_PROVIDERS = {"openalex", "semantic_scholar"}
+
+
 def _assert_under_root(path: Path) -> None:
     root = agenda_root().resolve()
     resolved = path.resolve()
@@ -298,6 +301,27 @@ def _formal_provider_errors(run_date: str) -> list[str]:
     return errors
 
 
+def _formal_novelty_errors(run_date: str) -> list[str]:
+    novelty_path = artifact_dir(run_date) / "novelty-scan.json"
+    if not novelty_path.exists():
+        return ["missing_novelty_scan_for_formal_publish"]
+    errors: list[str] = []
+    for item in read_json(novelty_path).get("scans", []):
+        if not isinstance(item, dict):
+            continue
+        cid = str(item.get("candidate_id"))
+        providers = {str(value) for value in item.get("external_providers_used", []) if value}
+        if item.get("formal_promotion_allowed") is not True:
+            errors.append(f"formal_novelty_not_allowed:{cid}")
+        if item.get("verification_scope") == "local_plus_arxiv_api":
+            errors.append(f"formal_novelty_arxiv_only_scope:{cid}")
+        if not providers:
+            errors.append(f"formal_novelty_missing_external_provider:{cid}")
+        if not (providers & BROAD_EXTERNAL_NOVELTY_PROVIDERS):
+            errors.append(f"formal_novelty_missing_broad_external_provider:{cid}")
+    return errors
+
+
 def publish(
     run_date: str,
     *,
@@ -345,6 +369,17 @@ def publish(
             allow_test_provider_for_formal=allow_test_provider_for_formal,
             blocked=[f"backfill_mode_cannot_formal_publish:{manifest.get('backfill_mode')}"],
         )
+    if target_policy == "formal":
+        novelty_errors = _formal_novelty_errors(run_date)
+        if novelty_errors:
+            return _result(
+                run_date=run_date,
+                status="blocked_formal_novelty_scope",
+                target_policy=target_policy,
+                allow_formal_seed_publish=allow_formal_seed_publish,
+                allow_test_provider_for_formal=allow_test_provider_for_formal,
+                blocked=novelty_errors,
+            )
     if target_policy == "formal" and not allow_test_provider_for_formal:
         provider_errors = _formal_provider_errors(run_date)
         if provider_errors:

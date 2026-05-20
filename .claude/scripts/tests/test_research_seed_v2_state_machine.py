@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import urllib.error
 from argparse import Namespace
 from pathlib import Path
 from unittest.mock import patch
@@ -105,6 +106,24 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
     def write_bom_json(self, path: Path, payload: dict[str, object]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("\ufeff" + json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def fake_urlopen_json(self, payload: dict[str, object], calls: list[object] | None = None):
+        class FakeResponse:
+            def __enter__(self) -> "FakeResponse":
+                return self
+
+            def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
+                return None
+
+            def read(self) -> bytes:
+                return json.dumps(payload).encode("utf-8")
+
+        def fake(request: object, timeout: int = 0) -> FakeResponse:
+            if calls is not None:
+                calls.append(request)
+            return FakeResponse()
+
+        return fake
 
     def provider_deepseek_payload(self, candidate: dict[str, object] | None = None) -> dict[str, object]:
         item = candidate or self.candidate()
@@ -232,9 +251,26 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
                 },
                 state="rescued_or_mutated",
             )
-        external_providers = external_providers_used or ([] if verification_scope == "local_only" else ["arxiv_api"])
+        if external_providers_used is not None:
+            external_providers = external_providers_used
+        elif verification_scope == "local_plus_arxiv_api":
+            external_providers = ["arxiv_api"]
+        elif verification_scope == "local_plus_s2_or_openalex":
+            external_providers = ["openalex"]
+        elif verification_scope == "strict_multi_provider":
+            external_providers = ["arxiv_api", "openalex"]
+        else:
+            external_providers = []
         if formal_promotion_allowed is None:
-            formal_promotion_allowed = novelty in {"likely_open", "partial_overlap"} and verification_scope != "local_only" and bool(external_providers)
+            formal_promotion_allowed = (
+                novelty in {"likely_open", "partial_overlap"}
+                and verification_scope in {"local_plus_s2_or_openalex", "strict_multi_provider"}
+                and bool({"openalex", "semantic_scholar"} & set(external_providers))
+            )
+        provider_results = {
+            provider: {"provider": provider, "status": "success", "records_scanned": 1, "cached": False, "queries": 1}
+            for provider in external_providers
+        }
         write_run_artifact(
             RUN_DATE,
             "novelty-scan.json",
@@ -253,9 +289,12 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
                         "verification_scope": verification_scope,
                         "external_providers_used": external_providers,
                         "formal_publish_risk": "external_scope_arxiv_only_not_full_prior_art" if verification_scope == "local_plus_arxiv_api" else "",
+                        "provider_results": provider_results,
+                        "provider_errors": [],
                         "nearest_works": [{"source": "test", "score": 0.1, "title": "Near work"}] if novelty != "unknown" else [],
+                        "strongest_baseline": {"source": "test", "score": 0.1, "title": "Near work"} if novelty != "unknown" else {"source": "candidate_field", "score": 0, "title": str(item.get("strongest_baseline", ""))},
                         "local_scan_evidence": {},
-                        "external_scan_evidence": {"arxiv_api": {"records_scanned": 1}} if external_providers else {},
+                        "external_scan_evidence": provider_results,
                         "duplicate_guard": {"status": "pass", "action": "allow_with_lineage", "nearest_candidates": []},
                     }
                 ],
@@ -771,19 +810,37 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
         self.assertEqual(result["published"], [])
         self.assertEqual(len(result["bucketed"]), 1)
 
-    def test_external_arxiv_only_novelty_can_formal_publish_with_risk_marker(self) -> None:
+    def test_external_arxiv_only_novelty_blocks_formal_publish_with_risk_marker(self) -> None:
         self.write_review_artifacts(
             verification_scope="local_plus_arxiv_api",
             deepseek_mode="opencode",
             codex_mode="codex-cli",
         )
         survival = decide(run_date=RUN_DATE, allow_human_override=False, target_policy="formal")
-        self.assertEqual(survival["decisions"][0]["decision"], "accept_for_user_review")
+        self.assertEqual(survival["decisions"][0]["decision"], "killed")
+        self.assertIn("formal_novelty_arxiv_only_scope_not_broad_prior_art", survival["decisions"][0]["blocks"])
+        self.assertIn("formal_novelty_requires_openalex_or_semantic_scholar", survival["decisions"][0]["blocks"])
         write_run_artifact(RUN_DATE, "survival-decision.json", survival, state="survival_decided")
         result = publish(RUN_DATE, dry_run=False, target_policy="formal", allow_formal_seed_publish=True)
-        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["status"], "blocked_formal_novelty_scope")
+        self.assertTrue(any("formal_novelty_arxiv_only_scope" in item for item in result["blocked"]))
+
+    def test_strict_publish_rejects_missing_external_broad_provider(self) -> None:
+        self.write_review_artifacts(
+            verification_scope="local_plus_arxiv_api",
+            deepseek_mode="opencode",
+            codex_mode="codex-cli",
+            formal_promotion_allowed=False,
+        )
+        survival = decide(run_date=RUN_DATE, allow_human_override=False, target_policy="formal")
+        write_run_artifact(RUN_DATE, "survival-decision.json", survival, state="survival_decided")
         manifest = read_json(run_dir(RUN_DATE) / "manifest.json")
-        self.assertEqual(manifest["formal_publish_risk"], "external_scope_arxiv_only_not_full_prior_art")
+        manifest["v2_publish_policy"] = "formal"
+        manifest["formal_seed_publish_allowed"] = True
+        write_json(run_dir(RUN_DATE) / "manifest.json", manifest)
+        validation = validate_run(RUN_DATE, strict_publish=True)
+        self.assertEqual(validation["status"], "partial_schema_blocked")
+        self.assertTrue(any("formal_novelty_missing_broad_external_provider" in item for item in validation["errors"]))
 
     def test_deepseek_local_adapter_does_not_satisfy_gate(self) -> None:
         payload, exit_code = build_deepseek_payload([self.candidate()], run_date=RUN_DATE, provider_payload={})
@@ -820,6 +877,200 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
             hits, summary = novelty_scan._scan_arxiv_api(self.candidate(), max_queries=1, timeout=1, delay_sec=0)
         self.assertEqual(hits, [])
         self.assertIn("TimeoutError", summary["error"])
+
+    def test_openalex_provider_success_sets_broad_scope(self) -> None:
+        hit = {"source": "openalex", "score": 0.2, "title": "Anchored contact failure benchmark", "locator": "W1", "evidence": "near work"}
+        unavailable = {"provider": "semantic_scholar", "status": "provider_unavailable", "records_scanned": 0, "cached": False, "error": "semantic_scholar_api_key_missing"}
+        with patch.object(novelty_scan, "_scan_claim_graph", return_value=([], {"records_scanned": 0})), patch.object(
+            novelty_scan,
+            "_scan_arxiv_mirror",
+            return_value=([], {"records_scanned": 0}),
+        ), patch.object(
+            novelty_scan,
+            "_scan_arxiv_api",
+            return_value=([], {"provider": "arxiv_api", "status": "provider_unavailable", "records_scanned": 0, "cached": False, "error": "arxiv_timeout"}),
+        ), patch.object(
+            novelty_scan,
+            "_scan_openalex",
+            return_value=([hit], {"provider": "openalex", "status": "success", "records_scanned": 1, "cached": False, "queries": 1}),
+        ), patch.object(
+            novelty_scan,
+            "_scan_semantic_scholar",
+            return_value=([], unavailable),
+        ):
+            scan = novelty_scan._build_candidate_scan(
+                self.candidate(),
+                target_policy="formal",
+                strict_external=False,
+                max_external_queries=1,
+                external_timeout=1,
+            )
+        self.assertIn("openalex", scan["external_providers_used"])
+        self.assertEqual(scan["verification_scope"], "local_plus_s2_or_openalex")
+        self.assertTrue(scan["formal_promotion_allowed"])
+
+    def test_semantic_scholar_success_with_fixture_is_broad_provider(self) -> None:
+        fixture = {
+            "data": [
+                {
+                    "paperId": "s2-1",
+                    "title": "Anchored contact failure benchmark for DLO policies",
+                    "abstract": "Contact rich DLO policies fail under latent friction shifts at the vision tactile controller boundary.",
+                    "url": "https://www.semanticscholar.org/paper/s2-1",
+                }
+            ]
+        }
+        with patch.object(novelty_scan.urllib.request, "urlopen", self.fake_urlopen_json(fixture)):
+            hits, summary = novelty_scan._scan_semantic_scholar(self.candidate(), max_queries=1, timeout=1, api_key="fake-key", delay_sec=0)
+        self.assertEqual(summary["status"], "success")
+        self.assertTrue(hits)
+
+        unavailable = {"provider": "openalex", "status": "provider_unavailable", "records_scanned": 0, "cached": False, "error": "openalex_timeout"}
+        with patch.object(novelty_scan, "_scan_claim_graph", return_value=([], {"records_scanned": 0})), patch.object(
+            novelty_scan,
+            "_scan_arxiv_mirror",
+            return_value=([], {"records_scanned": 0}),
+        ), patch.object(
+            novelty_scan,
+            "_scan_arxiv_api",
+            return_value=([], {"provider": "arxiv_api", "status": "provider_unavailable", "records_scanned": 0, "cached": False, "error": "arxiv_timeout"}),
+        ), patch.object(
+            novelty_scan,
+            "_scan_openalex",
+            return_value=([], unavailable),
+        ), patch.object(
+            novelty_scan,
+            "_scan_semantic_scholar",
+            return_value=(hits, summary),
+        ):
+            scan = novelty_scan._build_candidate_scan(
+                self.candidate(),
+                target_policy="formal",
+                strict_external=False,
+                max_external_queries=1,
+                external_timeout=1,
+            )
+        self.assertIn("semantic_scholar", scan["external_providers_used"])
+        self.assertEqual(scan["verification_scope"], "local_plus_s2_or_openalex")
+        self.assertTrue(scan["formal_promotion_allowed"])
+
+    def test_semantic_scholar_429_fails_closed_for_formal(self) -> None:
+        error = urllib.error.HTTPError(
+            "https://api.semanticscholar.org/graph/v1/paper/search",
+            429,
+            "Too Many Requests",
+            hdrs=None,
+            fp=None,
+        )
+        with patch.object(novelty_scan.urllib.request, "urlopen", side_effect=error):
+            hits, summary = novelty_scan._scan_semantic_scholar(self.candidate(), max_queries=1, timeout=1, api_key="fake-key", delay_sec=0)
+        self.assertEqual(hits, [])
+        self.assertIn("HTTPError", summary["error"])
+
+        self.write_review_artifacts(
+            verification_scope="local_plus_arxiv_api",
+            deepseek_mode="opencode",
+            codex_mode="codex-cli",
+            formal_promotion_allowed=False,
+        )
+        survival = decide(run_date=RUN_DATE, allow_human_override=False, target_policy="formal")
+        write_run_artifact(RUN_DATE, "survival-decision.json", survival, state="survival_decided")
+        result = publish(RUN_DATE, dry_run=False, target_policy="formal", allow_formal_seed_publish=True)
+        self.assertEqual(result["status"], "blocked_formal_novelty_scope")
+        self.assertEqual(list((Path(self.tmp.name) / "idea_bank" / "seed").glob("*")), [])
+
+    def test_openalex_partial_overlap_with_remaining_delta_can_pass_novelty_gate(self) -> None:
+        local_hit = {"source": "local_notes_claim_graph", "score": 0.4, "title": "Contact failure benchmark", "locator": "claim-1", "evidence": "near overlap"}
+        openalex_hit = {"source": "openalex", "score": 0.2, "title": "External baseline", "locator": "W1", "evidence": "external near work"}
+        with patch.object(novelty_scan, "_scan_claim_graph", return_value=([local_hit], {"records_scanned": 1})), patch.object(
+            novelty_scan,
+            "_scan_arxiv_mirror",
+            return_value=([], {"records_scanned": 0}),
+        ), patch.object(
+            novelty_scan,
+            "_scan_arxiv_api",
+            return_value=([], {"provider": "arxiv_api", "status": "provider_unavailable", "records_scanned": 0, "cached": False, "error": "arxiv_timeout"}),
+        ), patch.object(
+            novelty_scan,
+            "_scan_openalex",
+            return_value=([openalex_hit], {"provider": "openalex", "status": "success", "records_scanned": 1, "cached": False, "queries": 1}),
+        ), patch.object(
+            novelty_scan,
+            "_scan_semantic_scholar",
+            return_value=([], {"provider": "semantic_scholar", "status": "provider_unavailable", "records_scanned": 0, "cached": False, "error": "semantic_scholar_api_key_missing"}),
+        ):
+            scan = novelty_scan._build_candidate_scan(
+                self.candidate(),
+                target_policy="formal",
+                strict_external=False,
+                max_external_queries=1,
+                external_timeout=1,
+            )
+        self.assertEqual(scan["novelty_classification"], "partial_overlap")
+        self.assertTrue(scan["promotion_allowed"])
+        self.assertTrue(scan["formal_promotion_allowed"])
+
+    def test_all_external_providers_unavailable_makes_novelty_unknown(self) -> None:
+        unavailable = {"status": "provider_unavailable", "records_scanned": 0, "cached": False, "error": "provider_down"}
+        with patch.object(novelty_scan, "_scan_claim_graph", return_value=([], {"records_scanned": 0})), patch.object(
+            novelty_scan,
+            "_scan_arxiv_mirror",
+            return_value=([], {"records_scanned": 0}),
+        ), patch.object(
+            novelty_scan,
+            "_scan_arxiv_api",
+            return_value=([], {"provider": "arxiv_api", **unavailable}),
+        ), patch.object(
+            novelty_scan,
+            "_scan_openalex",
+            return_value=([], {"provider": "openalex", **unavailable}),
+        ), patch.object(
+            novelty_scan,
+            "_scan_semantic_scholar",
+            return_value=([], {"provider": "semantic_scholar", **unavailable}),
+        ):
+            scan = novelty_scan._build_candidate_scan(
+                self.candidate(),
+                target_policy="formal",
+                strict_external=False,
+                max_external_queries=1,
+                external_timeout=1,
+            )
+        self.assertEqual(scan["novelty_classification"], "unknown")
+        self.assertFalse(scan["promotion_allowed"])
+        self.assertFalse(scan["formal_promotion_allowed"])
+        self.assertEqual(scan["external_providers_used"], [])
+
+    def test_cached_openalex_response_prevents_duplicate_network_call(self) -> None:
+        calls: list[object] = []
+        fixture = {
+            "results": [
+                {
+                    "id": "https://openalex.org/W1",
+                    "display_name": "Anchored contact failure benchmark for DLO policies",
+                    "publication_year": 2099,
+                    "abstract_inverted_index": {
+                        "Contact": [0],
+                        "rich": [1],
+                        "DLO": [2],
+                        "policies": [3],
+                        "fail": [4],
+                        "under": [5],
+                        "latent": [6],
+                        "friction": [7],
+                        "shifts": [8],
+                    },
+                }
+            ]
+        }
+        with patch.object(novelty_scan.urllib.request, "urlopen", self.fake_urlopen_json(fixture, calls)):
+            first_hits, first_summary = novelty_scan._scan_openalex(self.candidate(), max_queries=1, timeout=1, delay_sec=0)
+            second_hits, second_summary = novelty_scan._scan_openalex(self.candidate(), max_queries=1, timeout=1, delay_sec=0)
+        self.assertEqual(len(calls), 1)
+        self.assertTrue(first_hits)
+        self.assertTrue(second_hits)
+        self.assertFalse(first_summary["cached"])
+        self.assertTrue(second_summary["cached"])
 
     def test_bom_claim_graph_jsonl_first_line_is_used_by_novelty_scan(self) -> None:
         graph_path = Path(self.tmp.name) / "evidence" / "research_claim_graph.jsonl"
@@ -957,7 +1208,7 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
         self.assertEqual(list((Path(self.tmp.name) / "idea_bank" / "seed").glob("*")), [])
 
     def test_formal_provider_json_blocks_by_default(self) -> None:
-        self.write_review_artifacts(verification_scope="local_plus_arxiv_api")
+        self.write_review_artifacts(verification_scope="local_plus_s2_or_openalex")
         survival = decide(run_date=RUN_DATE, allow_human_override=False, target_policy="formal")
         write_run_artifact(RUN_DATE, "survival-decision.json", survival, state="survival_decided")
         result = publish(RUN_DATE, dry_run=False, target_policy="formal", allow_formal_seed_publish=True)
@@ -965,7 +1216,7 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
         self.assertTrue(any("formal_provider_mode_not_production" in item for item in result["blocked"]))
 
     def test_formal_provider_json_manual_override_records_risk(self) -> None:
-        self.write_review_artifacts(verification_scope="local_plus_arxiv_api")
+        self.write_review_artifacts(verification_scope="local_plus_s2_or_openalex")
         survival = decide(run_date=RUN_DATE, allow_human_override=False, target_policy="formal")
         write_run_artifact(RUN_DATE, "survival-decision.json", survival, state="survival_decided")
         result = publish(
@@ -983,7 +1234,7 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
     def test_formal_publish_with_allow_still_requires_existing_gates(self) -> None:
         self.write_review_artifacts(
             codex_action="reject_with_rescue",
-            verification_scope="local_plus_arxiv_api",
+            verification_scope="local_plus_s2_or_openalex",
             deepseek_mode="opencode",
             codex_mode="codex-cli",
         )
@@ -1008,7 +1259,7 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
 
     def test_publish_actual_staged_rename_writes_required_artifacts(self) -> None:
         self.write_review_artifacts(
-            verification_scope="local_plus_arxiv_api",
+            verification_scope="local_plus_s2_or_openalex",
             deepseek_mode="opencode",
             codex_mode="codex-cli",
         )
@@ -1031,7 +1282,7 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
 
     def test_publish_existing_target_blocks_duplicate_no_overwrite(self) -> None:
         self.write_review_artifacts(
-            verification_scope="local_plus_arxiv_api",
+            verification_scope="local_plus_s2_or_openalex",
             deepseek_mode="opencode",
             codex_mode="codex-cli",
         )
@@ -1050,7 +1301,7 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
 
     def test_concurrent_publish_lock_blocks_same_slug(self) -> None:
         self.write_review_artifacts(
-            verification_scope="local_plus_arxiv_api",
+            verification_scope="local_plus_s2_or_openalex",
             deepseek_mode="opencode",
             codex_mode="codex-cli",
         )
@@ -1066,7 +1317,7 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
 
     def test_missing_required_file_after_publish_moves_to_quarantine(self) -> None:
         self.write_review_artifacts(
-            verification_scope="local_plus_arxiv_api",
+            verification_scope="local_plus_s2_or_openalex",
             deepseek_mode="opencode",
             codex_mode="codex-cli",
         )
@@ -1206,6 +1457,9 @@ def bad(source, recommended):
             self.assertIn(phrase, normalized)
         self.assertIn("local_plus_arxiv_api", docs)
         self.assertIn("external_scope_arxiv_only_not_full_prior_art", docs)
+        self.assertIn("OpenAlex", docs)
+        self.assertIn("Semantic Scholar", docs)
+        self.assertIn("Scheduled formal publish remains disabled", docs)
 
     def test_audit_catches_policy_manifest_mismatch(self) -> None:
         manifest = read_json(run_dir(RUN_DATE) / "manifest.json")

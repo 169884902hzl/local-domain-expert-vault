@@ -24,6 +24,13 @@ from research_seed_v2_common import (
 )
 
 
+BROAD_EXTERNAL_NOVELTY_PROVIDERS = {"openalex", "semantic_scholar"}
+
+
+def _has_broad_external_provider(providers: list[str]) -> bool:
+    return bool(BROAD_EXTERNAL_NOVELTY_PROVIDERS & set(providers))
+
+
 def _validate_manifest(run_date: str) -> list[str]:
     path = run_dir(run_date) / "manifest.json"
     if not path.exists():
@@ -99,8 +106,13 @@ def _validate_formal_policy(run_date: str) -> list[str]:
                 errors.append(f"formal_novelty_not_allowed:{cid}")
             if item.get("verification_scope") == "local_only":
                 errors.append(f"formal_novelty_local_only:{cid}")
-            if not item.get("external_providers_used"):
+            if item.get("verification_scope") == "local_plus_arxiv_api":
+                errors.append(f"formal_novelty_arxiv_only_scope:{cid}")
+            external_providers = [str(value) for value in item.get("external_providers_used", []) if value]
+            if not external_providers:
                 errors.append(f"formal_novelty_missing_external_provider:{cid}")
+            if not _has_broad_external_provider(external_providers):
+                errors.append(f"formal_novelty_missing_broad_external_provider:{cid}")
     if not manifest.get("test_provider_used_for_formal"):
         provider_expectations = [
             ("deepseek-review.json", "opencode"),

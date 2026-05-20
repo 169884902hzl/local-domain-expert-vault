@@ -21,7 +21,7 @@
           "blocks": {"type": "array", "items": {"type": "string"}},
           "deepseek_label": {"type": "string"},
           "novelty_classification": {"type": "string", "enum": ["likely_open", "partial_overlap", "unknown", "duplicate"]},
-          "verification_scope": {"type": "string"},
+          "verification_scope": {"type": "string", "enum": ["local_only", "local_plus_arxiv_api", "local_plus_s2_or_openalex", "strict_multi_provider"]},
           "external_providers_used": {"type": "array", "items": {"type": "string"}},
           "codex_action": {"type": "string"},
           "human_override_used": {"type": "boolean"},
