@@ -25,6 +25,7 @@
           "external_providers_used": {"type": "array", "items": {"type": "string"}},
           "codex_action": {"type": "string"},
           "human_override_used": {"type": "boolean"},
+          "risks": {"type": "array", "items": {"type": "string"}},
           "publish_target": {"type": "string", "enum": ["seed", "seed-candidates", "killed", "parked", "rescue"]}
         }
       }

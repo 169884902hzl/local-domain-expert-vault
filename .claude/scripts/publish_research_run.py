@@ -251,6 +251,14 @@ def _formal_publish_risk(run_date: str, *, allow_test_provider_for_formal: bool)
         for item in read_json(novelty_path).get("scans", []):
             if isinstance(item, dict) and item.get("formal_publish_risk"):
                 risks.append(str(item["formal_publish_risk"]))
+    survival_path = artifact_dir(run_date) / "survival-decision.json"
+    if survival_path.exists():
+        for item in read_json(survival_path).get("decisions", []):
+            if not isinstance(item, dict):
+                continue
+            for risk in item.get("risks", []):
+                if risk in {"anchorless_core_evidence_risk", "speculative_tension_not_formal_seed_evidence"}:
+                    risks.append(str(risk))
     return ";".join(dict.fromkeys(risks))
 
 

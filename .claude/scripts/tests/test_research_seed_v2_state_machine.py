@@ -25,7 +25,7 @@ from deepseek_scientific_review import build_payload as build_deepseek_payload
 from paper_intake_triage import build_triage
 from publish_research_run import publish
 from research_agenda_extract import build_paper_primitives
-from research_claim_graph import build_nodes
+from research_claim_graph import build_edges, build_graph_records, build_nodes
 from research_seed_v2_common import (
     artifact_dir,
     duplicate_guard,
@@ -37,10 +37,11 @@ from research_seed_v2_common import (
     validate_json_file,
     validate_payload,
     write_json,
+    write_jsonl,
     write_run_artifact,
 )
 from survival_decision import decide
-from tension_map import validate_tensions
+from tension_map import build_tensions, validate_tensions
 from validate_research_run import validate_run
 from weekly_strategy_review import sanitize_overrides
 from audit_daily_automation_quality import _audit_v2_state_machine, _scan_text_for_seed_writer
@@ -81,6 +82,48 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
             "supporting_nodes": ["claim-1"],
             "evidence_links": ["wiki/topics/example.md#claim-1"],
         }
+
+    def write_claim_graph_node(
+        self,
+        *,
+        node_id: str = "claim-1",
+        confidence: str = "high",
+        anchor_type: str = "section",
+        requires_human_check: bool = False,
+    ) -> None:
+        anchor = {
+            "source_note": "wiki/topics/example.md",
+            "evidence_anchor": "wiki/topics/example.md#Results",
+            "anchor": "wiki/topics/example.md#Results",
+            "anchor_type": anchor_type,
+            "section": "Results",
+            "snippet": "Contact rich DLO policies fail under latent friction shifts.",
+            "snippet_type": "section_summary",
+            "pdf_page": None,
+        }
+        write_jsonl(
+            artifact_dir(RUN_DATE) / "claim-graph-snapshot.jsonl",
+            [
+                {
+                    "schema_version": "research_claim_graph.v1",
+                    "record_type": "node",
+                    "node_id": node_id,
+                    "paper_key": "ABC123",
+                    "source_note": "wiki/topics/example.md",
+                    "source_title": "Anchored Contact Failure Benchmark",
+                    "claim_type": "central_claim",
+                    "statement": "Contact rich DLO policies fail under latent friction shifts.",
+                    "confidence": confidence,
+                    "confidence_reason": "test_fixture",
+                    "evidence_anchor": anchor["evidence_anchor"],
+                    "anchor_type": anchor_type,
+                    "summary_origin": "section_summary",
+                    "requires_human_check": requires_human_check,
+                    "anchor": anchor,
+                    "supporting_node_ids": [],
+                }
+            ],
+        )
 
     def register_daily_arxiv_dry_run(self, *args: str) -> str:
         result = subprocess.run(
@@ -195,9 +238,10 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
         formal_promotion_allowed: bool | None = None,
         deepseek_mode: str = "test",
         codex_mode: str = "test",
-    ) -> str:
+        ) -> str:
         item = candidate or self.candidate()
         cid = str(item["candidate_id"])
+        self.write_claim_graph_node()
         write_run_artifact(
             RUN_DATE,
             "selected-candidates.json",
@@ -441,6 +485,106 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
         node = build_nodes([{**primitive, "confidence": {"method_assumption": "high"}}])[0]
         self.assertEqual(node["confidence"], "low")
 
+    def test_note_only_cannot_become_high_confidence(self) -> None:
+        primitive = {
+            "schema_version": "paper_primitives.v1",
+            "paper_key": "ABC123",
+            "source_note": "wiki/topics/example.md",
+            "source_title": "Example",
+            "claims": [
+                {
+                    "claim_id": "claim-note-only",
+                    "claim_type": "central_claim",
+                    "statement": "A model summary claim without source anchor.",
+                    "evidence_anchor": "wiki/topics/example.md",
+                    "anchor_type": "note_only",
+                    "anchor": {"anchor_type": "note_only", "evidence_anchor": "wiki/topics/example.md"},
+                    "confidence": "high",
+                    "confidence_reason": "bad_fixture",
+                    "summary_origin": "model_summary",
+                    "requires_human_check": False,
+                }
+            ],
+        }
+        node = build_nodes([primitive])[0]
+        self.assertEqual(node["confidence"], "low")
+        self.assertTrue(node["requires_human_check"])
+
+    def test_anchored_baseline_result_can_be_high_confidence(self) -> None:
+        records = [
+            {
+                "source_note": "wiki/topics/example.md",
+                "source_title": "Example",
+                "zotero_key": "ABC123",
+                "claim_type": "metric",
+                "statement": "Table 2 reports 71 percent success against the strongest baseline.",
+                "source_snippet_type": "section_summary",
+                "source_snippet": "Table 2 reports 71 percent success against the strongest baseline.",
+                "anchor_type": "table",
+                "evidence_anchor": "wiki/topics/example.md#Results",
+                "evidence_section": "Results",
+            }
+        ]
+        primitive = build_paper_primitives(records)[0]
+        self.assertIn(primitive["confidence"]["actual_baseline_result"], {"medium", "high"})
+        self.assertIn(primitive["confidence"]["strongest_baseline"], {"medium", "high"})
+
+    def test_claim_graph_writes_node_and_edge_records(self) -> None:
+        records = [
+            {
+                "source_note": "wiki/topics/example.md",
+                "source_title": "Example",
+                "zotero_key": "ABC123",
+                "claim_type": claim_type,
+                "statement": statement,
+                "source_snippet_type": "section_summary",
+                "source_snippet": statement,
+                "anchor_type": "section",
+                "evidence_anchor": f"wiki/topics/example.md#{section}",
+                "evidence_section": section,
+            }
+            for claim_type, statement, section in [
+                ("problem", "DLO policies fail under latent friction shifts.", "Problem"),
+                ("method", "The method assumes stable tactile handoff.", "Method"),
+                ("metric", "Results compare against a diffusion policy baseline.", "Results"),
+                ("limitation", "Missing ablation on tactile latency.", "Limitations"),
+            ]
+        ]
+        primitive = build_paper_primitives(records)[0]
+        graph = build_graph_records([primitive])
+        nodes = [item for item in graph if item["record_type"] == "node"]
+        edges = [item for item in graph if item["record_type"] == "edge"]
+        node_ids = {item["node_id"] for item in nodes}
+        self.assertTrue(nodes)
+        self.assertTrue(edges)
+        self.assertTrue(all(edge["source_node_id"] in node_ids and edge["target_node_id"] in node_ids for edge in edges))
+
+    def test_contradiction_edge_requires_two_existing_nodes(self) -> None:
+        contradiction_only = [
+            {
+                "schema_version": "research_claim_graph.v1",
+                "record_type": "node",
+                "node_id": "claim-contradiction",
+                "paper_key": "ABC123",
+                "claim_type": "contradiction",
+                "statement": "The reported failure contradicts the assumed interface stability.",
+                "confidence": "medium",
+                "anchor": {"anchor_type": "section", "evidence_anchor": "wiki/topics/example.md#Limitations"},
+                "requires_human_check": False,
+            }
+        ]
+        self.assertFalse([edge for edge in build_edges(contradiction_only) if edge["relation"] == "contradicts"])
+
+        with_method = contradiction_only + [
+            {
+                **contradiction_only[0],
+                "node_id": "claim-method",
+                "claim_type": "method_assumption",
+                "statement": "The method assumes stable tactile handoff.",
+            }
+        ]
+        self.assertTrue([edge for edge in build_edges(with_method) if edge["relation"] == "contradicts"])
+
     def test_tension_map_rejects_high_confidence_without_high_anchor(self) -> None:
         node = {"node_id": "claim-1", "confidence": "low"}
         errors = validate_tensions(
@@ -449,6 +593,45 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
             {"claim-1": node},
         )
         self.assertIn("t1:high_confidence_without_high_anchored_node", errors)
+
+    def test_tension_map_rejects_high_confidence_llm_only_tension(self) -> None:
+        errors = validate_tensions(
+            [{"tension_id": "t-llm", "tension_type": "baseline_contradiction", "supporting_nodes": [], "confidence": "high"}],
+            set(),
+            {},
+        )
+        self.assertIn("t-llm:high_confidence_llm_only_tension", errors)
+
+    def test_tension_map_uses_existing_edges(self) -> None:
+        nodes = [
+            {
+                "schema_version": "research_claim_graph.v1",
+                "record_type": "node",
+                "node_id": "claim-gap",
+                "paper_key": "ABC123",
+                "claim_type": "missing_ablation",
+                "statement": "Missing tactile latency ablation.",
+                "confidence": "medium",
+                "anchor": {"anchor_type": "section", "evidence_anchor": "wiki/topics/example.md#Limitations"},
+                "requires_human_check": False,
+            },
+            {
+                "schema_version": "research_claim_graph.v1",
+                "record_type": "node",
+                "node_id": "claim-central",
+                "paper_key": "ABC123",
+                "claim_type": "central_claim",
+                "statement": "DLO policies fail under latent shifts.",
+                "confidence": "high",
+                "anchor": {"anchor_type": "section", "evidence_anchor": "wiki/topics/example.md#Problem"},
+                "requires_human_check": False,
+            },
+        ]
+        edge = build_edges(nodes)[0]
+        tensions, speculative = build_tensions(nodes, [edge])
+        self.assertFalse(speculative)
+        self.assertEqual(tensions[0]["tension_type"], "negative_result_opportunity")
+        self.assertEqual(tensions[0]["supporting_edges"], [edge["edge_id"]])
 
     def test_research_agenda_review_apply_cannot_modify_seed(self) -> None:
         idea_bank = Path(self.tmp.name) / "idea_bank"
@@ -809,6 +992,67 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
         self.assertEqual(result["status"], "success")
         self.assertEqual(result["published"], [])
         self.assertEqual(len(result["bucketed"]), 1)
+
+    def test_formal_candidate_with_only_low_note_only_core_evidence_blocks(self) -> None:
+        self.write_review_artifacts(
+            verification_scope="local_plus_s2_or_openalex",
+            deepseek_mode="opencode",
+            codex_mode="codex-cli",
+        )
+        self.write_claim_graph_node(confidence="low", anchor_type="note_only", requires_human_check=True)
+        payload = decide(run_date=RUN_DATE, allow_human_override=False, target_policy="formal")
+        self.assertEqual(payload["decisions"][0]["decision"], "killed")
+        self.assertIn("formal_core_evidence_not_anchored", payload["decisions"][0]["blocks"])
+
+    def test_seed_candidates_only_records_anchorless_risk_without_formal_seed(self) -> None:
+        self.write_review_artifacts(novelty="likely_open", verification_scope="local_only")
+        self.write_claim_graph_node(confidence="low", anchor_type="note_only", requires_human_check=True)
+        survival = decide(run_date=RUN_DATE, allow_human_override=False)
+        self.assertEqual(survival["decisions"][0]["decision"], "accept_for_user_review")
+        self.assertIn("anchorless_core_evidence_risk", survival["decisions"][0]["risks"])
+        write_run_artifact(RUN_DATE, "survival-decision.json", survival, state="survival_decided")
+        result = publish(RUN_DATE, dry_run=False, target_policy="seed-candidates-only")
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["published"], [])
+        self.assertEqual(list((Path(self.tmp.name) / "idea_bank" / "seed").glob("*")), [])
+
+    def test_speculative_tension_cannot_support_formal_seed(self) -> None:
+        candidate = {**self.candidate(), "supporting_tensions": ["tension-spec"]}
+        self.write_review_artifacts(
+            candidate=candidate,
+            verification_scope="local_plus_s2_or_openalex",
+            deepseek_mode="opencode",
+            codex_mode="codex-cli",
+        )
+        write_run_artifact(
+            RUN_DATE,
+            "tension-map.json",
+            {
+                "schema_version": "tension_map.v1",
+                "run_date": RUN_DATE,
+                "tension_types": [],
+                "tensions": [],
+                "speculative_tensions": [
+                    {
+                        "tension_id": "tension-spec",
+                        "tension_type": "speculative_tension",
+                        "summary": "LLM-only tension for breakthrough lane.",
+                        "supporting_nodes": [],
+                        "supporting_edges": [],
+                        "confidence": "low",
+                        "source": "llm_only",
+                        "do_not_use_as_seed_evidence": True,
+                        "original_tension_type": "baseline_contradiction",
+                        "allowed_lane": "breakthrough_speculative",
+                    }
+                ],
+                "validation_errors": [],
+                "artifact_hashes": {},
+            },
+            state="tension_mapped",
+        )
+        payload = decide(run_date=RUN_DATE, allow_human_override=False, target_policy="formal")
+        self.assertIn("speculative_tension_not_formal_seed_evidence", payload["decisions"][0]["blocks"])
 
     def test_external_arxiv_only_novelty_blocks_formal_publish_with_risk_marker(self) -> None:
         self.write_review_artifacts(

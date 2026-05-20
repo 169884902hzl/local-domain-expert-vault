@@ -19,7 +19,7 @@ The public vault uses robotic manipulation as its example domain, especially DLO
 
 It is built for graduate students, PI/lab knowledge-base maintainers, and researchers who need long-term literature memory rather than another one-off summarizer.
 
-Current public version: `v0.2.2`. `v0.1.0` was the first releasable local-first vault: local browsing, knowledge-base audits, `kb_search.py` retrieval, Zotero/Obsidian setup documentation, Paper Reading Workbench, arXiv mirror-first automation docs, and the Windows scheduled-task entry point. `v0.2.0` adds the research-seed v2 state machine on top of that base; `v0.2.1` hardens the gates needed before any future scheduled formal publish; `v0.2.2` upgrades the external novelty scan from an arXiv-only probe to OpenAlex plus optional Semantic Scholar prior-art probes, while still not enabling scheduled formal publish.
+Current public version: `v0.2.3`. `v0.1.0` was the first releasable local-first vault: local browsing, knowledge-base audits, `kb_search.py` retrieval, Zotero/Obsidian setup documentation, Paper Reading Workbench, arXiv mirror-first automation docs, and the Windows scheduled-task entry point. `v0.2.0` adds the research-seed v2 state machine on top of that base; `v0.2.1` hardens the gates needed before any future scheduled formal publish; `v0.2.2` upgrades the external novelty scan from an arXiv-only probe to OpenAlex plus optional Semantic Scholar prior-art probes; `v0.2.3` hardens the anchored evidence graph, while still not enabling scheduled formal publish.
 
 `v0.2.0` is a major workflow architecture upgrade: the old Gemini greenhouse plus downstream-review scaffold is now a transactional research-seed state machine. It improves state control, review ordering, auditability, and rollout safety; it does not claim that generated ideas are automatically novel or publishable.
 
@@ -119,6 +119,20 @@ Key boundaries:
 - arXiv-only still records `external_scope_arxiv_only_not_full_prior_art`; those candidates may go to `seed-candidates/` or `parked/`, but cannot become formal seeds.
 - Scheduled formal publish remains disabled, and scheduled wrappers still must not add formal publish flags.
 - Generated candidates are not proven doctoral-level novelty, publishability, or experimental results.
+
+## v0.2.3: Evidence Graph Hardening
+
+v0.2.3 hardens evidence graph quality; it is not a formal-publish enablement release. `paper_primitives.v1` now records each claim as an anchored claim record with `claim_id`, `claim_type`, `statement`, `evidence_anchor`, `anchor_type`, `confidence`, `confidence_reason`, `summary_origin`, and `requires_human_check`. Note-derived or legacy structured fields default to low confidence unless they carry a real section / snippet / table / figure anchor. `note_only` cannot produce high confidence, and an `actual_baseline_result` without a strict anchor is marked `unusable`.
+
+Key boundaries:
+
+- High-confidence evidence requires a `section`, `snippet`, `table`, or `figure` anchor.
+- The local claim graph now writes both `node` and `edge` records. Edges must reference existing nodes, and edge confidence cannot exceed the weakest evidence node it depends on.
+- The tension map now derives tensions from claim graph edges first and explicitly cites `supporting_nodes` / `supporting_edges`.
+- LLM-only or no-node tensions are marked `speculative_tension` with `do_not_use_as_seed_evidence=true`; they may feed only the breakthrough speculative lane, not formal seed evidence.
+- Under formal target policy, candidates whose core claim graph evidence is entirely low / note_only / requires_human_check are blocked by `formal_core_evidence_not_anchored`. The default `seed-candidates-only` policy records `anchorless_core_evidence_risk` instead of writing a formal seed.
+- Scheduled formal publish remains disabled, and the v0.2.2 external novelty gate is not relaxed.
+- Generated candidates are still not proven doctoral-level novelty, publishability, or experimental results.
 
 ## What this is / is not
 

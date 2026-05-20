@@ -17,7 +17,7 @@
 
 适合对象：需要长期追踪一个专业方向的研究生、PI / 实验室知识库维护者，以及希望把 LLM 变成“有本地文献记忆的领域专家”的研究者。
 
-当前公开版本：`v0.2.2`。`v0.1.0` 是首个可发行 local-first vault 版本，覆盖本地浏览、知识库审计、`kb_search.py` 检索、Zotero/Obsidian 配置说明、Paper Reading Workbench、arXiv mirror-first 自动化文档和 Windows 计划任务入口。`v0.2.0` 在此基础上加入 research-seed v2 状态机；`v0.2.1` 继续加固 scheduled formal publish 前的安全闸门；`v0.2.2` 把 external novelty scan 从 arXiv-only probe 升级为 OpenAlex / optional Semantic Scholar 的 multi-provider prior-art probe，但仍不启用 scheduled formal publish。
+当前公开版本：`v0.2.3`。`v0.1.0` 是首个可发行 local-first vault 版本，覆盖本地浏览、知识库审计、`kb_search.py` 检索、Zotero/Obsidian 配置说明、Paper Reading Workbench、arXiv mirror-first 自动化文档和 Windows 计划任务入口。`v0.2.0` 在此基础上加入 research-seed v2 状态机；`v0.2.1` 继续加固 scheduled formal publish 前的安全闸门；`v0.2.2` 把 external novelty scan 从 arXiv-only probe 升级为 OpenAlex / optional Semantic Scholar 的 multi-provider prior-art probe；`v0.2.3` 加固 anchored evidence graph，但仍不启用 scheduled formal publish。
 
 `v0.2.0` 是一次 workflow architecture upgrade：从 Gemini greenhouse + 后置审查 scaffold，升级为 transactional research-seed state machine。它改进的是状态控制、审查顺序、审计性和 rollout safety，不是声明系统已经能稳定产生已验证创新点。
 
@@ -102,6 +102,20 @@ v0.2.2 把 `local_plus_arxiv_api` 从 formal 最低门槛降回“窄范围 arXi
 - 所有外部 provider 都有 timeout、rate limit 和 runtime cache；cache 位于 `projects/research-agenda/cache/`，属于本地运行状态，不应提交。
 - arXiv-only 仍记录 `external_scope_arxiv_only_not_full_prior_art`；这类 candidate 只能进入 `seed-candidates/` 或 `parked/`，不能写 formal seed。
 - Scheduled formal publish 仍保持禁用，scheduled wrapper 仍不得加入 formal flags。
+- 生成的 candidates 仍不是已证明 doctoral-level novelty、publishability 或实验有效性。
+
+## v0.2.3: Evidence Graph Hardening
+
+v0.2.3 加固的是 evidence graph 质量，不是 formal publish enablement。`paper_primitives.v1` 现在把每条 claim 显式记录为 anchored claim record，包括 `claim_id`、`claim_type`、`statement`、`evidence_anchor`、`anchor_type`、`confidence`、`confidence_reason`、`summary_origin` 和 `requires_human_check`。没有真实 section / snippet / table / figure anchor 的 note-derived 或 legacy structured fields 默认低置信；`note_only` 不能产生 high confidence，`actual_baseline_result` 没有严格 anchor 时会标为 `unusable`。
+
+关键边界：
+
+- high-confidence evidence 必须有 `section`、`snippet`、`table` 或 `figure` anchor。
+- local claim graph 现在同时写 `node` 和 `edge` records；edge 只能引用已存在 node，且 edge confidence 不高于相关 evidence nodes 的最低 confidence。
+- tension map 现在优先从 claim graph edges 生成，并显式引用 `supporting_nodes` / `supporting_edges`。
+- LLM-only 或无 node 的 tension 会标为 `speculative_tension` 和 `do_not_use_as_seed_evidence=true`，只能保留给 breakthrough speculative lane，不能支撑 formal seed。
+- formal target 下，如果核心 claim graph evidence 全是 low / note_only / requires_human_check，会被 `formal_core_evidence_not_anchored` 阻断；默认 `seed-candidates-only` 只记录 `anchorless_core_evidence_risk`。
+- Scheduled formal publish 仍保持禁用，v0.2.2 external novelty gate 没有放宽。
 - 生成的 candidates 仍不是已证明 doctoral-level novelty、publishability 或实验有效性。
 
 ## 它是什么 / 不是什么

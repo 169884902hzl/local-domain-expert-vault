@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import re
 from collections import Counter
 from pathlib import Path
@@ -61,6 +62,21 @@ TRANSFER_DOMAINS = {
     "VLA": "transfer_to_VLA",
     "sim-to-real": "transfer_to_sim_to_real",
 }
+ANCHOR_TYPES = {"section", "figure", "table", "snippet", "abstract", "note_only"}
+STRICT_ANCHOR_TYPES = {"section", "figure", "table", "snippet"}
+PAPER_PRIMITIVE_CLAIMS = [
+    "central_claim",
+    "method_assumption",
+    "strongest_baseline",
+    "actual_baseline_result",
+    "missing_ablation",
+    "unmodeled_latent_variable",
+    "evaluation_blind_spot",
+    "interface_boundary",
+    "transfer_failure",
+    "reusable_primitive",
+    "contradiction",
+]
 CLAIM_TO_SECTION = {
     "paper_summary": "Frontmatter summary",
     "problem": "Problem",
@@ -72,6 +88,14 @@ CLAIM_TO_SECTION = {
     "limitation": "Limitations",
     "open_question": "Limitations",
     "evidence_note": "结构化提取",
+}
+CLAIM_SECTION_CANDIDATES = {
+    "metric": ["Results", "Evaluation", "Experiments", "Metrics", "Evidence Notes"],
+    "limitation": ["Limitations", "Discussion", "Failure Cases", "Evaluation", "Evidence Notes"],
+    "evidence_note": ["Evidence Notes", "Results", "Evaluation", "Discussion"],
+    "task": ["Tasks", "Experiments", "Evaluation"],
+    "sensor": ["Sensors", "Method", "System"],
+    "robot_setup": ["Robot Setup", "System", "Method"],
 }
 CLAIM_TO_STRUCTURED_FIELD = {
     "problem": "Problem",
@@ -121,6 +145,14 @@ def _short_snippet(value: str, *, limit: int = 260) -> str:
     return text[: limit - 1].rstrip() + "…"
 
 
+def _section_candidates_for_claim(claim_type: str, section: str) -> list[str]:
+    candidates = [] if section == "结构化提取" else [section]
+    candidates.extend(CLAIM_SECTION_CANDIDATES.get(claim_type, []))
+    if section == "结构化提取":
+        candidates.append("Evidence Notes")
+    return list(dict.fromkeys(candidate for candidate in candidates if candidate))
+
+
 def _snippet_for_claim(
     *,
     claim_type: str,
@@ -131,17 +163,14 @@ def _snippet_for_claim(
 ) -> tuple[str, str, str, str]:
     section = CLAIM_TO_SECTION.get(claim_type, "结构化提取")
     field_name = CLAIM_TO_STRUCTURED_FIELD.get(claim_type)
-    if field_name and structured.get(field_name):
-        return section, _short_snippet(structured[field_name]), "structured_field", "low"
     if claim_type == "paper_summary" and fields.get("summary"):
         return section, _short_snippet(fields["summary"]), "frontmatter_summary", "medium"
-    section_candidates = [section]
-    if section == "结构化提取":
-        section_candidates.append("Evidence Notes")
-    for heading in section_candidates:
+    for heading in _section_candidates_for_claim(claim_type, section):
         snippet = _short_snippet(_section_text(body, heading))
         if snippet:
             return heading, snippet, "section_summary", "medium"
+    if field_name and structured.get(field_name):
+        return section, _short_snippet(structured[field_name]), "structured_field", "low"
     return section, _short_snippet(statement), "claim_statement", "low"
 
 
@@ -157,6 +186,8 @@ def _anchor_type(section: str, snippet_type: str, snippet: str) -> str:
         return "table"
     if "figure" in lowered or "fig." in lowered or "fig " in lowered or "图" in lowered:
         return "figure"
+    if snippet_type == "frontmatter_summary":
+        return "abstract"
     if snippet_type == "section_summary" and snippet:
         return "section"
     return "note_only"
@@ -361,16 +392,158 @@ def validate_records(records: list[dict[str, Any]]) -> list[str]:
 
 
 def _anchor_confidence(record: dict[str, Any], claim_type: str) -> str:
-    snippet_type = str(record.get("source_snippet_type", ""))
-    snippet = str(record.get("source_snippet", ""))
-    anchor_type = str(record.get("anchor_type", "note_only"))
-    if not snippet or snippet_type == "claim_statement" or anchor_type == "note_only":
-        if claim_type == "actual_baseline_result":
-            return "unusable"
-        return "low"
-    if anchor_type in {"section", "snippet", "table", "figure"}:
-        return "high" if claim_type not in {"evaluation_blind_spot", "reusable_primitive"} else "medium"
-    return "low"
+    anchor = _record_anchor(str(record.get("source_note", "")), record)
+    confidence, _reason, _requires_human_check = _claim_confidence(record, claim_type, anchor)
+    return confidence
+
+
+def _claim_id(paper_key: str, claim_type: str, statement: str) -> str:
+    basis = f"{paper_key}|{claim_type}|{' '.join(str(statement).lower().split())}"
+    return "paper-claim-" + hashlib.sha1(basis.encode("utf-8")).hexdigest()[:16]
+
+
+def _record_anchor(source_note: str, record: dict[str, Any] | None) -> dict[str, Any]:
+    if not record:
+        return {
+            "source_note": source_note,
+            "evidence_anchor": "",
+            "anchor_type": "note_only",
+            "section": "",
+            "snippet": "",
+            "snippet_type": "note_only",
+            "pdf_page": None,
+        }
+    anchor_type = str(record.get("anchor_type") or "note_only")
+    if anchor_type not in ANCHOR_TYPES:
+        anchor_type = "note_only"
+    return {
+        "source_note": source_note,
+        "evidence_anchor": record.get("evidence_anchor", ""),
+        "anchor": record.get("evidence_anchor", ""),
+        "anchor_type": anchor_type,
+        "section": record.get("evidence_section", ""),
+        "snippet": record.get("source_snippet", ""),
+        "snippet_type": record.get("source_snippet_type", "note_only"),
+        "pdf_page": record.get("pdf_page", None),
+    }
+
+
+def _strictly_anchored(anchor: dict[str, Any]) -> bool:
+    return bool(
+        anchor.get("anchor_type") in STRICT_ANCHOR_TYPES
+        and (anchor.get("evidence_anchor") or anchor.get("section") or anchor.get("snippet"))
+    )
+
+
+def _claim_confidence(record: dict[str, Any] | None, claim_type: str, anchor: dict[str, Any]) -> tuple[str, str, bool]:
+    if not record:
+        return "low", "claim_not_extracted_from_note", True
+    snippet = str(anchor.get("snippet", ""))
+    snippet_type = str(anchor.get("snippet_type", ""))
+    anchor_type = str(anchor.get("anchor_type", "note_only"))
+    anchored = _strictly_anchored(anchor)
+    if claim_type == "actual_baseline_result" and not anchored:
+        return "unusable", "actual_baseline_result_requires_section_snippet_table_or_figure_anchor", True
+    if anchor_type == "note_only" or snippet_type in {"claim_statement", "structured_field"} or not snippet:
+        return "low", "note_only_or_legacy_structured_field_without_strict_anchor", True
+    if claim_type == "strongest_baseline" and not anchored:
+        return "low", "strongest_baseline_without_strict_anchor_is_low_confidence", True
+    if claim_type == "evaluation_blind_spot":
+        if not anchored:
+            return "low", "evaluation_blind_spot_requires_strict_anchor_for_medium_or_high", True
+        return "medium", "evaluation_blind_spot_has_strict_anchor_but_requires_human_review", False
+    if not anchored:
+        return "low", "high_confidence_requires_section_snippet_table_or_figure_anchor", True
+    if claim_type in {"missing_ablation", "interface_boundary", "transfer_failure", "contradiction", "reusable_primitive"}:
+        return "medium", "strict_anchor_present_but_claim_requires_human_interpretation", False
+    return "high", "strict_anchor_present", False
+
+
+def _claim_from_record(
+    *,
+    paper_key: str,
+    source_note: str,
+    claim_type: str,
+    statement: str,
+    record: dict[str, Any] | None,
+) -> dict[str, Any]:
+    anchor = _record_anchor(source_note, record)
+    confidence, confidence_reason, requires_human_check = _claim_confidence(record, claim_type, anchor)
+    summary_origin = str(anchor.get("snippet_type") or "note_only")
+    if summary_origin in {"frontmatter_summary", "claim_statement"} and not _strictly_anchored(anchor):
+        requires_human_check = True
+        if confidence == "high":
+            confidence = "low"
+            confidence_reason = "model_summary_without_strict_anchor_is_low_confidence"
+    return {
+        "claim_id": _claim_id(paper_key, claim_type, statement),
+        "claim_type": claim_type,
+        "statement": statement,
+        "evidence_anchor": anchor.get("evidence_anchor", ""),
+        "anchor_type": anchor.get("anchor_type", "note_only"),
+        "anchor": anchor,
+        "confidence": confidence,
+        "confidence_reason": confidence_reason,
+        "summary_origin": summary_origin,
+        "requires_human_check": requires_human_check,
+        "domains": record.get("domains", []) if record else [],
+    }
+
+
+def _record_matches(record: dict[str, Any], claim_types: set[str], tokens: set[str] | None = None) -> bool:
+    if str(record.get("claim_type")) not in claim_types or not record.get("statement"):
+        return False
+    if not tokens:
+        return True
+    text = " ".join(str(record.get(key, "")) for key in ["statement", "source_snippet", "evidence_section"]).lower()
+    return any(token in text for token in tokens)
+
+
+def _first_matching(
+    records: list[dict[str, Any]],
+    claim_types: set[str],
+    *,
+    tokens: set[str] | None = None,
+) -> tuple[str, dict[str, Any] | None]:
+    for record in records:
+        if _record_matches(record, claim_types, tokens):
+            return str(record["statement"]), record
+    return "", None
+
+
+def _first_prefer_matching(
+    records: list[dict[str, Any]],
+    claim_types: set[str],
+    *,
+    tokens: set[str],
+) -> tuple[str, dict[str, Any] | None]:
+    statement, record = _first_matching(records, claim_types, tokens=tokens)
+    if record:
+        return statement, record
+    return _first_matching(records, claim_types)
+
+
+def _legacy_confidence_map(claims: list[dict[str, Any]]) -> dict[str, str]:
+    return {str(claim["claim_type"]): str(claim["confidence"]) for claim in claims}
+
+
+def _legacy_anchor_map(claims: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    return {str(claim["claim_type"]): dict(claim["anchor"]) for claim in claims}
+
+
+def _legacy_reason_map(claims: list[dict[str, Any]]) -> dict[str, str]:
+    return {str(claim["claim_type"]): str(claim["confidence_reason"]) for claim in claims}
+
+
+def _legacy_metadata_map(claims: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    return {
+        str(claim["claim_type"]): {
+            "claim_id": claim["claim_id"],
+            "summary_origin": claim["summary_origin"],
+            "requires_human_check": claim["requires_human_check"],
+        }
+        for claim in claims
+    }
 
 
 def _first_statement(records: list[dict[str, Any]], claim_types: set[str]) -> tuple[str, dict[str, Any] | None]:
@@ -391,56 +564,82 @@ def build_paper_primitives(records: list[dict[str, Any]]) -> list[dict[str, Any]
         method_assumption, method_record = _first_statement(items, {"method"})
         strongest_baseline, baseline_record = _first_statement(items, {"metric", "method"})
         actual_baseline_result, result_record = _first_statement(items, {"metric"})
-        missing_ablation, ablation_record = _first_statement(items, {"limitation", "open_question"})
+        missing_ablation, ablation_record = _first_prefer_matching(
+            items,
+            {"limitation", "open_question", "evidence_note"},
+            tokens={"ablation", "ablations", "消融", "对照"},
+        )
+        latent_variable, latent_record = _first_matching(
+            items,
+            {"limitation", "open_question", "evidence_note"},
+            tokens={"latent", "unmodeled", "hidden", "未建模", "隐变量"},
+        )
         evaluation_blind_spot, blind_record = _first_statement(items, {"limitation", "evidence_note"})
+        interface_boundary, interface_record = _first_prefer_matching(
+            items,
+            {"method", "task", "sensor", "robot_setup", "limitation", "evidence_note"},
+            tokens={"interface", "boundary", "handoff", "接口", "边界"},
+        )
+        transfer_failure, transfer_record = _first_matching(
+            items,
+            {"limitation", "open_question", "evidence_note"},
+            tokens={"transfer", "sim-to-real", "generalization", "domain", "迁移", "泛化"},
+        )
         reusable_primitive, primitive_record = _first_statement(items, {"method", "task", "sensor", "robot_setup"})
+        contradiction, contradiction_record = _first_matching(
+            items,
+            {"limitation", "open_question", "evidence_note"},
+            tokens={"contradiction", "conflict", "inconsistent", "反例", "矛盾", "冲突"},
+        )
         record_by_name = {
             "central_claim": central_record,
             "method_assumption": method_record,
             "strongest_baseline": baseline_record,
             "actual_baseline_result": result_record,
             "missing_ablation": ablation_record,
+            "unmodeled_latent_variable": latent_record,
             "evaluation_blind_spot": blind_record,
+            "interface_boundary": interface_record,
+            "transfer_failure": transfer_record,
             "reusable_primitive": primitive_record,
+            "contradiction": contradiction_record,
         }
-        anchors = {
-            name: {
-                "source_note": source_note,
-                "anchor": item.get("evidence_anchor", ""),
-                "section": item.get("evidence_section", ""),
-                "snippet": item.get("source_snippet", ""),
-                "snippet_type": item.get("source_snippet_type", "note_only"),
-                "anchor_type": item.get("anchor_type", "note_only"),
-            }
-            for name, item in record_by_name.items()
-            if item
+        primitive_values = {
+            "central_claim": central_claim,
+            "method_assumption": method_assumption,
+            "strongest_baseline": strongest_baseline,
+            "actual_baseline_result": actual_baseline_result,
+            "missing_ablation": missing_ablation,
+            "unmodeled_latent_variable": latent_variable,
+            "evaluation_blind_spot": evaluation_blind_spot,
+            "interface_boundary": interface_boundary,
+            "transfer_failure": transfer_failure,
+            "reusable_primitive": reusable_primitive,
+            "contradiction": contradiction,
         }
-        confidence = {
-            name: _anchor_confidence(item, name)
-            for name, item in record_by_name.items()
-            if item
-        }
+        claims = [
+            _claim_from_record(
+                paper_key=paper_key,
+                source_note=source_note,
+                claim_type=claim_type,
+                statement=statement,
+                record=record_by_name.get(claim_type),
+            )
+            for claim_type, statement in primitive_values.items()
+            if statement
+        ]
         primitives.append(
             {
                 "schema_version": "paper_primitives.v1",
                 "paper_key": paper_key,
                 "source_note": source_note,
                 "source_title": items[0].get("source_title", Path(source_note).stem),
-                "primitives": {
-                    "central_claim": central_claim,
-                    "method_assumption": method_assumption,
-                    "strongest_baseline": strongest_baseline,
-                    "actual_baseline_result": actual_baseline_result,
-                    "missing_ablation": missing_ablation,
-                    "unmodeled_latent_variable": "",
-                    "evaluation_blind_spot": evaluation_blind_spot,
-                    "interface_boundary": "",
-                    "transfer_failure": "",
-                    "reusable_primitive": reusable_primitive,
-                    "contradiction": "",
-                },
-                "anchors": anchors,
-                "confidence": confidence,
+                "primitives": primitive_values,
+                "claims": claims,
+                "anchors": _legacy_anchor_map(claims),
+                "confidence": _legacy_confidence_map(claims),
+                "confidence_reasons": _legacy_reason_map(claims),
+                "claim_metadata": _legacy_metadata_map(claims),
                 "legacy_evidence_boundary": "legacy records without section/snippet/table/figure anchors are low confidence by default.",
             }
         )

@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.2.3 - Evidence Graph Hardening
+
+### Added
+
+- `paper_primitives.v1` now emits anchored per-claim records with claim id, claim type, evidence anchor, anchor type, confidence, confidence reason, summary origin, and human-check marker.
+- `research_claim_graph.py` now writes both `record_type=node` and `record_type=edge` records to the canonical graph and run snapshot.
+- Claim graph edge relations now include `supports`, `contradicts`, `limits`, `exposes_gap`, `baseline_for`, `depends_on`, `evaluates`, and `transfers_to`.
+- `tension_map.py` now cites claim graph `supporting_nodes` and `supporting_edges`, and marks LLM-only / no-node tensions as `speculative_tension` with `do_not_use_as_seed_evidence=true`.
+- Survival and strict validation now detect anchorless core evidence risk.
+
+### Changed
+
+- Note-only and legacy structured-field claims default to low confidence unless they carry a real section / snippet / table / figure anchor.
+- High-confidence claim evidence now requires a `section`, `snippet`, `table`, or `figure` anchor.
+- `actual_baseline_result` without a strict anchor is marked `unusable`; `strongest_baseline` without anchor is at most low confidence.
+- Tension map generation now depends on claim graph nodes and edges instead of only deterministic claim-type mapping.
+- Formal target policy blocks candidates whose core claim graph evidence is entirely low / note_only / requires_human_check with `formal_core_evidence_not_anchored`; `seed-candidates-only` records `anchorless_core_evidence_risk` instead.
+
+### Safety
+
+- v0.2.3 is evidence graph hardening, not formal publish enablement.
+- Scheduled formal publish remains disabled, and scheduled wrappers still must not pass formal publish flags.
+- v0.2.2 external novelty gates are not relaxed.
+- Generated candidates remain review artifacts, not proven doctoral-level novelty, publishability, or experimental results.
+
 ## v0.2.2 - External Novelty Scan Hardening
 
 ### Added

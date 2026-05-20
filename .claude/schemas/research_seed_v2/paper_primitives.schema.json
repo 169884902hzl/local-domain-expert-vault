@@ -2,14 +2,62 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Research Seed v2 Paper Primitives",
   "type": "object",
-  "required": ["schema_version", "paper_key", "source_note", "primitives"],
+  "required": ["schema_version", "paper_key", "source_note", "primitives", "claims", "anchors", "confidence"],
   "properties": {
-    "schema_version": {"type": "string"},
-    "paper_key": {"type": "string"},
-    "source_note": {"type": "string"},
+    "schema_version": {"type": "string", "const": "paper_primitives.v1"},
+    "paper_key": {"type": "string", "minLength": 1},
+    "source_note": {"type": "string", "minLength": 1},
+    "source_title": {"type": "string"},
     "primitives": {"type": "object"},
+    "claims": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "claim_id",
+          "claim_type",
+          "statement",
+          "evidence_anchor",
+          "anchor_type",
+          "confidence",
+          "confidence_reason",
+          "summary_origin",
+          "requires_human_check"
+        ],
+        "properties": {
+          "claim_id": {"type": "string", "minLength": 1},
+          "claim_type": {
+            "type": "string",
+            "enum": [
+              "central_claim",
+              "method_assumption",
+              "strongest_baseline",
+              "actual_baseline_result",
+              "missing_ablation",
+              "unmodeled_latent_variable",
+              "evaluation_blind_spot",
+              "interface_boundary",
+              "transfer_failure",
+              "reusable_primitive",
+              "contradiction"
+            ]
+          },
+          "statement": {"type": "string", "minLength": 1},
+          "evidence_anchor": {"type": "string"},
+          "anchor_type": {"type": "string", "enum": ["section", "figure", "table", "snippet", "abstract", "note_only"]},
+          "anchor": {"type": "object"},
+          "confidence": {"type": "string", "enum": ["high", "medium", "low", "unusable"]},
+          "confidence_reason": {"type": "string"},
+          "summary_origin": {"type": "string"},
+          "requires_human_check": {"type": "boolean"},
+          "domains": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    },
     "anchors": {"type": "object"},
     "confidence": {"type": "object"},
+    "confidence_reasons": {"type": "object"},
+    "claim_metadata": {"type": "object"},
     "legacy_evidence_boundary": {"type": "string"}
   }
 }

@@ -15,6 +15,7 @@ from research_seed_v2_common import (
     candidate_id,
     file_sha256,
     init_manifest_with_policy,
+    load_jsonl,
     read_json,
     run_dir,
     schema_validator_available,
@@ -25,10 +26,45 @@ from research_seed_v2_common import (
 
 
 BROAD_EXTERNAL_NOVELTY_PROVIDERS = {"openalex", "semantic_scholar"}
+WEAK_CORE_CONFIDENCE = {"low", "unusable"}
+UNANCHORED_TYPES = {"note_only", "abstract", ""}
 
 
 def _has_broad_external_provider(providers: list[str]) -> bool:
     return bool(BROAD_EXTERNAL_NOVELTY_PROVIDERS & set(providers))
+
+
+def _load_claim_nodes(run_date: str) -> dict[str, dict[str, Any]]:
+    path = artifact_dir(run_date) / "claim-graph-snapshot.jsonl"
+    if not path.exists():
+        return {}
+    nodes: dict[str, dict[str, Any]] = {}
+    for record in load_jsonl(path):
+        if record.get("record_type", "node") != "node":
+            continue
+        node_id = str(record.get("node_id", ""))
+        if node_id:
+            nodes[node_id] = record
+    return nodes
+
+
+def _candidate_node_ids(item: dict[str, Any]) -> list[str]:
+    values: list[str] = []
+    for key in ["core_claim_graph_nodes", "supporting_nodes"]:
+        raw = item.get(key, [])
+        if isinstance(raw, list):
+            values.extend(str(value) for value in raw if value)
+    return list(dict.fromkeys(values))
+
+
+def _node_is_weak_or_unanchored(node: dict[str, Any]) -> bool:
+    anchor = node.get("anchor", {}) if isinstance(node.get("anchor"), dict) else {}
+    anchor_type = str(node.get("anchor_type") or anchor.get("anchor_type") or "")
+    return (
+        str(node.get("confidence", "low")) in WEAK_CORE_CONFIDENCE
+        or anchor_type in UNANCHORED_TYPES
+        or node.get("requires_human_check") is True
+    )
 
 
 def _validate_manifest(run_date: str) -> list[str]:
@@ -63,6 +99,53 @@ def _final_candidate_ids(run_date: str) -> set[str]:
     ids = {candidate_id(item) for item in selected if isinstance(item, dict) and candidate_id(item) not in mutated_parent_ids}
     ids.update(candidate_id(item) for item in mutations if isinstance(item, dict))
     return ids
+
+
+def _final_candidates(run_date: str) -> list[dict[str, Any]]:
+    selected = read_json(artifact_dir(run_date) / "selected-candidates.json").get("selected", [])
+    mutations_path = artifact_dir(run_date) / "gemini-mutations.json"
+    mutations = read_json(mutations_path).get("mutations", []) if mutations_path.exists() else []
+    mutated_parent_ids = {str(item.get("parent_candidate_id")) for item in mutations if isinstance(item, dict)}
+    finals = [dict(item) for item in selected if isinstance(item, dict) and candidate_id(item) not in mutated_parent_ids]
+    finals.extend(dict(item) for item in mutations if isinstance(item, dict))
+    return finals
+
+
+def _validate_formal_core_evidence(run_date: str) -> list[str]:
+    artifacts = artifact_dir(run_date)
+    if not (artifacts / "selected-candidates.json").exists() or not (artifacts / "survival-decision.json").exists():
+        return []
+    accepted = {
+        str(item.get("candidate_id"))
+        for item in read_json(artifacts / "survival-decision.json").get("decisions", [])
+        if isinstance(item, dict) and item.get("decision") == "accept_for_user_review"
+    }
+    if not accepted:
+        return []
+    claim_nodes = _load_claim_nodes(run_date)
+    errors: list[str] = []
+    for item in _final_candidates(run_date):
+        cid = candidate_id(item)
+        if cid not in accepted:
+            continue
+        node_ids = _candidate_node_ids(item)
+        resolved = [claim_nodes[node_id] for node_id in node_ids if node_id in claim_nodes]
+        if item.get("anchorless_core_evidence") or not node_ids or not resolved:
+            errors.append(f"formal_core_evidence_not_anchored:{cid}")
+        elif all(_node_is_weak_or_unanchored(node) for node in resolved):
+            errors.append(f"formal_core_evidence_not_anchored:{cid}")
+        decision = next(
+            (
+                row
+                for row in read_json(artifacts / "survival-decision.json").get("decisions", [])
+                if isinstance(row, dict) and str(row.get("candidate_id")) == cid
+            ),
+            {},
+        )
+        risks = decision.get("risks", []) if isinstance(decision, dict) else []
+        if "speculative_tension_not_formal_seed_evidence" in risks:
+            errors.append(f"speculative_tension_not_formal_seed_evidence:{cid}")
+    return errors
 
 
 def _validate_candidate_alignment(run_date: str) -> list[str]:
@@ -125,6 +208,7 @@ def _validate_formal_policy(run_date: str) -> list[str]:
             provider = read_json(path).get("provider_status", {})
             if provider.get("mode") != expected_mode:
                 errors.append(f"formal_provider_mode_not_production:{artifact_name}:expected={expected_mode}:actual={provider.get('mode')}")
+    errors.extend(_validate_formal_core_evidence(run_date))
     return errors
 
 

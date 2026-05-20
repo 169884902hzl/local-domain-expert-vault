@@ -265,7 +265,7 @@ $env:LOCAL_FIRST_VAULT_ALLOW_DANGEROUS_CLAUDE = "1"
 
 这个开关只影响 `daily_arxiv_pipeline.py` 的本机运行，不应该写入公开仓库配置。
 
-### v0.2.0-v0.2.2 research-seed 状态机和 publish policy
+### v0.2.0-v0.2.3 research-seed 状态机和 publish policy
 
 v0.2.0 的 daily automation 不再把 Gemini/local score 的输出直接当成正式 idea seed。它把每轮候选放进一个 transactional research-seed state machine：
 
@@ -320,6 +320,10 @@ Scheduled daily wrapper 另有 PowerShell 参数：
 v0.2.1 里，`paper_intake_triage.py` 会输出 `selected_for_deep_read`，daily pipeline 用这些 stable `arxiv_id` 同时控制 Zotero import attempts 和 Claudian deep-read attempts。默认 target 是 3 篇，hard cap 是 4 篇；除非显式启用 `--legacy-import-fill`，旧的 `min_new_imports=10` 不再把 v2 import/read 数量拉回 10。
 
 Formal novelty verification 不能只依赖 local claim graph、local arXiv mirror 或 arXiv API。`novelty_scan.v1` 会记录 `verification_scope`、`external_providers_used`、`provider_results`、`provider_errors` 和 `formal_promotion_allowed`。v0.2.2 新增 OpenAlex 和 optional Semantic Scholar prior-art probes；Semantic Scholar 只有在 `SEMANTIC_SCHOLAR_API_KEY` 或 `S2_API_KEY` 存在时启用，没有 key 时记录 `provider_unavailable` 并 fail closed。所有外部 provider 都有 timeout、rate limit 和位于 `projects/research-agenda/cache/` 的 runtime cache；cache 不应提交。只用了 arXiv API 时仍记录 `formal_publish_risk=external_scope_arxiv_only_not_full_prior_art`，这不是完整 prior-art verification，不能写 formal seed。
+
+v0.2.3 加固的是 evidence graph，不是 formal publish enablement。`paper_primitives.v1` 会为每条 claim 记录 anchor、confidence、confidence reason、summary origin 和 human-check 标记；note-derived / legacy structured fields 没有 section / snippet / table / figure anchor 时默认低置信，`note_only` 不能产生 high confidence，`actual_baseline_result` 没有严格 anchor 时会变成 `unusable`。`research_claim_graph.jsonl` 和 run snapshot 现在同时包含 `record_type=node` 与 `record_type=edge`；edge 必须引用现有 node，edge confidence 不能高于相关 node 的最低 confidence。`tension_map.py` 优先从 claim graph edges 生成 tension，并显式记录 `supporting_nodes` / `supporting_edges`。LLM-only 或无 node tension 必须标记为 `speculative_tension` 与 `do_not_use_as_seed_evidence=true`，只能进入 breakthrough speculative lane，不能支撑 formal seed。
+
+formal target policy 下，如果候选核心 claim graph evidence 全是 low / note_only / requires_human_check，`survival_decision.py` 和 strict validation 会阻断并记录 `formal_core_evidence_not_anchored`。默认 `seed-candidates-only` 只记录 `anchorless_core_evidence_risk`，不会写 production formal seed。v0.2.3 不放宽 v0.2.2 external novelty gate，也不证明 generated candidates 已达到 doctoral-level novelty、publishability 或实验有效性。
 
 Formal provider provenance 也更严格：`provider=json` 可以继续用于 seed-candidates-only fixture 和 CI，但 formal mode 默认拒绝它。只有手动传入 `--allow-test-provider-for-formal` 才能继续测试 formal path，并且 manifest / publish result / audit 会记录 `test_provider_used_for_formal=true` 和 `formal_publish_risk=test_provider_not_production_provenance`。
 

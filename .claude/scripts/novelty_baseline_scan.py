@@ -230,7 +230,11 @@ def _strongest_baseline(item: dict[str, Any], nearest_works: list[dict[str, Any]
 def _scan_claim_graph(item: dict[str, Any], limit: int = 5) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     query = _candidate_text(item)
     path = agenda_v2_path("evidence", "research_claim_graph.jsonl")
-    records = load_jsonl(path) if path.exists() else []
+    records = [
+        record
+        for record in (load_jsonl(path) if path.exists() else [])
+        if record.get("record_type", "node") == "node"
+    ]
     scored: list[dict[str, Any]] = []
     for record in records:
         text = " ".join(str(record.get(key, "")) for key in ["source_title", "claim_type", "statement"])

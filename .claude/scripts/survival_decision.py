@@ -12,6 +12,7 @@ from research_seed_v2_common import (
     artifact_hashes,
     candidate_id,
     ensure_v2_dirs,
+    load_jsonl,
     read_json,
     run_dir,
     validate_artifact,
@@ -21,6 +22,8 @@ from research_seed_v2_common import (
 
 
 BROAD_EXTERNAL_NOVELTY_PROVIDERS = {"openalex", "semantic_scholar"}
+WEAK_CORE_CONFIDENCE = {"low", "unusable"}
+UNANCHORED_TYPES = {"note_only", "abstract", ""}
 
 
 def _has_broad_external_provider(providers: list[str]) -> bool:
@@ -63,6 +66,89 @@ def _has_anchorless_core_evidence(item: dict[str, Any]) -> bool:
     return not bool(item.get("evidence_links") or item.get("supporting_nodes"))
 
 
+def _load_claim_nodes(run_date: str) -> dict[str, dict[str, Any]]:
+    path = artifact_dir(run_date) / "claim-graph-snapshot.jsonl"
+    if not path.exists():
+        return {}
+    nodes: dict[str, dict[str, Any]] = {}
+    for record in load_jsonl(path):
+        if record.get("record_type", "node") != "node":
+            continue
+        node_id = str(record.get("node_id", ""))
+        if node_id:
+            nodes[node_id] = record
+    return nodes
+
+
+def _load_speculative_tensions(run_date: str) -> dict[str, dict[str, Any]]:
+    path = artifact_dir(run_date) / "tension-map.json"
+    if not path.exists():
+        return {}
+    payload = read_json(path)
+    tensions: dict[str, dict[str, Any]] = {}
+    for item in [*payload.get("tensions", []), *payload.get("speculative_tensions", [])]:
+        if not isinstance(item, dict):
+            continue
+        tension_id = str(item.get("tension_id", ""))
+        if tension_id:
+            tensions[tension_id] = item
+    return tensions
+
+
+def _candidate_node_ids(item: dict[str, Any]) -> list[str]:
+    values: list[str] = []
+    for key in ["core_claim_graph_nodes", "supporting_nodes"]:
+        raw = item.get(key, [])
+        if isinstance(raw, list):
+            values.extend(str(value) for value in raw if value)
+    return list(dict.fromkeys(values))
+
+
+def _candidate_tension_ids(item: dict[str, Any]) -> list[str]:
+    values: list[str] = []
+    for key in ["supporting_tensions", "tension_ids"]:
+        raw = item.get(key, [])
+        if isinstance(raw, list):
+            values.extend(str(value) for value in raw if value)
+    return list(dict.fromkeys(values))
+
+
+def _node_is_weak_or_unanchored(node: dict[str, Any]) -> bool:
+    anchor = node.get("anchor", {}) if isinstance(node.get("anchor"), dict) else {}
+    anchor_type = str(node.get("anchor_type") or anchor.get("anchor_type") or "")
+    return (
+        str(node.get("confidence", "low")) in WEAK_CORE_CONFIDENCE
+        or anchor_type in UNANCHORED_TYPES
+        or node.get("requires_human_check") is True
+    )
+
+
+def _core_evidence_risks(
+    item: dict[str, Any],
+    claim_nodes: dict[str, dict[str, Any]],
+    tensions: dict[str, dict[str, Any]],
+) -> list[str]:
+    risks: list[str] = []
+    if item.get("fabricated_core_evidence"):
+        risks.append("fabricated_core_evidence")
+    node_ids = _candidate_node_ids(item)
+    resolved_nodes = [claim_nodes[node_id] for node_id in node_ids if node_id in claim_nodes]
+    if item.get("anchorless_core_evidence") or not node_ids or not resolved_nodes:
+        risks.append("anchorless_core_evidence_risk")
+    elif all(_node_is_weak_or_unanchored(node) for node in resolved_nodes):
+        risks.append("anchorless_core_evidence_risk")
+    for tension_id in _candidate_tension_ids(item):
+        tension = tensions.get(tension_id)
+        if tension and (
+            tension.get("do_not_use_as_seed_evidence") is True
+            or tension.get("tension_type") == "speculative_tension"
+        ):
+            risks.append("speculative_tension_not_formal_seed_evidence")
+    if item.get("lane") == "breakthrough_speculative" and "anchorless_core_evidence_risk" in risks:
+        risks.append("breakthrough_speculative_evidence_boundary")
+    return list(dict.fromkeys(risks))
+
+
 def decide(
     *,
     run_date: str,
@@ -100,6 +186,8 @@ def decide(
     codex_by_id = {str(item.get("candidate_id")): item for item in codex_payload.get("reviews", [])}
     deepseek_provider = deepseek_payload.get("provider_status", {})
     codex_provider = codex_payload.get("provider_status", {})
+    claim_nodes = _load_claim_nodes(run_date)
+    tensions = _load_speculative_tensions(run_date)
     decisions: list[dict[str, Any]] = []
     for item in _final_candidates(selected_payload.get("selected", []), mutation_payload.get("mutations", [])):
         cid = candidate_id(item)
@@ -149,9 +237,23 @@ def decide(
             blocks.append("codex_status_not_success")
         if codex.get("action") != "accept_for_user_review":
             blocks.append(f"codex_action_not_accept:{codex.get('action', 'missing')}")
-        if _has_anchorless_core_evidence(item):
+        risks = _core_evidence_risks(item, claim_nodes, tensions)
+        if "fabricated_core_evidence" in risks:
             blocks.append("fabricated_or_anchorless_core_evidence")
-        if override and any(block in blocks for block in ["deepseek_fatal_flaw", "fabricated_or_anchorless_core_evidence"]):
+        if target_policy == "formal":
+            if "anchorless_core_evidence_risk" in risks:
+                blocks.append("formal_core_evidence_not_anchored")
+            if "speculative_tension_not_formal_seed_evidence" in risks:
+                blocks.append("speculative_tension_not_formal_seed_evidence")
+        if override and any(
+            block in blocks
+            for block in [
+                "deepseek_fatal_flaw",
+                "fabricated_or_anchorless_core_evidence",
+                "formal_core_evidence_not_anchored",
+                "speculative_tension_not_formal_seed_evidence",
+            ]
+        ):
             blocks.append("human_override_cannot_bypass_hard_block")
 
         action = "accept_for_user_review" if not blocks else "killed"
@@ -172,6 +274,7 @@ def decide(
                 "external_providers_used": external_providers_used,
                 "codex_action": codex.get("action", ""),
                 "human_override_used": bool(override),
+                "risks": risks,
                 "publish_target": ("seed" if target_policy == "formal" else "seed-candidates") if action == "accept_for_user_review" else action,
             }
         )
