@@ -10,7 +10,7 @@
 | Level 1 | arXiv metadata mirror smoke test | Python + 网络 | 想确认 OAI-PMH metadata 同步入口可用 |
 | Level 2 | mirror-first daily pipeline dry-run | Python + metadata mirror | 想看每日候选但不写库 |
 | Level 3 | optional Search API fallback troubleshooting | Python + 网络 | 只在 mirror 缺失、过旧或候选不足时排错 |
-| Level 4 | Zotero + Claudian + Gemini + DeepSeek + Codex full workflow | Zotero / Claudian / Gemini / OpenCode DeepSeek / Codex 逐步配置 | 想复现完整导入、精读、idea 发散、敌对审稿、二审 |
+| Level 4 | Zotero + Claudian + Gemini + DeepSeek + Codex full workflow | Zotero / Claudian / Gemini / OpenCode DeepSeek / Codex 逐步配置 | 想复现完整导入、精读、raw candidate 生成和 v0.2 pre-publish gates |
 | Level 5 | Windows 定时运行 | Windows Task Scheduler | 想每天自动跑 |
 
 建议按层级逐步启用。不要第一次使用就直接注册计划任务。
@@ -21,11 +21,11 @@
 
 | 默认时间 | 任务名 | 入口脚本 | 输出位置 | 边界 |
 | --- | --- | --- | --- | --- |
-| 每天 12:00 | `DailyArxivEmbodiedAIScout` | `.claude/scripts/run_daily_arxiv_task.ps1` | `projects/arxiv-daily/scheduled-task.log` | 负责 arXiv mirror sync、daily pipeline、Gemini greenhouse、OpenCode/DeepSeek battle 和质量审计；可能因为 Zotero/CLI/网络缺失返回 `partial`。 |
-| 每天 16:30 | `DailyCodexSeedReview` | `.claude/scripts/run_daily_codex_seed_review_task.ps1` | `projects/research-agenda/reviews/daily-codex-seed-review-task.log` 和 `YYYY-MM-DD-codex-seed-review.md` | 对当天或最近 7 天未审 seed 做 Codex 二审；不删除、不晋升、不声明 novelty。 |
+| 每天 12:00 | `DailyArxivEmbodiedAIScout` | `.claude/scripts/run_daily_arxiv_task.ps1` | `projects/arxiv-daily/scheduled-task.log` | 负责 arXiv mirror sync、daily pipeline、Gemini raw candidates、DeepSeek scientific review、novelty/baseline scan、Codex execution review、survival decision、默认 `seed-candidates-only` publish gate 和质量审计；可能因为 Zotero/CLI/网络缺失返回 `partial`。 |
+| 每天 16:30 | `DailyCodexSeedReview` | `.claude/scripts/run_daily_codex_seed_review_task.ps1` | `projects/research-agenda/reviews/daily-codex-seed-review-task.log` 和 `YYYY-MM-DD-codex-seed-review.md` | 对当天或最近 7 天未审 seed packet 做 Codex execution review；不删除、不晋升、不声明 novelty，也不自动发布 formal seed。 |
 | 每周日 20:00 | `WeeklyResearchAgendaReview` | `.claude/scripts/run_weekly_agenda_review_task.ps1` | `projects/research-agenda/reviews/weekly-agenda-review-task.log`、`YYYY-MM-DD-weekly-agenda-review.md`、`YYYY-MM-DD-weekly-top-tier-review.md` | 汇总一周 agenda 状态、审计结果和 top-tier pressure test；不会自动移动 idea 文件夹。 |
 
-推荐启用顺序：先完成 Level 0-4 的手动验证，再注册 12:00 每日任务；确认每天有 seed packet 后，再启用 16:30 Codex 二审；最后启用周日 20:00 周审。
+推荐启用顺序：先完成 Level 0-4 的手动验证，再注册 12:00 每日任务；确认每天有 seed packet 后，再启用 16:30 Codex execution review；最后启用周日 20:00 周审。
 
 ## 0. 基础健康检查
 
@@ -225,6 +225,9 @@ python .claude/scripts/daily_arxiv_pipeline.py `
   --once `
   --source mirror-first `
   --idea-mode gemini-divergent `
+  --deepseek-provider opencode `
+  --codex-execution-provider codex-cli `
+  --v2-publish-policy seed-candidates-only `
   --idea-timeout 1200 `
   --gemini-model gemini-3.1-pro-preview `
   --raw-candidate-limit 8 `
@@ -241,7 +244,8 @@ python .claude/scripts/daily_arxiv_pipeline.py `
 - `projects/arxiv-daily/YYYY-MM-DD-candidates.jsonl`
 - `projects/arxiv-daily/YYYY-MM-DD-review-queue.md`
 - `projects/research-agenda/daily/YYYY-MM-DD-agenda-delta.md`
-- `projects/research-agenda/idea_bank/seed/...`
+- `projects/research-agenda/seed-candidates/...`，默认 `seed-candidates-only` rollout 下的 accepted-but-not-formal 候选
+- `projects/research-agenda/parked/...` 或 `projects/research-agenda/rescue/...`，用于 blocked、non-accepted 或需要 rescue mutation 的候选
 - `raw/readings/...`
 - `wiki/topics/...`
 
@@ -261,9 +265,79 @@ $env:LOCAL_FIRST_VAULT_ALLOW_DANGEROUS_CLAUDE = "1"
 
 这个开关只影响 `daily_arxiv_pipeline.py` 的本机运行，不应该写入公开仓库配置。
 
+### v0.2.0 research-seed 状态机和 publish policy
+
+v0.2.0 的 daily automation 不再把 Gemini/local score 的输出直接当成正式 idea seed。它把每轮候选放进一个 transactional research-seed state machine：
+
+```text
+Zotero/arXiv
+-> paper intake triage
+-> Claudian deep reading
+-> paper primitives
+-> research claim graph
+-> tension map
+-> Gemini raw candidates
+-> portfolio selection
+-> DeepSeek scientific review
+-> novelty/baseline scan
+-> Codex execution review
+-> survival_decision.py
+-> publish_research_run.py
+```
+
+v2 相关 CLI flags：
+
+| Flag | 取值 | 用途 |
+| --- | --- | --- |
+| `--deepseek-provider` | `json`, `opencode`, `none` | DeepSeek scientific review 的 provider；正式 v2 gate 需要 provider-backed review。 |
+| `--deepseek-provider-json PATH` | path | 读取已有 `deepseek_review.v1` JSON，适合复现或 CI fixture。 |
+| `--codex-execution-provider` | `json`, `codex-cli`, `none` | Codex execution review 的 provider；正式 v2 gate 需要 provider-backed review。 |
+| `--codex-execution-provider-json PATH` | path | 读取已有 `codex_execution_review.v1` JSON，适合复现或 CI fixture。 |
+| `--v2-publish-policy` | `disabled`, `seed-candidates-only`, `formal` | v2 rollout publish policy；默认是 `seed-candidates-only`。 |
+| `--allow-formal-seed-publish` | flag | formal seed publish 的第二道显式确认。仅设置 `--v2-publish-policy formal` 不够。 |
+
+默认 publish policy 是 `seed-candidates-only`：通过 pre-publish gates 的候选写入 `projects/research-agenda/seed-candidates/`，不会写入 `projects/research-agenda/idea_bank/seed/`。formal seed publish 默认关闭，必须同时满足：
+
+- `--v2-publish-policy formal`
+- `--allow-formal-seed-publish`
+- DeepSeek scientific review、novelty/baseline scan、Codex execution review、survival decision、artifact hash 等 hard gates 全部通过
+
+backfill 运行的默认操作策略应是 `ingest-only`：只补齐 intake / reading / metadata，不生成 formal seed。做 backfill 时请显式传入：
+
+```powershell
+python .claude/scripts/daily_arxiv_pipeline.py `
+  --once `
+  --source mirror-first `
+  --backfill-mode ingest-only `
+  --v2-publish-policy seed-candidates-only
+```
+
+backfill 不能 formal-publish；即使高级 backfill 允许生成 raw candidates，也只能走 `disabled` 或 `seed-candidates-only` rehearsal。
+
+Provider-backed 要求：
+
+- DeepSeek / opencode 必须产出 `deepseek_review.v1`，并且 `provider_backed=true`。
+- Codex CLI 必须产出 `codex_execution_review.v1`，并且 `provider_backed=true`。
+- deterministic fallback、字段存在、模板输出或本地规则结果都不能算 provider-backed success。
+
+Publish outcomes：
+
+- `projects/research-agenda/idea_bank/seed/` 只能由 `publish_research_run.py` 写入。
+- `projects/research-agenda/seed-candidates/` 保存 accepted-but-not-formal rollout 候选。
+- `projects/research-agenda/parked/` 和 `projects/research-agenda/rescue/` 保存 blocked、non-accepted 或需要 rescue mutation 的候选。
+- `research_agenda_ideate.py` 只生成 raw candidates；`research_agenda_update.py` 不写 formal seeds。
+
+Audit invariants：
+
+- 不允许非 `publish_research_run.py` 的脚本创建、移动或修改 formal seed folder。
+- seed folder 必须有 DeepSeek review、novelty scan、Codex execution review、survival decision 和 artifact hashes。
+- formal publish 必须显式设置 formal policy 和 confirmation flag。
+- `quality_tier`、`sharpness_score`、`evidence_execution_score` 和 `ordinaryness_penalty` 是 potential / display 字段，不是 promotion gates。
+- 没有 seed 是正常结果；未经审查就写 formal seed 是失败。
+
 ## 8. Gemini CLI
 
-Gemini 是完整 workflow 的发散 idea 层。我们把它放在 greenhouse 位置，是为了生成高方差、跨论文、机制级的 raw candidates；这类输出更活跃，也更容易产生 hallucination 或 A+B 拼接，所以它不能直接写成结论。基础 smoke test 可以用 template mode 降级运行，但要复现本 vault 的研究 idea 生成链路，应先确认 CLI 可用：
+Gemini 是完整 workflow 的 raw candidate generator。我们使用它生成高方差、跨论文、机制级的 raw candidates；这类输出更活跃，也更容易产生 hallucination 或 A+B 拼接，所以它不能直接写成 formal seed。基础 smoke test 可以用 template mode 降级运行，但要复现本 vault 的研究 idea 生成链路，应先确认 CLI 可用：
 
 ```powershell
 gemini --version
@@ -284,9 +358,9 @@ python .claude/scripts/gemini_idea_probe.py --timeout 1200
 --idea-mode template
 ```
 
-## 9. OpenCode / DeepSeek adversarial battle
+## 9. OpenCode / DeepSeek scientific review gate
 
-OpenCode / DeepSeek 是 Gemini greenhouse 后的敌对审稿层。源码里由 `.claude/scripts/run_model_debate.py` 调用 `opencode run`，默认模型 selector 是 `deepseek/deepseek-v4-pro(max)`。
+OpenCode / DeepSeek 是 Gemini raw candidates 后的 provider-backed scientific review gate。源码里由 `.claude/scripts/run_model_debate.py` 调用 `opencode run`，默认模型 selector 是 `deepseek/deepseek-v4-pro(max)`。
 
 它的职责不是继续发散，而是攻击：
 
@@ -296,7 +370,7 @@ OpenCode / DeepSeek 是 Gemini greenhouse 后的敌对审稿层。源码里由 `
 - 最强 baseline 是否会直接杀死这个 idea；
 - lab-fit 是否匹配 Franka、FlexiTac、wrist camera、DLO、本地日志等条件。
 
-从 2026-05-14 起，`gemini-divergent` 的 daily idea stage 要算 clean success，必须有 Gemini-DeepSeek battle 成功。失败时 greenhouse candidates 仍会保留，但 daily idea 状态应是 `partial`。
+在 v0.2.0 里，DeepSeek / opencode 需要产出 `deepseek_review.v1` 且 `provider_backed=true`，才算通过 scientific review gate。失败时 raw candidates 仍会保留，但不能晋升为 accepted seed candidate，更不能写入 formal seed。
 
 先确认 OpenCode 可用：
 
@@ -306,9 +380,9 @@ opencode --version
 
 如果你没有 OpenCode / DeepSeek，完整 daily idea 链路会降级为 `partial`；这不是 KB 或 arXiv mirror 损坏。
 
-## 10. Codex seed review
+## 10. Codex execution review
 
-Codex seed review 是完整 workflow 的二审层。它会读取每日 pipeline 生成的 seed packet、DeepSeek battle 报告和本地 evidence packet，并输出 review 报告。计划任务默认每天 16:30 执行；如果当天 pipeline 还没有完成，包装器会在最近 7 天内 catch up 最新未审 run。没有 Codex 时可以先跳过，但这属于降级路径。
+Codex execution review 是完整 workflow 的 pre-publish execution gate。它会读取每日 pipeline 生成的 seed packet、DeepSeek scientific review 和本地 evidence packet，并输出 review 报告。计划任务默认每天 16:30 执行；如果当天 pipeline 还没有完成，包装器会在最近 7 天内 catch up 最新未审 run。没有 Codex 时可以先跳过，但这属于降级路径，不能视为 provider-backed success。
 
 先只准备 packet，不调用 Codex：
 
@@ -328,7 +402,7 @@ powershell -ExecutionPolicy Bypass -File .claude/scripts/run_daily_codex_seed_re
 codex --version
 ```
 
-注意：当前包装器默认不绕过 Codex sandbox/approval。只有在你完全理解本机 CLI 权限边界时，才手动追加 `-DangerouslyBypassSandbox`。
+注意：当前包装器默认不绕过 Codex sandbox/approval。只有在你完全理解本机 CLI 权限边界时，才手动追加 `-DangerouslyBypassSandbox`。v0.2.0 的 formal publish gate 需要 `codex_execution_review.v1` 且 `provider_backed=true`；只有字段存在或 deterministic fallback 不足以 accept。
 
 ## 11. Windows 计划任务
 
@@ -433,10 +507,10 @@ smoke-test cron 示例只作结构参考，不会写 Zotero 或 vault：
 0 12 * * * cd /path/to/local-domain-expert-vault && python3 .claude/scripts/arxiv_metadata_sync.py --incremental --days-back 60 --overlap-days 3 && python3 .claude/scripts/daily_arxiv_pipeline.py --dry-run --source mirror-first --max-candidates 30 --days-back 14 >> projects/arxiv-daily/cron.log 2>&1
 ```
 
-真实每日任务示例会写入本地 `projects/` 运行产物，并在你配置 Zotero / Claudian / Gemini / OpenCode DeepSeek 后继续执行导入、精读、idea 生成和敌对审稿：
+真实每日任务示例会写入本地 `projects/` 运行产物，并在你配置 Zotero / Claudian / Gemini / OpenCode DeepSeek / Codex 后继续执行导入、精读、raw candidate 生成和 v0.2 pre-publish gates。默认仍是 `seed-candidates-only`，不会发布 formal seed：
 
 ```cron
-0 12 * * * cd /path/to/local-domain-expert-vault && python3 .claude/scripts/arxiv_metadata_sync.py --incremental --days-back 60 --overlap-days 3 && python3 .claude/scripts/daily_arxiv_pipeline.py --once --source mirror-first --idea-mode template --skip-read --max-candidates 40 --days-back 14 >> projects/arxiv-daily/cron.log 2>&1
+0 12 * * * cd /path/to/local-domain-expert-vault && python3 .claude/scripts/arxiv_metadata_sync.py --incremental --days-back 60 --overlap-days 3 && python3 .claude/scripts/daily_arxiv_pipeline.py --once --source mirror-first --idea-mode template --skip-read --max-candidates 40 --days-back 14 --v2-publish-policy seed-candidates-only >> projects/arxiv-daily/cron.log 2>&1
 ```
 
 ## 14. 状态解释
@@ -463,10 +537,10 @@ smoke-test cron 示例只作结构参考，不会写 Zotero 或 vault：
 8. 单篇 `ingest_paper.py`
 9. 手动 `daily_arxiv_pipeline.py --once --source mirror-first --idea-mode template`
 10. Gemini CLI
-11. OpenCode / DeepSeek battle
+11. OpenCode / DeepSeek scientific review gate
 12. `run_daily_arxiv_task.ps1`
 13. `register_daily_arxiv_task.ps1`
-14. Codex seed review
+14. Codex execution review
 15. weekly agenda review
 
 这样做的好处是每一步都有明确验收，不会把 Zotero、Gemini、OpenCode/DeepSeek、Codex、计划任务的问题混在一起。

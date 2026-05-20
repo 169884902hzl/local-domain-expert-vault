@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](#what-works-immediately-after-cloning)
 
-> A local-first research vault that turns an Obsidian + Zotero library into a domain expert with memory: papers become `wiki/` evidence, Claudian reads and compares them, Gemini generates hypotheses, DeepSeek attacks weak ideas, Codex reviews the evidence chain, and weekly review feeds the next reading cycle.
+> A local-first research vault that turns an Obsidian + Zotero library into a domain expert with memory: papers become `wiki/` evidence, Claudian reads and compares them, Gemini proposes raw candidates, DeepSeek / novelty scan / Codex / survival decision gate them, and human approval decides whether anything becomes a formal research seed.
 
 [中文 README](README.md)
 
@@ -19,7 +19,9 @@ The public vault uses robotic manipulation as its example domain, especially DLO
 
 It is built for graduate students, PI/lab knowledge-base maintainers, and researchers who need long-term literature memory rather than another one-off summarizer.
 
-Current public version: `v0.1.0`. This first release covers local browsing, knowledge-base audits, `kb_search.py` retrieval, Zotero/Obsidian setup documentation, Paper Reading Workbench, arXiv mirror-first automation docs, and the Windows scheduled-task entry point. Full AI automation still requires local Zotero, Claudian / Claude Code, Gemini, OpenCode / DeepSeek, Codex, and explicit permission configuration.
+Current public version: `v0.2.0`. `v0.1.0` was the first releasable local-first vault: local browsing, knowledge-base audits, `kb_search.py` retrieval, Zotero/Obsidian setup documentation, Paper Reading Workbench, arXiv mirror-first automation docs, and the Windows scheduled-task entry point. `v0.2.0` adds the research-seed v2 state machine on top of that base.
+
+`v0.2.0` is a major workflow architecture upgrade: the old Gemini greenhouse plus downstream-review scaffold is now a transactional research-seed state machine. It improves state control, review ordering, auditability, and rollout safety; it does not claim that generated ideas are automatically novel or publishable.
 
 ## Why This Exists
 
@@ -42,16 +44,53 @@ Zotero / arXiv
     -> wiki/topics, wiki/concepts, wiki/entities
     -> kb_search.py local evidence retrieval
     -> Claudian deep reading and paper comparison
-    -> Gemini divergent idea greenhouse
-    -> OpenCode / DeepSeek adversarial battle
-    -> Codex second-pass review
+    -> Gemini raw candidate generation
+    -> portfolio selection
+    -> provider-backed DeepSeek scientific review
+    -> novelty / baseline scan
+    -> provider-backed Codex execution review
+    -> survival decision and publish gate
     -> weekly agenda review and top-tier pressure test
     -> revised filters, prompts, reading priorities, and next research ideas
 ```
 
-Every stage writes an artifact that the next stage can consume. Papers are not summarized once and forgotten; they become local evidence. Deep-reading reports feed the idea greenhouse. Gemini's speculative output does not become a claim until it has gone through DeepSeek's adversarial review, Codex's structured second pass, and weekly agenda review.
+Every stage writes an artifact that the next stage can consume. Papers are not summarized once and forgotten; they become local evidence. Deep-reading reports are decomposed into paper primitives, claim graphs, and tension maps. Gemini's speculative output is only a raw candidate; it does not become a formal seed unless it passes portfolio selection, DeepSeek scientific review, novelty/baseline scan, Codex execution review, survival decision, publish gates, and human approval.
 
 The workflow is also designed to fail cleanly. Dry-runs, preflights, logs, `partial` states, mirror-missing status, and human review gates keep missing keys, missing mirrors, network failures, and unstable model output from contaminating the formal knowledge layer.
+
+## v0.2.0: Transactional Research-Seed State Machine
+
+The v0.2.0 workflow is:
+
+```text
+Zotero/arXiv
+-> paper intake triage
+-> Claudian deep reading
+-> paper primitives
+-> research claim graph
+-> tension map
+-> Gemini raw candidates
+-> portfolio selection
+-> DeepSeek scientific review
+-> novelty/baseline scan
+-> Codex execution review
+-> survival_decision.py
+-> publish_research_run.py
+```
+
+Important boundaries:
+
+- `research_agenda_ideate.py` generates raw candidates only.
+- `research_agenda_update.py` does not write formal seeds.
+- `publish_research_run.py` is the only script allowed to write `projects/research-agenda/idea_bank/seed/`.
+- `quality_tier`, `sharpness_score`, `evidence_execution_score`, and `ordinaryness_penalty` are potential/display fields only, not promotion gates.
+- Formal seed publish is disabled by default.
+- `seed-candidates-only` is the default rollout policy.
+- Formal seed publish requires both `--v2-publish-policy formal` and `--allow-formal-seed-publish`, plus all hard gates passing.
+- No seed today is a normal outcome; an unreviewed seed written to the formal seed folder is a failure.
+- Scheduled daily automation should not be described as automatically publishing formal seeds.
+
+v0.2.0 improves state control, review ordering, auditability, and rollout safety. It does not prove that generated ideas are novel, publishable, or doctoral-level by itself. That still requires real prior-art review, human judgment, and pilot outcomes.
 
 ## What this is / is not
 
@@ -60,7 +99,7 @@ This is:
 - a local domain-expert vault with long-term literature memory;
 - an evidence-grounded workflow that searches `wiki/topics/`, `wiki/concepts/`, and `wiki/entities/` before writing domain answers;
 - a Zotero / Obsidian / Claudian workflow for import, deep reading, finalization, audits, comparison, and concept maintenance;
-- a research-agenda seed system for reviewable hypotheses, baselines, risks, and experiment-plan drafts;
+- a transactional research-seed system for raw candidates, seed candidates, blocked/rescue records, and reviewable experiment-plan drafts;
 - a sanitized public package without API keys, PDFs, SQLite mirrors, Zotero caches, logs, or personal machine paths.
 
 This is not:
@@ -92,9 +131,9 @@ Obsidian is optional for this smoke test, but recommended for graph view, backli
 | Importing Zotero metadata | Zotero API key, user ID, collection key, or local Zotero Desktop |
 | Jumping from Obsidian notes to Zotero item / PDF | Zotero Desktop, PDF attachment, Paper Reading Workbench |
 | Claudian / Claude Code reading and QA commands | Core layer of the full local domain-expert workflow; local CLI, model account, explicit permission choices |
-| Gemini idea divergence | Core idea-divergence layer; logged-in Gemini CLI |
-| OpenCode / DeepSeek adversarial battle | Mandatory adversarial layer after Gemini greenhouse; OpenCode CLI and DeepSeek provider |
-| Codex seed review | Core review layer; logged-in Codex CLI |
+| Gemini idea divergence | Raw candidate generator; logged-in Gemini CLI |
+| OpenCode / DeepSeek scientific review | Pre-publish scientific review gate; OpenCode CLI and DeepSeek provider |
+| Codex execution review | Pre-publish execution review gate; logged-in Codex CLI |
 | Daily arXiv scouting and idea seeds | Local arXiv SQLite metadata mirror and network; full mode needs Zotero / Claudian / Gemini / DeepSeek / Codex |
 | PDF syncing | Zotero storage, WebDAV, or linked attachments; PDFs are not committed |
 
@@ -111,8 +150,8 @@ The full automation is not a single `daily_arxiv_pipeline.py` call. The intended
 
 | Default time | Windows task | Wrapper | Purpose |
 | --- | --- | --- | --- |
-| Daily 12:00 | `DailyArxivEmbodiedAIScout` | `run_daily_arxiv_task.ps1` | Refresh the arXiv OAI-PMH metadata mirror, run the mirror-first daily pipeline, trigger the Zotero / Claudian / Gemini / OpenCode-DeepSeek chain, and write the daily quality audit. |
-| Daily 16:30 | `DailyCodexSeedReview` | `run_daily_codex_seed_review_task.ps1` | Review today's seed packet, DeepSeek battle, and evidence packet with Codex. It can catch up to the newest unreviewed run from the last 7 days and does not promote ideas automatically. |
+| Daily 12:00 | `DailyArxivEmbodiedAIScout` | `run_daily_arxiv_task.ps1` | Refresh the arXiv OAI-PMH metadata mirror, run the mirror-first daily pipeline, trigger Zotero / Claudian / Gemini / DeepSeek / Codex v2 gates, and write the daily quality audit. The default rollout policy is `seed-candidates-only`; it does not publish formal seeds automatically. |
+| Daily 16:30 | `DailyCodexSeedReview` | `run_daily_codex_seed_review_task.ps1` | Review today's seed packet, DeepSeek scientific review, and evidence packet with Codex execution review. It can catch up to the newest unreviewed run from the last 7 days and does not promote ideas into formal seeds automatically. |
 | Sunday 20:00 | `WeeklyResearchAgendaReview` | `run_weekly_agenda_review_task.ps1` | Summarize the week's research-agenda state, quality audit, and top-tier idea pressure test. It writes review artifacts but does not move idea folders automatically. |
 
 `daily_arxiv_pipeline.py` is the daily arXiv workflow engine, but it is not the recommended Windows scheduler entry point. For a daily local run, use the wrapper and registration scripts:
@@ -173,12 +212,14 @@ The workflow does not ask several models the same question and average their ans
 | Layer | Role | Why it exists |
 | --- | --- | --- |
 | Claudian | Obsidian interaction and workflow routing | The researcher asks questions, starts deep reading, and compares papers inside Obsidian. Claudian routes those requests to `.claude/commands/` and local scripts. |
-| Claude Code / Claude CLI | Script execution worker | `daily_arxiv_pipeline.py` can invoke Claude CLI for `/read-paper` style deep reading and vault edits. Public defaults do not bypass permissions; dangerous modes are explicit opt-in. |
-| Gemini CLI | High-variance idea greenhouse | Gemini is used for divergence, not validation. Its broader and more speculative style is useful for raw candidates, but the hallucination risk is contained by evidence, baseline, and reviewer gates. |
-| OpenCode / DeepSeek | Adversarial reviewer for Gemini ideas | `run_model_debate.py` makes DeepSeek attack weak mechanisms, A+B combinations, strongest baseline failures, and lab-fit risks. Since 2026-05-14, clean daily idea success requires this battle. |
-| Codex / GPT | Structured second-pass reviewer | Codex reads the greenhouse output, DeepSeek battle, and local evidence packet, then classifies candidates as accept, rewrite, park, or reject-with-rescue. It does not auto-promote paper claims. |
+| Claude Code / Claude CLI | Script execution worker | The `research_agenda_ideate.py` idea-refinement path intentionally keeps `claude --dangerously-skip-permissions` for the current high-autonomy workflow; the `daily_arxiv_pipeline.py` Claude reading worker remains a separate opt-in. |
+| Gemini CLI | Raw candidate generator | Gemini proposes high-variance raw candidates. It does not judge novelty and does not write formal seeds. |
+| OpenCode / DeepSeek | Provider-backed scientific review gate | DeepSeek / opencode must produce `deepseek_review.v1` with `provider_backed=true`; deterministic fallback is not enough. |
+| Novelty / baseline scan | Prior-art and ordinaryness pressure | `novelty_baseline_scan.py` checks baselines, ordinaryness, and near-neighbor pressure. Unknown novelty does not auto-promote. |
+| Codex / GPT | Provider-backed execution review gate | Codex CLI must produce `codex_execution_review.v1` with `provider_backed=true`; field presence without provider-backed review cannot accept a candidate. |
+| Survival decision | Final pre-publish gate | `survival_decision.py` aggregates scientific review, novelty scan, execution review, and hard gates into accepted / parked / rescue / blocked outcomes. |
 
-The full loop is: `Claudian deep reading -> Gemini greenhouse -> OpenCode/DeepSeek adversarial battle -> Codex/GPT second-pass review -> human approval`.
+The v0.2.0 loop is: `Claudian deep reading -> paper primitives -> claim graph -> tension map -> Gemini raw candidates -> portfolio selection -> DeepSeek scientific review -> novelty/baseline scan -> Codex execution review -> survival decision -> publish gate -> human approval`.
 
 ## What Problem It Solves
 
@@ -273,7 +314,7 @@ The base vault only needs Python for local audit and search. Extra integrations 
 | CSTCloud WebDAV or another storage route | Syncing Zotero stored attachments |
 | Claudian / Claude Code | AI-assisted deep reading and project commands |
 | Gemini CLI | Divergent research idea generation |
-| OpenCode / DeepSeek CLI | Mandatory adversarial battle for Gemini greenhouse runs |
+| OpenCode / DeepSeek CLI | Provider-backed scientific review gate for Gemini raw candidates |
 | Codex CLI | Second-pass seed review |
 
 Paper Reading Workbench is bundled and enabled in the public vault. Open a `wiki/topics/*.md` note with `zotero_key`, then run `Paper Reading Workbench: Open paper reading workbench for current note`. The plugin queries the local Zotero Connector API, creates a `projects/reading-workbench/<ZOTERO_KEY>-zotero-source.md` source note, and provides links back to the Zotero item, Zotero PDF attachment, and arXiv PDF fallback. Zotero Desktop must be open, and the Zotero item must already have a stored or linked PDF attachment. The plugin does not copy PDFs into the vault. It is local executable Obsidian plugin code; translation and diagram actions spawn the local Python helper scripts only when you click those actions.
@@ -323,7 +364,7 @@ Recommended public default:
 
 - Required MCP for basic browsing/search: none
 - Full automation: Zotero and arXiv access
-- Full idea/review loop: Gemini / OpenCode DeepSeek / Codex for divergent idea generation, adversarial battle, and review
+- Full idea/review loop: Gemini / OpenCode DeepSeek / Codex for raw candidate generation, provider-backed scientific review, and execution review
 
 Project commands include:
 

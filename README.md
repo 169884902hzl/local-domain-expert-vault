@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](#clone-后能直接做什么)
 
-> 把 Obsidian + Zotero 文献库变成一个每天自更新、可审计、会复盘的本地领域专家：论文进入 `wiki/` 证据层，Claudian 精读，Gemini 发散，DeepSeek 攻击，Codex 二审，周审再把问题推回下一轮阅读和 idea 迭代。
+> 把 Obsidian + Zotero 文献库变成一个每天自更新、可审计、会复盘的本地领域专家：论文进入 `wiki/` 证据层，Claudian 精读，Gemini 只生成 raw candidates，DeepSeek / novelty scan / Codex / survival decision 逐级拦截，最后由 human gate 决定是否进入正式研究 agenda。
 
 [English README](README_EN.md)
 
@@ -17,7 +17,9 @@
 
 适合对象：需要长期追踪一个专业方向的研究生、PI / 实验室知识库维护者，以及希望把 LLM 变成“有本地文献记忆的领域专家”的研究者。
 
-当前公开版本：`v0.1.0`。这是首个可发行版本，覆盖本地浏览、知识库审计、`kb_search.py` 检索、Zotero/Obsidian 配置说明、Paper Reading Workbench、arXiv mirror-first 自动化文档和 Windows 计划任务入口。完整 AI 自动化仍需要使用者在本机配置 Zotero、Claudian / Claude Code、Gemini、OpenCode / DeepSeek、Codex 和权限边界。
+当前公开版本：`v0.2.0`。`v0.1.0` 是首个可发行 local-first vault 版本，覆盖本地浏览、知识库审计、`kb_search.py` 检索、Zotero/Obsidian 配置说明、Paper Reading Workbench、arXiv mirror-first 自动化文档和 Windows 计划任务入口。`v0.2.0` 在此基础上加入 research-seed v2 状态机。
+
+`v0.2.0` 是一次 workflow architecture upgrade：从 Gemini greenhouse + 后置审查 scaffold，升级为 transactional research-seed state machine。它改进的是状态控制、审查顺序、审计性和 rollout safety，不是声明系统已经能稳定产生已验证创新点。
 
 ## 闭环设计
 
@@ -28,14 +30,51 @@ Zotero / arXiv
     -> wiki/topics, wiki/concepts, wiki/entities
     -> kb_search.py local evidence retrieval
     -> Claudian deep reading and paper comparison
-    -> Gemini divergent idea greenhouse
-    -> OpenCode / DeepSeek adversarial battle
-    -> Codex second-pass review
+    -> Gemini raw candidate generation
+    -> portfolio selection
+    -> provider-backed DeepSeek scientific review
+    -> novelty / baseline scan
+    -> provider-backed Codex execution review
+    -> survival decision and publish gate
     -> weekly agenda review and top-tier pressure test
     -> revised filters, prompts, reading priorities, and next research ideas
 ```
 
-每一环都有明确产物和下一环消费者：论文不是只被“总结”一次，而是进入 `wiki/` 证据层；精读不是停在阅读报告，而是继续喂给 idea greenhouse；Gemini 的发散不是直接变成结论，而要经过 DeepSeek 的敌对审稿、Codex 的结构化二审和每周复盘。失败也不会把系统带偏：dry-run、preflight、日志、`partial` 状态、mirror-first fallback、人工 review gate 都是为了让自动化在缺 key、缺 mirror、网络失败或模型输出不稳定时仍然保持边界清楚。
+每一环都有明确产物和下一环消费者：论文不是只被“总结”一次，而是进入 `wiki/` 证据层；精读不是停在阅读报告，而是被拆成 paper primitives、claim graph 和 tension map；Gemini 的输出只是 raw candidates，不会直接变成 formal seed。候选必须经过 portfolio selection、DeepSeek scientific review、novelty/baseline scan、Codex execution review、survival decision 和 publish gate。失败也不会把系统带偏：dry-run、preflight、日志、`partial` 状态、mirror-first fallback、人工 review gate 都是为了让自动化在缺 key、缺 mirror、网络失败或模型输出不稳定时仍然保持边界清楚。
+
+## v0.2.0: Transactional Research-Seed State Machine
+
+v0.2.0 把旧的 Gemini greenhouse / DeepSeek / Codex 后置审查 scaffold，升级成一个有显式状态、schema、artifact hash 和 publish gate 的 research-seed v2 状态机：
+
+```text
+Zotero/arXiv
+-> paper intake triage
+-> Claudian deep reading
+-> paper primitives
+-> research claim graph
+-> tension map
+-> Gemini raw candidates
+-> portfolio selection
+-> DeepSeek scientific review
+-> novelty/baseline scan
+-> Codex execution review
+-> survival_decision.py
+-> publish_research_run.py
+```
+
+关键边界：
+
+- `research_agenda_ideate.py` 只生成 raw candidates。
+- `research_agenda_update.py` 不写 formal seeds。
+- `publish_research_run.py` 是唯一允许写入 `projects/research-agenda/idea_bank/seed/` 的脚本。
+- `quality_tier`、`sharpness_score`、`evidence_execution_score` 和 `ordinaryness_penalty` 只是 potential / display 字段，不是 promotion gates。
+- formal seed publish 默认关闭。
+- 默认 v2 publish policy 是 `seed-candidates-only`，通过的候选先进入 `seed-candidates/`，而不是直接进入 formal seed。
+- formal seed publish 必须同时满足 `--v2-publish-policy formal`、`--allow-formal-seed-publish` 和全部 hard gates。
+- 没有 seed 是正常结果；未经审查就写 seed 才是失败。
+- scheduled daily 不应被理解为自动发布 formal seeds。
+
+v0.2.0 improves state control, review ordering, auditability, and rollout safety. It does not prove that generated ideas are novel, publishable, or doctoral-level by itself. That still requires real prior-art review, human judgment, and pilot outcomes.
 
 ## 它是什么 / 不是什么
 
@@ -44,7 +83,7 @@ Zotero / arXiv
 - 一个 **本地领域专家 vault**：长期保留本地文献记忆，而不是一次性 AI 对话。
 - 一个 **evidence-grounded workflow**：回答领域问题前先检索 `wiki/topics/`、`wiki/concepts/` 和 `wiki/entities/`，让答案从证据里长出来。
 - 一个 Zotero / Obsidian / Claudian 工作流模板：支持导入、精读、finalize、audit、比较和概念页维护。
-- 一个 research-agenda seed system：把本地证据整理成可审阅 idea seed、baseline、风险和实验方案草案。
+- 一个 transactional research-seed system：把本地证据整理成 raw candidates、seed candidates、blocked/rescue records 和人工可审阅的实验方案草案。
 - 一个可脱敏发布的公开包：不包含 API key、PDF、SQLite mirror、Zotero 缓存、日志和个人路径。
 
 这不是：
@@ -72,9 +111,9 @@ python .claude/scripts/kb_search.py "diffusion policy DLO" --limit 5
 | 从 Zotero 导入论文 metadata | Zotero API key、user ID、collection key，或本机 Zotero Desktop |
 | 从 Obsidian 精读笔记回跳 Zotero item / PDF | Zotero Desktop、PDF 附件、Paper Reading Workbench |
 | Claudian / Claude Code 精读、比较、问答 | 完整本地领域专家工作流的核心层；需要本机 CLI、模型账号、权限确认 |
-| Gemini idea divergence | 完整 idea 生成链路的发散层；需要 Gemini CLI 登录 |
-| OpenCode / DeepSeek adversarial battle | Gemini greenhouse 后的强攻击层；需要 OpenCode CLI 和 DeepSeek provider |
-| Codex seed review | 完整自动化里的二审层；需要 Codex CLI 登录 |
+| Gemini idea divergence | raw candidate 生成层；需要 Gemini CLI 登录 |
+| OpenCode / DeepSeek scientific review | pre-publish scientific review gate；需要 OpenCode CLI 和 DeepSeek provider |
+| Codex execution review | pre-publish execution review gate；需要 Codex CLI 登录 |
 | daily arXiv scout 和 idea seed | 本地 arXiv SQLite metadata mirror、网络；完整模式需要 Zotero / Claudian / Gemini / DeepSeek / Codex |
 | PDF 同步 | Zotero 官方存储、WebDAV 或 linked attachment；仓库不提交 PDF |
 
@@ -88,12 +127,12 @@ python .claude/scripts/kb_search.py "diffusion policy DLO" --limit 5
 
 ## 电脑上怎么每天自动跑
 
-完整自动化不是只跑一次 `daily_arxiv_pipeline.py`。本机默认节奏分成三段：中午做论文发现和精读，下午做 Codex 二审，周末做一周复盘。
+完整自动化不是只跑一次 `daily_arxiv_pipeline.py`。本机默认节奏分成三段：中午做论文发现、精读和 v2 gates，下午做 Codex execution review，周末做一周复盘。
 
 | 默认时间 | Windows 任务名 | 包装脚本 | 做什么 |
 | --- | --- | --- | --- |
-| 每天 12:00 | `DailyArxivEmbodiedAIScout` | `run_daily_arxiv_task.ps1` | 增量同步 arXiv OAI-PMH metadata mirror，运行 mirror-first daily pipeline，触发 Zotero/Claudian/Gemini/OpenCode-DeepSeek 链路，并写每日质量审计。 |
-| 每天 16:30 | `DailyCodexSeedReview` | `run_daily_codex_seed_review_task.ps1` | 读取当天或最近 7 天未审的 seed packet、DeepSeek battle 和 evidence packet，生成 Codex 二审报告；不会自动把 idea 晋升成结论。 |
+| 每天 12:00 | `DailyArxivEmbodiedAIScout` | `run_daily_arxiv_task.ps1` | 增量同步 arXiv OAI-PMH metadata mirror，运行 mirror-first daily pipeline，触发 Zotero/Claudian/Gemini/DeepSeek/Codex v2 gates，并写每日质量审计；默认只走 `seed-candidates-only` rollout，不自动发布 formal seed。 |
+| 每天 16:30 | `DailyCodexSeedReview` | `run_daily_codex_seed_review_task.ps1` | 读取当天或最近 7 天未审的 seed packet、DeepSeek scientific review 和 evidence packet，生成 Codex execution review；不会自动把 idea 晋升成 formal seed。 |
 | 每周日 20:00 | `WeeklyResearchAgendaReview` | `run_weekly_agenda_review_task.ps1` | 汇总一周 research agenda 状态、质量审计和 top-tier idea pressure test，输出周报；不会自动移动 idea 文件夹。 |
 
 `daily_arxiv_pipeline.py` 是每日 arXiv 工作流的核心引擎，但它不是推荐的 Windows 定时任务入口。电脑上每天自动跑时，建议走包装器：
@@ -119,7 +158,7 @@ powershell -ExecutionPolicy Bypass -File .claude/scripts/register_daily_arxiv_ta
 Get-ScheduledTask -TaskName DailyArxivEmbodiedAIScout
 ```
 
-Codex 二审和每周复盘也建议先 dry-run 再注册：
+Codex execution review 和每周复盘也建议先 dry-run 再注册：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .claude/scripts/register_daily_codex_seed_review_task.ps1 -DryRun -Time "16:30"
@@ -154,12 +193,14 @@ Get-Content -Encoding UTF8 projects/research-agenda/reviews/weekly-agenda-review
 | 层 | 角色 | 为什么需要 |
 | --- | --- | --- |
 | Claudian | Obsidian 里的交互层和工作流路由器 | 你在 vault 里提问、精读、比较论文时，通过 Claudian 把请求路由到 `.claude/commands/` 和本地脚本。 |
-| Claude Code / Claude CLI | 脚本执行 worker | `daily_arxiv_pipeline.py` 可以调用 Claude CLI 执行 `/read-paper` 风格的精读；公开版默认不跳过权限，高权限需要显式 opt-in。 |
-| Gemini CLI | 高方差 idea greenhouse | 我们把 Gemini 放在发散层，不是让它下结论，而是利用它更活跃、更容易跳出常规组合的输出风格生成 raw candidates。这个位置天然有更高 hallucination 风险，所以输出只进入 greenhouse，必须被证据、baseline 和 reviewer gate 约束。 |
-| OpenCode / DeepSeek | 对 Gemini idea 做敌对审稿 | `run_model_debate.py` 让 DeepSeek 扮演 hostile reviewer，专门攻击 A+B 拼接、弱机制、最强 baseline kill、lab-fit 风险；从 2026-05-14 起，Gemini divergent 日常 idea 要 clean success，必须通过这个 battle。 |
-| Codex / GPT | 结构化二审和工程化审计 | Codex 读取 greenhouse、DeepSeek battle 和本地 evidence packet，给出 accept / rewrite / park / reject-with-rescue；它不负责自由发散，也不自动把 idea 晋升成论文结论。 |
+| Claude Code / Claude CLI | 脚本执行 worker | `research_agenda_ideate.py` 的 idea refinement 路径按当前工作流保留 `claude --dangerously-skip-permissions`；`daily_arxiv_pipeline.py` 的 Claude 精读 worker 仍是单独 opt-in。 |
+| Gemini CLI | raw candidate generator | Gemini 只负责提出高方差 raw candidates，不负责判断 novelty，不写 formal seed。 |
+| OpenCode / DeepSeek | provider-backed scientific review gate | DeepSeek / opencode 必须产出 `deepseek_review.v1` 且 `provider_backed=true`；deterministic fallback 不能算成功 review。 |
+| Novelty / baseline scan | prior-art and ordinaryness pressure | `novelty_baseline_scan.py` 检查 baseline、ordinaryness、near-neighbor pressure；unknown novelty 不会自动晋升。 |
+| Codex / GPT | provider-backed execution review gate | Codex CLI 必须产出 `codex_execution_review.v1` 且 `provider_backed=true`；字段存在但没有 provider-backed review 不能 accept。 |
+| Survival decision | final pre-publish gate | `survival_decision.py` 汇总 scientific review、novelty scan、execution review 和 hard gates，决定 accepted / parked / rescue / blocked。 |
 
-所以完整链路是：`Claudian deep reading -> Gemini greenhouse -> OpenCode/DeepSeek adversarial battle -> Codex/GPT second-pass review -> human approval`。
+所以 v0.2.0 的完整链路是：`Claudian deep reading -> paper primitives -> claim graph -> tension map -> Gemini raw candidates -> portfolio selection -> DeepSeek scientific review -> novelty/baseline scan -> Codex execution review -> survival decision -> publish gate -> human approval`。
 
 ## 工作流概览
 
@@ -203,7 +244,7 @@ Claudian 在 Obsidian 中回答“有关 RL token 的论文有哪些？怎么做
 
 ### 4. Research idea seed
 
-research-agenda 工作流会把本地证据沉淀成待审阅研究 idea seed。下面示例展示了从本地证据、方法改进主张、baseline、关键区分实验、novelty pressure 到 no-hardware pilot 的结构化研究设想草案；这些研究主张仍需要人工审阅和实验验证。
+research-agenda 工作流会把本地证据沉淀成待审阅研究候选。v0.2.0 里 Gemini 先生成 raw candidates，状态机再把候选送入 portfolio selection、DeepSeek scientific review、novelty/baseline scan、Codex execution review 和 survival decision。下面截图展示的是研究设想草案的结构；它不是已验证 novelty，也不是 scheduled daily 自动发布的 formal seed。
 
 ![Gemini-assisted research idea seed with local evidence and review fields](docs/assets/gemini-research-idea-seed-example.png)
 
@@ -300,7 +341,7 @@ python .claude/scripts/daily_arxiv_pipeline.py --dry-run --source mirror-first -
 | Claudian 配置 | 已包含脱敏配置；CLI 路径和账号需用户本机配置 |
 | Zotero 导入 | 需要用户自己的 Zotero 或 Zotero API 配置 |
 | 每日 arXiv 自动化 | 需要网络；写入 Zotero 时需要 Zotero 配置 |
-| Gemini / DeepSeek / Codex 自动化 | 完整工作流的 idea 发散、敌对审稿和二审层；需要用户本机 CLI 已登录 |
+| Gemini / DeepSeek / Codex 自动化 | 完整工作流的 raw candidate generation、scientific review gate 和 execution review gate；需要用户本机 CLI 已登录 |
 | API key | 不包含在仓库中，必须由使用者自己配置 |
 
 ## 目录结构
@@ -626,10 +667,11 @@ powershell -ExecutionPolicy Bypass -File .claude/scripts/run_daily_arxiv_task.ps
 
 1. 通过 OAI-PMH 增量同步 arXiv `cs/stat` metadata mirror。
 2. 运行 `daily_arxiv_pipeline.py --once --source mirror-first`。
-3. 使用 Gemini divergent idea 生成 raw greenhouse candidates。
-4. 使用 OpenCode / DeepSeek 对 greenhouse candidates 做 adversarial battle。
-5. 写入每日日志。
-6. 运行自动化质量审计。
+3. 使用 Gemini divergent idea 生成 raw candidates。
+4. 运行 portfolio selection、DeepSeek scientific review、novelty/baseline scan、Codex execution review 和 survival decision。
+5. 通过 `publish_research_run.py` 按默认 `seed-candidates-only` policy 写入候选桶；不会自动写 formal seed。
+6. 写入每日日志。
+7. 运行自动化质量审计。
 
 注意：包装器默认会调用 Gemini CLI 和 OpenCode / DeepSeek，并尝试 Zotero/Claudian 路径。没有相关配置时，运行结果可能是 `partial`，这不等于基础 vault 坏了。
 
@@ -677,7 +719,7 @@ Unregister-ScheduledTask -TaskName WeeklyResearchAgendaReview -Confirm:$false
 | Claudian | Obsidian 内问答、精读、比较和命令路由 | 核心交互层 |
 | Claude Code / Claude CLI | 自动化脚本中的精读和文件执行 worker | 核心执行层 |
 | Gemini CLI | 发散 research idea、图谱/翻译等流程 | 核心 idea 层 |
-| OpenCode / DeepSeek CLI | 对 Gemini greenhouse 做 mandatory adversarial battle | 核心攻击层 |
+| OpenCode / DeepSeek CLI | 对 Gemini raw candidates 做 provider-backed scientific review gate | 核心审查层 |
 | Codex CLI | 对每日 seed 做二次审查 | 核心 review 层 |
 | OpenCode/DeepSeek 之外的模型 | 额外模型辩论和 idea refinement | 可替换/扩展 |
 
