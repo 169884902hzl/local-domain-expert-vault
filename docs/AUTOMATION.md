@@ -265,7 +265,7 @@ $env:LOCAL_FIRST_VAULT_ALLOW_DANGEROUS_CLAUDE = "1"
 
 这个开关只影响 `daily_arxiv_pipeline.py` 的本机运行，不应该写入公开仓库配置。
 
-### v0.2.0-v0.3.0 research-seed 状态机和 publish policy
+### v0.2.0-v0.3.1 research-seed 状态机和 publish policy
 
 v0.2.0 的 daily automation 不再把 Gemini/local score 的输出直接当成正式 idea seed。它把每轮候选放进一个 transactional research-seed state machine：
 
@@ -333,6 +333,12 @@ v0.3.0 是 supervised research-validity hardening，不是 scheduled formal publ
 - `pilot_ready`：在 active seed 基础上还需要 executable pilot plan、metric automation、baseline implementation path 和 resource budget。
 
 OpenAlex / Semantic Scholar / arXiv 仍只是 external probes，不是完整人工 prior-art review；pilot feedback 只用于 strategy calibration，不是 publication proof。`note_section` anchor 不等价于 PDF/table verified evidence；`result_row` 需要 page/table/row/metric/baseline/reported value 等字段。Manual artifact 不能绕过 DeepSeek fatal flaw、Codex reject/rewrite、external novelty failure、stale cache、anchorless evidence、speculative tension 或 missing survival decision。
+
+v0.3.1 是 active-seed QA hardening。它新增 derived `active_seed_dashboard.py`，但 dashboard 只是 run-scoped audit view 和 latest copy，不是 promotion source of truth。`survival_decision.py`、strict validation、`publish_research_run.py` 和 audit 仍是 gate 来源。
+
+v0.3.1 active seed 额外要求 manual prior-art QA checklist、query log、negative search log、venue/manual source check、strongest-baseline comparison、reviewer signature、fresh broad novelty cache、baseline execution readiness 和 pilot plan。`result_row` / `actual_baseline_result` 只有在作为 core evidence 使用时才要求人工确认；cross-paper edge 只有在作为 core evidence 使用时才要求 audited 或 human confirmed。不使用这些证据类型的 candidate 不会仅因缺少 result row 或 cross-paper edge 被阻断。
+
+Formal rehearsal 仍不等于 active seed；active seed 仍不是 publication proof；pilot feedback 只做 strategy calibration，不能 auto-promote、删除 seed、修改 `raw/` 或放宽 hard gates。Scheduled formal publish 仍禁用，scheduled wrapper 不得包含 formal/active publish flags。
 
 Formal provider provenance 也更严格：`provider=json` 可以继续用于 seed-candidates-only fixture 和 CI，但 formal mode 默认拒绝它。只有手动传入 `--allow-test-provider-for-formal` 才能继续测试 formal path，并且 manifest / publish result / audit 会记录 `test_provider_used_for_formal=true` 和 `formal_publish_risk=test_provider_not_production_provenance`。
 

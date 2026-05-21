@@ -62,6 +62,13 @@
         "baseline_name": {"type": "string"},
         "reported_value": {"type": "string"},
         "task_or_dataset": {"type": "string"},
+        "manual_confirmed": {"type": "boolean"},
+        "confirmed_by": {"type": "string"},
+        "confirmed_at": {"type": "string"},
+        "validated_metric": {"type": "string"},
+        "validated_baseline": {"type": "string"},
+        "validated_task": {"type": "string"},
+        "confirmation_note": {"type": "string"},
         "extraction_method": {
           "type": "string",
           "enum": ["note_section", "pdfplumber", "pdf_text", "pdf_table", "manual"]

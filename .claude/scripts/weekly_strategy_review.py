@@ -20,6 +20,10 @@ ALLOWED_OVERRIDE_KEYS = {
     "manual_prior_art_queue",
     "pdf_evidence_queue",
     "baseline_table_queue",
+    "baseline_execution_queue",
+    "active_seed_qa_queue",
+    "result_row_confirmation_queue",
+    "cross_paper_edge_audit_queue",
     "pilot_candidate_queue",
 }
 FORBIDDEN_OVERRIDE_KEYS = {
@@ -73,6 +77,10 @@ def build_resurrection_review(run_date: str) -> dict[str, Any]:
         "manual_prior_art_queue": [],
         "pdf_evidence_queue": [],
         "baseline_table_queue": [],
+        "baseline_execution_queue": [],
+        "active_seed_qa_queue": [],
+        "result_row_confirmation_queue": [],
+        "cross_paper_edge_audit_queue": [],
     }
     survival_path = run_artifacts / "survival-decision.json"
     if survival_path.exists():
@@ -91,8 +99,17 @@ def build_resurrection_review(run_date: str) -> dict[str, Any]:
                 queues["codex_rewrite_or_reject"].append(_queue_item(cid, "Codex requested rewrite/reject/park", "survival-decision.json"))
             if "manual_prior_art_review_missing" in risks:
                 queues["manual_prior_art_queue"].append(_queue_item(cid, "needs manual prior-art review", "survival-decision.json"))
+            if "manual_prior_art_quality_incomplete" in risks or "manual_prior_art_query_log_missing" in risks:
+                queues["active_seed_qa_queue"].append(_queue_item(cid, "needs manual prior-art quality completion", "survival-decision.json"))
+                queues["manual_prior_art_queue"].append(_queue_item(cid, "needs manual prior-art QA checklist/query log", "survival-decision.json"))
             if "strongest_baseline_unknown" in risks or "baseline_table_missing" in risks:
                 queues["baseline_table_queue"].append(_queue_item(cid, "needs baseline table or strongest baseline judgment", "survival-decision.json"))
+            if "baseline_execution_not_ready" in risks:
+                queues["baseline_execution_queue"].append(_queue_item(cid, "needs baseline execution readiness", "survival-decision.json"))
+            if "result_row_unconfirmed" in risks:
+                queues["result_row_confirmation_queue"].append(_queue_item(cid, "needs manual result-row confirmation", "survival-decision.json"))
+            if "cross_paper_edge_requires_human_check" in risks:
+                queues["cross_paper_edge_audit_queue"].append(_queue_item(cid, "needs cross-paper edge audit", "survival-decision.json"))
     selected_path = run_artifacts / "selected-candidates.json"
     if selected_path.exists():
         for item in read_json(selected_path).get("selected", []):
@@ -121,6 +138,10 @@ def main() -> int:
         "manual_prior_art_queue": review["queues"]["manual_prior_art_queue"],
         "pdf_evidence_queue": review["queues"]["pdf_evidence_queue"],
         "baseline_table_queue": review["queues"]["baseline_table_queue"],
+        "baseline_execution_queue": review["queues"]["baseline_execution_queue"],
+        "active_seed_qa_queue": review["queues"]["active_seed_qa_queue"],
+        "result_row_confirmation_queue": review["queues"]["result_row_confirmation_queue"],
+        "cross_paper_edge_audit_queue": review["queues"]["cross_paper_edge_audit_queue"],
     }
     safe, errors = sanitize_overrides(payload)
     safe["run_date"] = args.run_date

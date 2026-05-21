@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from v03_test_helpers import RUN_DATE, V03TempAgendaTest
-from baseline_table import baseline_allows_active_seed, build_baseline_table, load_baseline_tables
+from baseline_table import baseline_allows_active_seed, baseline_execution_status, build_baseline_table, load_baseline_tables
 
 
 class BaselineTableTest(V03TempAgendaTest):
@@ -19,6 +19,7 @@ class BaselineTableTest(V03TempAgendaTest):
         table = build_baseline_table(RUN_DATE, self.candidate())
         self.assertEqual(table["strongest_baseline_final"]["status"], "known")
         self.assertEqual(table["strongest_baseline_final"]["source"], "manual_prior_art_review")
+        self.assertEqual(baseline_execution_status(table), "ready")
         self.assertTrue(baseline_allows_active_seed(table))
 
     def test_codex_feasibility_enters_baseline_table(self) -> None:
@@ -33,3 +34,19 @@ class BaselineTableTest(V03TempAgendaTest):
         self.write_baseline_table(known=False)
         table = load_baseline_tables(RUN_DATE)["cand-alpha"]
         self.assertFalse(baseline_allows_active_seed(table))
+
+    def test_unknown_or_prohibitive_execution_blocks_active_seed(self) -> None:
+        for status in ["unknown", "prohibitive", "partial"]:
+            with self.subTest(status=status):
+                self.tearDown()
+                self.setUp()
+                self.write_baseline_table(execution_status=status)
+                table = load_baseline_tables(RUN_DATE)["cand-alpha"]
+                self.assertEqual(baseline_execution_status(table), status)
+                self.assertFalse(baseline_allows_active_seed(table))
+
+    def test_not_applicable_execution_requires_reason_and_allows_active_seed(self) -> None:
+        self.write_baseline_table(execution_status="not_applicable")
+        table = load_baseline_tables(RUN_DATE)["cand-alpha"]
+        self.assertEqual(baseline_execution_status(table), "not_applicable")
+        self.assertTrue(baseline_allows_active_seed(table))

@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.3.1 - Active-Seed QA Hardening
+
+### Added
+
+- `active_seed_dashboard.py` as a derived run-scoped active-seed QA dashboard plus latest-view copy.
+- Manual prior-art QA fields for quality checklist, negative search log, venue/manual source checks, strongest-baseline comparison, reviewer signature, and template detection.
+- Result-row manual confirmation fields and active-seed blocking when unconfirmed result rows are used as core evidence.
+- Cross-paper edge audit fields and active-seed blocking when unaudited/unconfirmed cross-paper edges are used as core evidence.
+- Baseline execution readiness with `ready`, `partial`, `unknown`, `prohibitive`, and `not_applicable` statuses.
+
+### Changed
+
+- Active seed now requires complete manual QA, fresh broad novelty, anchored core evidence, known strongest baseline, baseline execution readiness, and pilot plan.
+- Result-row and cross-paper checks are conditional: candidates are blocked only when those artifacts are used as core active-seed evidence.
+- Weekly resurrection and pilot feedback queue/record QA failures without weakening hard gates or auto-promoting seeds.
+- Run packet export includes dashboard/manual/baseline/PDF/pilot/weekly/audit artifacts when present while redacting secrets, cache payloads, logs, raw PDFs, and private paths.
+
+### Safety
+
+- Dashboard is derived state only and is never a promotion source of truth.
+- Formal rehearsal remains separate from active seed and never writes `idea_bank/seed/`.
+- Scheduled formal publish remains disabled, and scheduled wrappers still must not pass formal/active publish flags.
+- v0.2.2 novelty gates, v0.2.3 evidence gates, and v0.3.0 manual prior-art / baseline / pilot gates are not relaxed.
+- Active seed is still not publication proof, and the system still does not claim doctoral-level idea generation.
+
 ## v0.3.0 - Supervised Research-Validity Hardening
 
 ### Added

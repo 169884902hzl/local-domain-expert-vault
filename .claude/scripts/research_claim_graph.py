@@ -176,6 +176,13 @@ def _edge_record(
     if relation not in EDGE_RELATIONS:
         raise ValueError(f"invalid_edge_relation:{relation}")
     confidence = _min_confidence([source, target])
+    requires_human_check = bool(
+        edge_scope == "cross_paper"
+        or source.get("requires_human_check")
+        or target.get("requires_human_check")
+        or confidence in {"low", "unusable"}
+    )
+    edge_quality_status = "requires_human_check" if requires_human_check else "audited"
     return {
         "schema_version": "research_claim_graph.v1",
         "record_type": "edge",
@@ -183,6 +190,8 @@ def _edge_record(
         "paper_key": source.get("paper_key", ""),
         "source_paper_key": source.get("paper_key", ""),
         "target_paper_key": target.get("paper_key", ""),
+        "source_paper_id": source.get("paper_id", source.get("paper_key", "")),
+        "target_paper_id": target.get("paper_id", target.get("paper_key", "")),
         "edge_scope": edge_scope,
         "source_node_id": source["node_id"],
         "target_node_id": target["node_id"],
@@ -193,12 +202,12 @@ def _edge_record(
         "relation_rule": relation_rule or reason,
         "overlap_evidence": overlap_evidence or {},
         "evidence_nodes": [source["node_id"], target["node_id"]],
-        "requires_human_check": bool(
-            edge_scope == "cross_paper"
-            or source.get("requires_human_check")
-            or target.get("requires_human_check")
-            or confidence in {"low", "unusable"}
-        ),
+        "requires_human_check": requires_human_check,
+        "human_check_required": requires_human_check,
+        "human_confirmed": False,
+        "confirmed_by": "",
+        "confirmed_at": "",
+        "edge_quality_status": edge_quality_status,
         "supporting_node_ids": [source["node_id"], target["node_id"]],
     }
 

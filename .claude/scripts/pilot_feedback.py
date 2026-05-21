@@ -15,6 +15,9 @@ FAILURE_REASONS = {
     "no_signal",
     "metric_failed",
     "implementation_blocked",
+    "generator_signal_failure",
+    "gate_false_positive",
+    "gate_false_negative",
     "data_unavailable",
     "hardware_blocked",
     "unknown",
@@ -91,7 +94,16 @@ def _feedback_from_result(result: dict[str, Any], args: argparse.Namespace) -> d
         "boost_patterns": _split_csv(args.boost_patterns),
         "required_future_checks": _split_csv(args.required_future_checks),
     }
-    if result.get("failure_reason") in {"baseline_killed", "metric_failed", "data_unavailable"}:
+    if result.get("failure_reason") in {
+        "baseline_killed",
+        "no_signal",
+        "metric_failed",
+        "implementation_blocked",
+        "generator_signal_failure",
+        "gate_false_positive",
+        "gate_false_negative",
+        "data_unavailable",
+    }:
         update["required_future_checks"].append(str(result["failure_reason"]))
     if result.get("result") in {"negative", "blocked"}:
         update["penalize_patterns"].append(str(result.get("failure_reason") or "unknown_pilot_failure"))

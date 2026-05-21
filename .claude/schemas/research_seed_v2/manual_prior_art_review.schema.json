@@ -32,6 +32,7 @@
       "properties": {
         "candidate_id": {"type": "string", "minLength": 1},
         "review_status": {"type": "string", "enum": ["template", "completed"]},
+        "is_template": {"type": "boolean"},
         "reviewer": {"type": "string", "enum": ["human"]},
         "reviewed_at": {"type": "string"},
         "decision": {
@@ -46,17 +47,32 @@
           "type": "array",
           "items": {"type": "string"}
         },
+        "review_quality_checklist": {"$ref": "#/$defs/review_quality_checklist"},
+        "negative_search_log": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/negative_search_item"}
+        },
+        "venue_search_checklist": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/venue_search_item"}
+        },
         "nearest_works": {
           "type": "array",
           "items": {"$ref": "#/$defs/nearest_work"}
         },
         "explicit_no_near_work_reason": {"type": "string"},
+        "strongest_baseline_comparison_table": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/strongest_baseline_comparison"}
+        },
         "strongest_baseline_judgment": {"$ref": "#/$defs/strongest_baseline_judgment"},
         "known_overlap_risk": {"type": "string", "enum": ["low", "medium", "high", "unknown"]},
         "remaining_delta": {"type": "string"},
         "reason": {"type": "string"},
         "limitations": {"type": "string"},
         "risk_acceptance": {"type": "string"},
+        "manual_review_quality_status": {"type": "string", "enum": ["complete", "partial", "insufficient", "incomplete", "template"]},
+        "reviewer_signature": {"$ref": "#/$defs/reviewer_signature"},
         "cannot_weaken": {
           "type": "array",
           "items": {"type": "string"},
@@ -95,6 +111,68 @@
         },
         "what_is_already_done": {"type": "string"},
         "remaining_delta": {"type": "string"}
+      },
+      "additionalProperties": true
+    },
+    "review_quality_checklist": {
+      "type": "object",
+      "properties": {
+        "venue_proceedings_checked": {"type": "boolean"},
+        "google_scholar_checked": {"type": "boolean"},
+        "openalex_checked": {"type": "boolean"},
+        "semantic_scholar_checked": {"type": "boolean"},
+        "arxiv_checked": {"type": "boolean"},
+        "lab_specific_sources_checked": {"type": "boolean"},
+        "negative_search_log_present": {"type": "boolean"},
+        "strongest_baseline_comparison_present": {"type": "boolean"},
+        "query_log_present": {"type": "boolean"}
+      },
+      "additionalProperties": true
+    },
+    "negative_search_item": {
+      "type": "object",
+      "properties": {
+        "query": {"type": "string"},
+        "source": {"type": "string"},
+        "result_summary": {"type": "string"},
+        "result_count": {"type": "integer", "minimum": 0},
+        "why_not_overlap": {"type": "string"},
+        "notes": {"type": "string"}
+      },
+      "additionalProperties": true
+    },
+    "venue_search_item": {
+      "type": "object",
+      "properties": {
+        "venue": {"type": "string"},
+        "years": {"type": "string"},
+        "query": {"type": "string"},
+        "checked": {"type": "boolean"},
+        "notes": {"type": "string"}
+      },
+      "additionalProperties": true
+    },
+    "strongest_baseline_comparison": {
+      "type": "object",
+      "properties": {
+        "work_title": {"type": "string"},
+        "baseline_name": {"type": "string"},
+        "source": {"type": "string"},
+        "overlap_type": {"type": "string"},
+        "stronger_than_candidate": {"type": "boolean"},
+        "why_not_kill_or_kills": {"type": "string"},
+        "why_not_strongest": {"type": "string"},
+        "remaining_delta": {"type": "string"},
+        "kill_condition": {"type": "string"}
+      },
+      "additionalProperties": true
+    },
+    "reviewer_signature": {
+      "type": "object",
+      "properties": {
+        "reviewer": {"type": "string"},
+        "signed_at": {"type": "string"},
+        "statement": {"type": "string"}
       },
       "additionalProperties": true
     },

@@ -140,16 +140,28 @@ def build_tensions(nodes: list[dict[str, Any]], edges: list[dict[str, Any]] | No
             continue
         supporting = [str(source["node_id"]), str(target["node_id"])]
         scope = str(edge.get("edge_scope") or "same_paper")
+        edge_quality = str(edge.get("edge_quality_status") or "")
+        cross_edge_needs_check = bool(
+            scope == "cross_paper"
+            and edge_quality not in {"audited", "confirmed"}
+            and edge.get("human_confirmed") is not True
+        )
+        confidence = _edge_confidence(edge, [source, target])
+        if cross_edge_needs_check and confidence == "high":
+            confidence = "medium"
         item = _tension_item(
             tension_type=tension_type,
             summary=f"{source.get('statement', '')} / {target.get('statement', '')}",
             supporting_nodes=supporting,
             supporting_edges=[str(edge["edge_id"])],
-            confidence=_edge_confidence(edge, [source, target]),
+            confidence=confidence,
             source="claim_graph_edge",
             tension_scope=scope,
-            requires_human_check=bool(edge.get("requires_human_check") or scope == "cross_paper"),
+            requires_human_check=bool(edge.get("requires_human_check") or cross_edge_needs_check),
         )
+        item["edge_quality_status"] = edge_quality or ("requires_human_check" if cross_edge_needs_check else "audited")
+        if cross_edge_needs_check:
+            item["risk_markers"] = ["cross_paper_edge_requires_human_check"]
         _canonical_or_speculative(item, speculative, tensions)
     node_only_pairs = [
         ("interface_boundary", by_type.get("interface_boundary", []), "interface_boundary_mismatch"),

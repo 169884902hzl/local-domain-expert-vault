@@ -63,8 +63,26 @@ V03_RISK_MARKERS = {
     "external_scope_arxiv_only_not_full_prior_art",
     "stale_external_novelty_cache",
     "strongest_baseline_unknown",
+    "manual_prior_art_quality_incomplete",
+    "manual_prior_art_query_log_missing",
+    "result_row_unconfirmed",
+    "cross_paper_edge_requires_human_check",
+    "baseline_execution_not_ready",
     "speculative_tension_not_formal_seed_evidence",
     "active_seed_without_manual_prior_art_review",
+    "active_seed_without_pilot_plan",
+}
+ACTIVE_SEED_FATAL_RISKS = {
+    "manual_prior_art_review_missing",
+    "manual_prior_art_quality_incomplete",
+    "manual_prior_art_query_log_missing",
+    "stale_external_novelty_cache",
+    "strongest_baseline_unknown",
+    "baseline_execution_not_ready",
+    "result_row_unconfirmed",
+    "cross_paper_edge_requires_human_check",
+    "anchorless_core_evidence_risk",
+    "speculative_tension_not_formal_seed_evidence",
     "active_seed_without_pilot_plan",
 }
 
@@ -480,7 +498,7 @@ def _audit_v2_state_machine(run_date: str) -> tuple[dict[str, Any], list[dict[st
             for marker in sorted(decision_risks & V03_RISK_MARKERS):
                 risk_markers[marker] += 1
                 level = "WARN"
-                if marker in {"active_seed_without_pilot_plan"} and decision.get("active_seed_allowed") is True:
+                if marker in ACTIVE_SEED_FATAL_RISKS and decision.get("active_seed_allowed") is True:
                     level = "FAIL"
                 issues.append(_issue(level, marker, f"{cid}: {marker}", _rel(survival_path)))
             if decision.get("active_seed_allowed") is True and "manual_prior_art_review_missing" in decision_risks:
@@ -503,8 +521,48 @@ def _audit_v2_state_machine(run_date: str) -> tuple[dict[str, Any], list[dict[st
                         _rel(survival_path),
                     )
                 )
+            if decision.get("active_seed_allowed") is True:
+                fatal = sorted(decision_risks & ACTIVE_SEED_FATAL_RISKS)
+                if fatal:
+                    issues.append(
+                        _issue(
+                            "FAIL",
+                            "active_seed_with_v031_blocking_risk",
+                            f"{cid}: active seed is marked allowed despite {','.join(fatal)}.",
+                            _rel(survival_path),
+                        )
+                    )
     elif survival_path.exists():
         issues.append(_issue("FAIL", "v2_survival_decision_invalid", str(survival_data.get("_read_error")), _rel(survival_path)))
+
+    dashboard_path = artifacts_path / "active-seed-dashboard.json"
+    dashboard_data = _json_read(dashboard_path)
+    if dashboard_data and not dashboard_data.get("_read_error") and survival_data and not survival_data.get("_read_error"):
+        decisions_by_id = {
+            str(item.get("candidate_id")): item
+            for item in survival_data.get("decisions", [])
+            if isinstance(item, dict)
+        }
+        for row in dashboard_data.get("rows", []):
+            if not isinstance(row, dict):
+                continue
+            cid = str(row.get("candidate_id") or "unknown_candidate")
+            decision = decisions_by_id.get(cid)
+            if not decision:
+                issues.append(_issue("WARN", "active_seed_dashboard_extra_row", f"{cid}: dashboard row has no survival decision.", _rel(dashboard_path)))
+                continue
+            for field in ["formal_rehearsal_allowed", "active_seed_allowed", "pilot_ready_allowed"]:
+                if bool(row.get(field)) != bool(decision.get(field)):
+                    issues.append(
+                        _issue(
+                            "FAIL",
+                            "active_seed_dashboard_survival_mismatch",
+                            f"{cid}: {field} dashboard={row.get(field)} survival={decision.get(field)}.",
+                            _rel(dashboard_path),
+                        )
+                    )
+    elif dashboard_path.exists():
+        issues.append(_issue("FAIL", "active_seed_dashboard_invalid", str(dashboard_data.get("_read_error")), _rel(dashboard_path)))
 
     novelty_path = artifacts_path / "novelty-scan.json"
     novelty_data = _json_read(novelty_path)

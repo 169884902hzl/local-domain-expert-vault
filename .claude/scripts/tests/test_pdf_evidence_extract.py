@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from v03_test_helpers import RUN_DATE, V03TempAgendaTest
-from pdf_evidence_extract import build_anchor_records, is_pdf_verified_anchor, validate_result_row_anchor
+from pdf_evidence_extract import build_anchor_records, is_pdf_verified_anchor, result_row_manual_confirmed, validate_result_row_anchor
 from research_seed_v2_common import validate_payload
 
 
@@ -60,9 +60,23 @@ class PdfEvidenceExtractTest(V03TempAgendaTest):
             "baseline_name": "baseline",
             "reported_value": "0.72",
             "task_or_dataset": "contact shift",
+            "manual_confirmed": False,
+            "confirmed_by": "",
+            "confirmed_at": "",
+            "confirmation_note": "",
         }
         self.assertEqual(validate_result_row_anchor(anchor), [])
-        self.assertTrue(is_pdf_verified_anchor(anchor))
+        self.assertFalse(result_row_manual_confirmed(anchor))
+        self.assertFalse(is_pdf_verified_anchor(anchor))
+        confirmed = {
+            **anchor,
+            "manual_confirmed": True,
+            "confirmed_by": "human",
+            "confirmed_at": "2099-03-04T12:00:00+00:00",
+            "confirmation_note": "Checked against the table.",
+        }
+        self.assertTrue(result_row_manual_confirmed(confirmed))
+        self.assertTrue(is_pdf_verified_anchor(confirmed))
         missing = dict(anchor)
         missing.pop("row_text")
         self.assertIn("result_row_missing_row_text", validate_result_row_anchor(missing))

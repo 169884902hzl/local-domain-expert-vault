@@ -45,6 +45,66 @@ def _codex_by_candidate(run_date: str) -> dict[str, dict[str, Any]]:
     return {str(item.get("candidate_id")): item for item in read_json(path).get("reviews", []) if isinstance(item, dict)}
 
 
+def _readiness_from_feasibility(value: str) -> str:
+    if value == "available":
+        return "ready"
+    if value == "needs_reimplementation":
+        return "partial"
+    if value == "prohibitive":
+        return "prohibitive"
+    return "unknown"
+
+
+def _baseline_execution_readiness(
+    *,
+    manual_judgment: dict[str, Any],
+    codex: dict[str, Any],
+    strongest_known: bool,
+) -> dict[str, Any]:
+    existing = manual_judgment.get("baseline_execution_readiness")
+    if isinstance(existing, dict) and existing.get("status"):
+        return {
+            "status": str(existing.get("status")),
+            "source": str(existing.get("source") or "manual_prior_art"),
+            "implementation_path": str(existing.get("implementation_path") or existing.get("repo_or_reference_url") or ""),
+            "dataset_or_sim": str(existing.get("dataset_or_sim") or existing.get("dataset_or_sim_available") or ""),
+            "compute_budget": str(existing.get("compute_budget") or existing.get("training_cost") or ""),
+            "metric_automation": str(existing.get("metric_automation") or ""),
+            "not_applicable_reason": str(existing.get("not_applicable_reason") or ""),
+            "blocking_issues": existing.get("blocking_issues", []) if isinstance(existing.get("blocking_issues"), list) else [],
+        }
+    feasibility = str(manual_judgment.get("implementation_feasibility") or "unknown")
+    status = _readiness_from_feasibility(feasibility) if strongest_known else "unknown"
+    implementation_path = str(
+        manual_judgment.get("repo_or_reference_url")
+        or codex.get("minimal_repo_plan")
+        or codex.get("reproducibility_path")
+        or ""
+    )
+    dataset_or_sim = str(codex.get("public_dataset_or_sim_availability") or "")
+    compute_budget = str(codex.get("compute_time_budget") or codex.get("baseline_training_cost") or "")
+    metric_automation = str(codex.get("metric_automation") or "")
+    blocking_issues: list[str] = []
+    cost_text = compute_budget.lower()
+    if "prohibitive" in cost_text:
+        status = "prohibitive"
+        blocking_issues.append("training_cost_prohibitive")
+    if status == "ready" and (not metric_automation or dataset_or_sim in {"", "unknown"}):
+        status = "partial"
+    if status in {"unknown", "prohibitive"}:
+        blocking_issues.append(f"baseline_execution_{status}")
+    return {
+        "status": status,
+        "source": "manual_prior_art" if strongest_known else "baseline_table",
+        "implementation_path": implementation_path,
+        "dataset_or_sim": dataset_or_sim,
+        "compute_budget": compute_budget,
+        "metric_automation": metric_automation,
+        "not_applicable_reason": str(manual_judgment.get("not_applicable_reason") or ""),
+        "blocking_issues": list(dict.fromkeys(blocking_issues)),
+    }
+
+
 def _claim_graph_baselines() -> list[dict[str, Any]]:
     path = agenda_v2_path("evidence", "research_claim_graph.jsonl")
     if not path.exists():
@@ -166,6 +226,7 @@ def build_baseline_table(run_date: str, candidate: dict[str, Any]) -> dict[str, 
 
     manual_strongest = next((item for item in baselines if item["baseline_role"] == "manual_strongest_baseline"), None)
     if manual_strongest:
+        judgment = manual.get("strongest_baseline_judgment", {}) if manual and isinstance(manual.get("strongest_baseline_judgment"), dict) else {}
         strongest = {
             "status": "known",
             "baseline_id": manual_strongest["baseline_id"],
@@ -178,6 +239,7 @@ def build_baseline_table(run_date: str, candidate: dict[str, Any]) -> dict[str, 
         }
         status = "verified"
     else:
+        judgment = {}
         strongest = {
             "status": "unknown",
             "baseline_id": "",
@@ -189,6 +251,11 @@ def build_baseline_table(run_date: str, candidate: dict[str, Any]) -> dict[str, 
             "why_strongest": "nearest_work_is_not_strongest_baseline",
         }
         status = "partial" if baselines else "unknown"
+    baseline_execution_readiness = _baseline_execution_readiness(
+        manual_judgment=judgment,
+        codex=codex,
+        strongest_known=bool(manual_strongest),
+    )
 
     return {
         "schema_version": "baseline_table.v1",
@@ -198,6 +265,7 @@ def build_baseline_table(run_date: str, candidate: dict[str, Any]) -> dict[str, 
         "strongest_baseline_id": strongest["baseline_id"],
         "strongest_baseline_final": strongest,
         "baseline_verification_status": status,
+        "baseline_execution_readiness": baseline_execution_readiness,
         "artifact_hashes": artifact_hashes(run_date, ["selected-candidates.json", "novelty-scan.json", "codex-execution-review.json"]),
         "boundary": "Nearest works are baseline candidates only; active seed requires known strongest_baseline_final.",
     }
@@ -217,12 +285,25 @@ def baseline_allows_active_seed(table: dict[str, Any] | None) -> bool:
     if not table:
         return False
     strongest = table.get("strongest_baseline_final", {}) if isinstance(table.get("strongest_baseline_final"), dict) else {}
+    readiness = baseline_execution_status(table)
     return bool(
         strongest.get("status") == "known"
         and str(strongest.get("name") or "").strip()
         and str(strongest.get("kill_condition") or "").strip()
         and str(strongest.get("metric_or_task") or "").strip()
+        and readiness in {"ready", "not_applicable"}
+        and (readiness != "not_applicable" or str(table.get("baseline_execution_readiness", {}).get("not_applicable_reason", "")).strip())
     )
+
+
+def baseline_execution_status(table: dict[str, Any] | None) -> str:
+    if not table:
+        return "unknown"
+    readiness = table.get("baseline_execution_readiness", {})
+    if not isinstance(readiness, dict):
+        return "unknown"
+    status = str(readiness.get("status") or "unknown")
+    return status if status in {"ready", "partial", "unknown", "prohibitive", "not_applicable"} else "unknown"
 
 
 def main() -> int:
@@ -252,6 +333,16 @@ def main() -> int:
                 "metric_or_task": "",
             },
             "baseline_verification_status": "unknown" if not tables else "partial",
+            "baseline_execution_readiness": {
+                "status": "unknown",
+                "source": "baseline_table",
+                "implementation_path": "",
+                "dataset_or_sim": "",
+                "compute_budget": "",
+                "metric_automation": "",
+                "not_applicable_reason": "",
+                "blocking_issues": ["multi_candidate_wrapper"],
+            },
             "tables": tables,
             "artifact_hashes": artifact_hashes(args.run_date, ["selected-candidates.json", "novelty-scan.json", "codex-execution-review.json"]),
             "boundary": "Multi-candidate wrapper; inspect tables for per-candidate strongest baseline status.",

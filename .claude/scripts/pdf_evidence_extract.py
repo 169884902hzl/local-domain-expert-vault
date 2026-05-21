@@ -60,6 +60,13 @@ def _note_anchor(paper_id: str, claim: dict[str, Any]) -> dict[str, Any] | None:
         "extraction_method": "note_section",
         "confidence": "medium" if anchor_type in {"section", "snippet", "table", "figure"} else "low",
         "requires_human_check": bool(claim.get("requires_human_check", True)),
+        "manual_confirmed": False,
+        "confirmed_by": "",
+        "confirmed_at": "",
+        "validated_metric": "",
+        "validated_baseline": "",
+        "validated_task": "",
+        "confirmation_note": "",
     }
 
 
@@ -67,7 +74,7 @@ def is_pdf_verified_anchor(anchor: dict[str, Any]) -> bool:
     if str(anchor.get("anchor_source")) not in PDF_VERIFIED_ANCHOR_SOURCES:
         return False
     if anchor.get("anchor_type") == "result_row":
-        return validate_result_row_anchor(anchor) == []
+        return validate_result_row_anchor(anchor) == [] and result_row_manual_confirmed(anchor)
     return bool((anchor.get("page") or anchor.get("section")) and (anchor.get("snippet") or anchor.get("row_text") or anchor.get("row_cells")))
 
 
@@ -80,6 +87,15 @@ def validate_result_row_anchor(anchor: dict[str, Any]) -> list[str]:
     if str(anchor.get("anchor_source")) not in {"pdf_table", "manual_pdf_locator", "result_row"}:
         errors.append("result_row_anchor_source_not_pdf_or_manual")
     return errors
+
+
+def result_row_manual_confirmed(anchor: dict[str, Any]) -> bool:
+    return bool(
+        anchor.get("manual_confirmed") is True
+        and str(anchor.get("confirmed_by", "")).strip()
+        and str(anchor.get("confirmed_at", "")).strip()
+        and str(anchor.get("confirmation_note", "")).strip()
+    )
 
 
 def _pdf_text_anchors(paper_id: str, source_pdf: str) -> list[dict[str, Any]]:
@@ -134,6 +150,13 @@ def _pdf_text_anchors(paper_id: str, source_pdf: str) -> list[dict[str, Any]]:
                                 "extraction_method": "pdfplumber",
                                 "confidence": "medium",
                                 "requires_human_check": True,
+                                "manual_confirmed": False,
+                                "confirmed_by": "",
+                                "confirmed_at": "",
+                                "validated_metric": "",
+                                "validated_baseline": "",
+                                "validated_task": "",
+                                "confirmation_note": "",
                             }
                         )
     except Exception:

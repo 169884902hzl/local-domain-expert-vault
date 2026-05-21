@@ -36,6 +36,7 @@ class TensionMapV03Test(unittest.TestCase):
         self.assertFalse(speculative)
         self.assertEqual(tensions[0]["tension_scope"], "cross_paper")
         self.assertEqual(tensions[0]["supporting_edges"], ["edge-a-b"])
+        self.assertIn("cross_paper_edge_requires_human_check", tensions[0]["risk_markers"])
 
     def test_llm_only_high_tension_rejected_as_speculative(self) -> None:
         tensions = [

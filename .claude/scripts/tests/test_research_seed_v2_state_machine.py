@@ -161,10 +161,34 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
                     {
                         "candidate_id": candidate_id,
                         "review_status": "completed",
+                        "is_template": False,
                         "reviewer": "human",
                         "reviewed_at": "2099-01-02T12:00:00+00:00",
                         "searched_sources": ["OpenAlex", "Semantic Scholar", "arXiv", "Google Scholar/manual"],
                         "search_queries": ["anchored contact failure benchmark DLO latent friction"],
+                        "review_quality_checklist": {
+                            "venue_proceedings_checked": True,
+                            "google_scholar_checked": True,
+                            "openalex_checked": True,
+                            "semantic_scholar_checked": True,
+                            "arxiv_checked": True,
+                            "lab_specific_sources_checked": True,
+                            "negative_search_log_present": True,
+                            "strongest_baseline_comparison_present": True,
+                            "query_log_present": True,
+                        },
+                        "negative_search_log": [
+                            {
+                                "query": "anchored contact failure benchmark DLO latent friction",
+                                "source": "OpenAlex",
+                                "result_summary": "Near work is adjacent.",
+                                "result_count": 8,
+                                "why_not_overlap": "No anchored latent contact-failure benchmark.",
+                            }
+                        ],
+                        "venue_search_checklist": [
+                            {"venue": "RSS/CoRL/ICRA", "years": "2021-2099", "query": "DLO latent friction failure", "checked": True, "notes": "No direct overlap."}
+                        ],
                         "nearest_works": [
                             {
                                 "title": "Near work",
@@ -173,6 +197,17 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
                                 "overlap_type": "adjacent",
                                 "what_is_already_done": "Adjacent benchmark exists.",
                                 "remaining_delta": "This candidate targets anchored latent contact failure.",
+                            }
+                        ],
+                        "strongest_baseline_comparison_table": [
+                            {
+                                "work_title": "Near work",
+                                "source": "manual:near-work",
+                                "overlap_type": "adjacent",
+                                "stronger_than_candidate": False,
+                                "why_not_kill_or_kills": "It lacks anchored latent contact-failure evidence.",
+                                "remaining_delta": "This candidate targets anchored latent contact failure.",
+                                "kill_condition": "Reject if it matches failure detection under latent friction shifts.",
                             }
                         ],
                         "strongest_baseline_judgment": {
@@ -189,6 +224,12 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
                         "decision": "allow_active_seed",
                         "reason": "Remaining delta is explicit and strongest baseline is known.",
                         "limitations": "Manual review is not a publishability proof.",
+                        "manual_review_quality_status": "complete",
+                        "reviewer_signature": {
+                            "reviewer": "human",
+                            "signed_at": "2099-01-02T12:00:00+00:00",
+                            "statement": "I reviewed nearest works and accept the remaining-delta risk.",
+                        },
                         "cannot_weaken": [
                             "deepseek_success_required",
                             "codex_accept_required",
@@ -253,6 +294,16 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
                     "why_strongest": "Direct policy baseline for the failure detection claim.",
                 },
                 "baseline_verification_status": "verified",
+                "baseline_execution_readiness": {
+                    "status": "ready",
+                    "source": "manual_prior_art_review",
+                    "implementation_path": "baselines/diffusion-policy-threshold",
+                    "dataset_or_sim": "public sim",
+                    "compute_budget": "one GPU day",
+                    "metric_automation": "pytest evaluator",
+                    "not_applicable_reason": "",
+                    "blocking_issues": [],
+                },
             },
             state="baseline_table_built",
         )

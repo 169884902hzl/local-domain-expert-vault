@@ -45,3 +45,63 @@ class AuditV03Test(V03TempAgendaTest):
         self.write_base_reviews(stale_cache=True)
         _summary, issues = _audit_v2_state_machine(RUN_DATE)
         self.assertTrue(any(item["code"] == "stale_external_novelty_cache" for item in issues))
+
+    def test_audit_catches_active_seed_dashboard_mismatch(self) -> None:
+        write_run_artifact(
+            RUN_DATE,
+            "survival-decision.json",
+            {
+                "schema_version": "survival_decision.v1",
+                "run_date": RUN_DATE,
+                "status": "success",
+                "target_policy": "seed-candidates-only",
+                "decisions": [
+                    {
+                        "candidate_id": "cand-alpha",
+                        "candidate_title": "Anchored Contact Failure Benchmark",
+                        "decision": "accept_for_user_review",
+                        "blocks": [],
+                        "deepseek_label": "survives",
+                        "novelty_classification": "likely_open",
+                        "verification_scope": "local_plus_s2_or_openalex",
+                        "external_providers_used": ["openalex"],
+                        "codex_action": "accept_for_user_review",
+                        "human_override_used": False,
+                        "risks": [],
+                        "active_seed_allowed": False,
+                        "formal_rehearsal_allowed": True,
+                        "pilot_ready_allowed": False,
+                        "publish_target": "formal-rehearsal",
+                    }
+                ],
+                "artifact_hashes": {},
+            },
+            state="survival_decided",
+        )
+        write_run_artifact(
+            RUN_DATE,
+            "active-seed-dashboard.json",
+            {
+                "schema_version": "active_seed_dashboard.v1",
+                "run_date": RUN_DATE,
+                "generated_at": "2099-03-04T12:00:00+00:00",
+                "source_of_truth": "derived_view_only",
+                "rows": [
+                    {
+                        "candidate_id": "cand-alpha",
+                        "title": "Anchored Contact Failure Benchmark",
+                        "current_state": "active_seed_candidate",
+                        "formal_rehearsal_allowed": True,
+                        "active_seed_allowed": True,
+                        "pilot_ready_allowed": False,
+                        "risk_markers": [],
+                        "blocking_reasons": [],
+                    }
+                ],
+                "source_artifact_hashes": {},
+                "boundary": "derived",
+            },
+            state="active_seed_dashboard_rendered",
+        )
+        _summary, issues = _audit_v2_state_machine(RUN_DATE)
+        self.assertTrue(any(item["code"] == "active_seed_dashboard_survival_mismatch" and item["level"] == "FAIL" for item in issues))

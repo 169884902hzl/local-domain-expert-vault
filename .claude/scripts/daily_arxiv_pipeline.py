@@ -827,9 +827,10 @@ def build_v2_review_stages(args: argparse.Namespace, run_date: str) -> list[tupl
         ("codex_execution_review", codex_cmd, max(600, codex_timeout)),
         ("baseline_table", [sys.executable, ".claude/scripts/baseline_table.py", "--run-date", run_date], 240),
         ("survival_decision", survival_cmd, 300),
+        ("active_seed_dashboard", [sys.executable, ".claude/scripts/active_seed_dashboard.py", "--run-date", run_date], 180),
     ]
     if args.allow_human_override:
-        review_stages[-1][1].append("--allow-human-override")
+        survival_cmd.append("--allow-human-override")
     return review_stages
 
 

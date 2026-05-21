@@ -269,8 +269,13 @@ def _formal_publish_risk(run_date: str, *, allow_test_provider_for_formal: bool)
                     "anchorless_core_evidence_risk",
                     "speculative_tension_not_formal_seed_evidence",
                     "manual_prior_art_review_missing",
+                    "manual_prior_art_quality_incomplete",
+                    "manual_prior_art_query_log_missing",
                     "stale_external_novelty_cache",
                     "strongest_baseline_unknown",
+                    "baseline_execution_not_ready",
+                    "result_row_unconfirmed",
+                    "cross_paper_edge_requires_human_check",
                     "active_seed_without_pilot_plan",
                 }:
                     risks.append(str(risk))

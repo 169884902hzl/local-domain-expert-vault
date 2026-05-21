@@ -57,6 +57,9 @@ class CrossPaperClaimGraphTest(unittest.TestCase):
         self.assertTrue(edges)
         self.assertEqual(edges[0]["confidence"], "medium")
         self.assertNotEqual(edges[0]["source_paper_key"], edges[0]["target_paper_key"])
+        self.assertNotEqual(edges[0]["source_paper_id"], edges[0]["target_paper_id"])
+        self.assertEqual(edges[0]["edge_quality_status"], "requires_human_check")
+        self.assertFalse(edges[0]["human_confirmed"])
 
     def test_high_cross_paper_edge_requires_anchored_nodes(self) -> None:
         nodes = build_nodes(

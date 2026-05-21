@@ -19,7 +19,7 @@ The public vault uses robotic manipulation as its example domain, especially DLO
 
 It is built for graduate students, PI/lab knowledge-base maintainers, and researchers who need long-term literature memory rather than another one-off summarizer.
 
-Current public version: `v0.3.0`. `v0.1.0` was the first releasable local-first vault: local browsing, knowledge-base audits, `kb_search.py` retrieval, Zotero/Obsidian setup documentation, Paper Reading Workbench, arXiv mirror-first automation docs, and the Windows scheduled-task entry point. `v0.2.0` adds the research-seed v2 state machine on top of that base; `v0.2.1` hardens the gates needed before any future scheduled formal publish; `v0.2.2` upgrades the external novelty scan from an arXiv-only probe to OpenAlex plus optional Semantic Scholar prior-art probes; `v0.2.3` hardens the anchored evidence graph; `v0.3.0` adds supervised research-validity hardening, while still not enabling scheduled formal publish.
+Current public version: `v0.3.1`. `v0.1.0` was the first releasable local-first vault: local browsing, knowledge-base audits, `kb_search.py` retrieval, Zotero/Obsidian setup documentation, Paper Reading Workbench, arXiv mirror-first automation docs, and the Windows scheduled-task entry point. `v0.2.0` adds the research-seed v2 state machine on top of that base; `v0.2.1` hardens the gates needed before any future scheduled formal publish; `v0.2.2` upgrades the external novelty scan from an arXiv-only probe to OpenAlex plus optional Semantic Scholar prior-art probes; `v0.2.3` hardens the anchored evidence graph; `v0.3.0` adds supervised research-validity hardening; `v0.3.1` hardens active-seed QA while still not enabling scheduled formal publish.
 
 `v0.2.0` is a major workflow architecture upgrade: the old Gemini greenhouse plus downstream-review scaffold is now a transactional research-seed state machine. It improves state control, review ordering, auditability, and rollout safety; it does not claim that generated ideas are automatically novel or publishable.
 
@@ -153,6 +153,20 @@ Research-validity boundaries:
 - Speculative tension, anchorless core evidence, stale novelty cache, Codex reject/rewrite, DeepSeek fatal flaw, and external novelty failure cannot be bypassed by a manual artifact.
 - Pilot feedback is a strategy calibration signal, not publication proof.
 - Generated candidates remain unproven with respect to doctoral-level novelty, publishability, and experimental validity.
+
+## v0.3.1: Active-Seed QA Hardening
+
+v0.3.1 keeps the same supervised-pipeline boundary. It hardens the QA needed before an active seed: manual prior-art quality, baseline execution readiness, result-row confirmation, cross-paper edge audit, the active-seed dashboard, audit checks, and export packets. It is not scheduled formal publish enablement and it does not prove doctoral-level idea generation.
+
+New boundaries:
+
+- `active_seed_dashboard.py` writes a derived dashboard only. The run-scoped artifact is an audit view, and `projects/research-agenda/dashboard/` is only the latest copy. The dashboard never replaces `survival_decision.py`, validation, publish, or audit gates.
+- Active seed requires complete manual prior-art QA: query log, negative search log, venue/manual source check, strongest-baseline comparison, and reviewer signature. OpenAlex / Semantic Scholar / arXiv remain probes, not full prior-art review.
+- If a candidate uses `result_row` / `actual_baseline_result` as core evidence, the relevant result rows must be manually confirmed. Candidates that do not use result-row core evidence are not blocked merely for lacking result rows.
+- If a candidate uses cross-paper edges as core evidence, the relevant edges must be audited or human confirmed. Candidates that do not use cross-paper core evidence are not blocked merely for lacking cross-paper edges.
+- Active seed requires baseline execution readiness. `unknown` / `prohibitive` blocks active seed; `partial` is a formal-rehearsal risk only.
+- Formal rehearsal is not active seed, active seed is not publication proof, and pilot feedback calibrates strategy without auto-promotion.
+- Scheduled formal publish remains disabled, and scheduled wrappers still must not carry formal/active publish flags.
 
 ## What this is / is not
 

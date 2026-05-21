@@ -17,7 +17,7 @@
 
 适合对象：需要长期追踪一个专业方向的研究生、PI / 实验室知识库维护者，以及希望把 LLM 变成“有本地文献记忆的领域专家”的研究者。
 
-当前公开版本：`v0.3.0`。`v0.1.0` 是首个可发行 local-first vault 版本，覆盖本地浏览、知识库审计、`kb_search.py` 检索、Zotero/Obsidian 配置说明、Paper Reading Workbench、arXiv mirror-first 自动化文档和 Windows 计划任务入口。`v0.2.0` 在此基础上加入 research-seed v2 状态机；`v0.2.1` 继续加固 scheduled formal publish 前的安全闸门；`v0.2.2` 把 external novelty scan 从 arXiv-only probe 升级为 OpenAlex / optional Semantic Scholar 的 multi-provider prior-art probe；`v0.2.3` 加固 anchored evidence graph；`v0.3.0` 加入 supervised research-validity hardening，但仍不启用 scheduled formal publish。
+当前公开版本：`v0.3.1`。`v0.1.0` 是首个可发行 local-first vault 版本，覆盖本地浏览、知识库审计、`kb_search.py` 检索、Zotero/Obsidian 配置说明、Paper Reading Workbench、arXiv mirror-first 自动化文档和 Windows 计划任务入口。`v0.2.0` 在此基础上加入 research-seed v2 状态机；`v0.2.1` 继续加固 scheduled formal publish 前的安全闸门；`v0.2.2` 把 external novelty scan 从 arXiv-only probe 升级为 OpenAlex / optional Semantic Scholar 的 multi-provider prior-art probe；`v0.2.3` 加固 anchored evidence graph；`v0.3.0` 加入 supervised research-validity hardening；`v0.3.1` 加固 active-seed QA，但仍不启用 scheduled formal publish。
 
 `v0.2.0` 是一次 workflow architecture upgrade：从 Gemini greenhouse + 后置审查 scaffold，升级为 transactional research-seed state machine。它改进的是状态控制、审查顺序、审计性和 rollout safety，不是声明系统已经能稳定产生已验证创新点。
 
@@ -137,6 +137,20 @@ v0.3.0 不是 scheduled formal publish enablement，也不是 doctoral-level ide
 - speculative tension、anchorless core evidence、stale novelty cache、Codex reject/rewrite、DeepSeek fatal flaw 和 external novelty failure 都不能被 manual artifact 绕过。
 - pilot feedback 是 strategy calibration signal，不是 publication proof。
 - generated candidates 仍不是已证明 doctoral-level novelty、publishability 或实验有效性。
+
+## v0.3.1: Active-Seed QA Hardening
+
+v0.3.1 继续保持 supervised pipeline 定位：它加固 active seed 前的人工 QA、baseline execution readiness、result-row confirmation、cross-paper edge audit、dashboard、audit 和 export packet；它不是 scheduled formal publish enablement，也不证明系统能稳定生成博士级 research ideas。
+
+新增边界：
+
+- `active_seed_dashboard.py` 只生成 derived dashboard：run-scoped artifact 是审计视图，`projects/research-agenda/dashboard/` 只是 latest copy；dashboard 不能替代 `survival_decision.py`、validation、publish 或 audit gate。
+- Active seed 需要完整 manual prior-art QA：query log、negative search log、venue/manual source check、strongest-baseline comparison 和 reviewer signature。OpenAlex / Semantic Scholar / arXiv 仍只是 probes，不是完整 prior-art review。
+- 如果 candidate 使用 `result_row` / `actual_baseline_result` 作为 core evidence，相关 result row 必须人工确认；不使用 result row 的 candidate 不会仅因缺少 result row 被阻断。
+- 如果 candidate 使用 cross-paper edge 作为 core evidence，相关 edge 必须 audited 或 human confirmed；不使用 cross-paper edge 的 candidate 不会仅因缺少 cross-paper edge 被阻断。
+- Active seed 需要 baseline execution readiness；`unknown` / `prohibitive` 会阻断 active seed，`partial` 只能作为 formal rehearsal 风险。
+- Formal rehearsal 仍不等于 active seed，active seed 仍不等于 publication proof，pilot feedback 只校准 strategy，不能自动 promote。
+- Scheduled formal publish 仍禁用，scheduled wrappers 仍不得携带 formal/active publish flags。
 
 ## 它是什么 / 不是什么
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from v03_test_helpers import RUN_DATE, V03TempAgendaTest
-from manual_prior_art_review import completion_errors, completed_review_by_candidate, validate_reviews, write_template
+from manual_prior_art_review import completion_errors, completed_review_by_candidate, review_quality_errors, validate_reviews, write_template
 from research_seed_v2_common import validate_payload, write_run_artifact
 from survival_decision import decide
 
@@ -18,6 +18,25 @@ class ManualPriorArtReviewTest(V03TempAgendaTest):
         _payload, errors = validate_reviews(RUN_DATE)
         self.assertEqual(errors, [])
         self.assertIn("cand-alpha", completed_review_by_candidate(RUN_DATE))
+
+    def test_completed_review_missing_quality_blocks_active_seed(self) -> None:
+        self.write_base_reviews()
+        self.write_manual_review(quality_complete=False)
+        self.write_baseline_table()
+        self.write_pilot_plan()
+        _payload, errors = validate_reviews(RUN_DATE)
+        self.assertTrue(any("negative_search_log_missing" in item for item in errors))
+        decision = decide(run_date=RUN_DATE, allow_human_override=False, target_policy="formal")["decisions"][0]
+        self.assertFalse(decision["active_seed_allowed"])
+        self.assertIn("manual_prior_art_quality_incomplete", decision["risks"])
+
+    def test_review_quality_requires_negative_log_baseline_comparison_and_signature(self) -> None:
+        self.write_manual_review(quality_complete=False)
+        review = completed_review_by_candidate(RUN_DATE)["cand-alpha"]
+        errors = review_quality_errors(review)
+        self.assertTrue(any("negative_search_log_missing" in item for item in errors))
+        self.assertTrue(any("strongest_baseline_comparison_missing" in item for item in errors))
+        self.assertTrue(any("reviewer_signature_missing" in item for item in errors))
 
     def test_allow_active_seed_requires_manual_review(self) -> None:
         self.write_base_reviews()

@@ -60,6 +60,8 @@
         "source": {"type": "string"},
         "do_not_use_as_seed_evidence": {"type": "boolean"},
         "requires_human_check": {"type": "boolean"},
+        "edge_quality_status": {"type": "string"},
+        "risk_markers": {"type": "array", "items": {"type": "string"}},
         "original_tension_type": {"type": "string"},
         "allowed_lane": {"type": "string"}
       }

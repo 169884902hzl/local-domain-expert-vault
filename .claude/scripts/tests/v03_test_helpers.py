@@ -55,6 +55,7 @@ class V03TempAgendaTest(unittest.TestCase):
         anchor_type: str = "section",
         snippet: str = "Contact policies fail under latent friction shifts.",
         requires_human_check: bool = False,
+        manual_confirmed: bool = False,
     ) -> None:
         anchor = {
             "source_note": f"wiki/topics/{paper_key}.md",
@@ -64,7 +65,24 @@ class V03TempAgendaTest(unittest.TestCase):
             "section": "Results",
             "snippet": snippet,
             "pdf_page": None,
+            "manual_confirmed": manual_confirmed,
+            "confirmed_by": "human" if manual_confirmed else "",
+            "confirmed_at": "2099-03-04T12:30:00+00:00" if manual_confirmed else "",
+            "confirmation_note": "Manually checked against the PDF table." if manual_confirmed else "",
         }
+        if anchor_type == "result_row":
+            anchor.update(
+                {
+                    "anchor_source": "pdf_table",
+                    "page": 7,
+                    "row_index": 3,
+                    "row_text": "baseline | auc | 0.72",
+                    "metric_name": "auc",
+                    "baseline_name": "baseline",
+                    "reported_value": "0.72",
+                    "task_or_dataset": "contact shift",
+                }
+            )
         write_jsonl(
             artifact_dir(RUN_DATE) / "claim-graph-snapshot.jsonl",
             [
@@ -91,6 +109,66 @@ class V03TempAgendaTest(unittest.TestCase):
                 }
             ],
         )
+
+    def write_claim_graph_with_edge(self, *, edge_quality_status: str = "requires_human_check", human_confirmed: bool = False) -> None:
+        records = []
+        for node_id, paper_key, claim_type, statement in [
+            ("claim-1", "PAPER-A", "central_claim", "Contact policies fail under latent friction shifts."),
+            ("claim-2", "PAPER-B", "contradiction", "Contact policies do not fail when friction is modeled."),
+        ]:
+            records.append(
+                {
+                    "schema_version": "research_claim_graph.v1",
+                    "record_type": "node",
+                    "node_id": node_id,
+                    "paper_key": paper_key,
+                    "paper_id": paper_key,
+                    "source_note": f"wiki/topics/{paper_key}.md",
+                    "source_title": paper_key,
+                    "claim_type": claim_type,
+                    "statement": statement,
+                    "confidence": "high",
+                    "confidence_reason": "test_fixture",
+                    "evidence_anchor": f"wiki/topics/{paper_key}.md#Results",
+                    "anchor_type": "section",
+                    "anchor_source": "note_section",
+                    "summary_origin": "section_summary",
+                    "requires_human_check": False,
+                    "anchor": {"anchor_type": "section", "section": "Results", "snippet": statement},
+                    "supporting_node_ids": [],
+                    "domains": ["dlo", "contact"],
+                }
+            )
+        records.append(
+            {
+                "schema_version": "research_claim_graph.v1",
+                "record_type": "edge",
+                "edge_id": "edge-cross-1",
+                "paper_key": "PAPER-B",
+                "source_paper_key": "PAPER-B",
+                "target_paper_key": "PAPER-A",
+                "source_paper_id": "PAPER-B",
+                "target_paper_id": "PAPER-A",
+                "edge_scope": "cross_paper",
+                "source_node_id": "claim-2",
+                "target_node_id": "claim-1",
+                "relation": "contradicts",
+                "confidence": "high",
+                "confidence_reason": "test_fixture",
+                "edge_reason": "assumption_conflict",
+                "relation_rule": "assumption_conflict",
+                "overlap_evidence": {"keyword_overlap": ["contact", "friction"], "domain_overlap": ["dlo"], "metric_overlap": [], "task_overlap": []},
+                "evidence_nodes": ["claim-2", "claim-1"],
+                "requires_human_check": not human_confirmed,
+                "human_check_required": not human_confirmed,
+                "human_confirmed": human_confirmed,
+                "confirmed_by": "human" if human_confirmed else "",
+                "confirmed_at": "2099-03-04T12:45:00+00:00" if human_confirmed else "",
+                "edge_quality_status": edge_quality_status,
+                "supporting_node_ids": ["claim-2", "claim-1"],
+            }
+        )
+        write_jsonl(artifact_dir(RUN_DATE) / "claim-graph-snapshot.jsonl", records)
 
     def write_base_reviews(
         self,
@@ -209,7 +287,7 @@ class V03TempAgendaTest(unittest.TestCase):
             state="execution_reviewed",
         )
 
-    def write_manual_review(self, *, decision: str = "allow_active_seed") -> None:
+    def write_manual_review(self, *, decision: str = "allow_active_seed", quality_complete: bool = True) -> None:
         write_run_artifact(
             RUN_DATE,
             "manual-prior-art-review.json",
@@ -220,12 +298,51 @@ class V03TempAgendaTest(unittest.TestCase):
                     {
                         "candidate_id": "cand-alpha",
                         "review_status": "completed",
+                        "is_template": False,
                         "reviewer": "human",
                         "reviewed_at": "2099-03-04T12:00:00+00:00",
                         "searched_sources": ["OpenAlex", "Semantic Scholar", "arXiv", "Google Scholar/manual"],
                         "search_queries": ["anchored contact failure DLO benchmark"],
+                        "review_quality_checklist": {
+                            "venue_proceedings_checked": quality_complete,
+                            "google_scholar_checked": quality_complete,
+                            "openalex_checked": True,
+                            "semantic_scholar_checked": True,
+                            "arxiv_checked": True,
+                            "lab_specific_sources_checked": quality_complete,
+                            "negative_search_log_present": quality_complete,
+                            "strongest_baseline_comparison_present": quality_complete,
+                            "query_log_present": True,
+                        },
+                        "negative_search_log": [
+                            {
+                                "query": "anchored contact failure DLO benchmark",
+                                "source": "OpenAlex",
+                                "result_summary": "Nearest work is adjacent.",
+                                "result_count": 12,
+                                "why_not_overlap": "No anchored failure-trigger benchmark.",
+                            }
+                        ]
+                        if quality_complete
+                        else [],
+                        "venue_search_checklist": [
+                            {"venue": "ICRA/RSS/CoRL", "years": "2021-2099", "query": "DLO contact failure", "checked": quality_complete, "notes": "No direct overlap."}
+                        ],
                         "nearest_works": [{"title": "Nearest work", "source": "manual", "url": "", "overlap_type": "adjacent", "what_is_already_done": "Adjacent benchmark", "remaining_delta": "Anchored contact failure"}],
                         "explicit_no_near_work_reason": "",
+                        "strongest_baseline_comparison_table": [
+                            {
+                                "work_title": "Nearest work",
+                                "source": "manual:W1",
+                                "overlap_type": "adjacent",
+                                "stronger_than_candidate": False,
+                                "why_not_kill_or_kills": "Does not test anchored contact failure.",
+                                "remaining_delta": "Contact-failure benchmark remains.",
+                                "kill_condition": "Reject if it matches failure detection.",
+                            }
+                        ]
+                        if quality_complete
+                        else [],
                         "strongest_baseline_judgment": {
                             "status": "known",
                             "baseline_name": "Diffusion policy with fixed recovery threshold",
@@ -241,6 +358,14 @@ class V03TempAgendaTest(unittest.TestCase):
                         "reason": "Manual review completed.",
                         "limitations": "Not publishability proof.",
                         "risk_acceptance": "Human accepts active-seed risk.",
+                        "manual_review_quality_status": "complete" if quality_complete else "incomplete",
+                        "reviewer_signature": {
+                            "reviewer": "human",
+                            "signed_at": "2099-03-04T12:00:00+00:00",
+                            "statement": "I reviewed nearest works and accept the remaining-delta risk.",
+                        }
+                        if quality_complete
+                        else {"reviewer": "", "signed_at": "", "statement": ""},
                         "cannot_weaken": [
                             "deepseek_success_required",
                             "codex_accept_required",
@@ -255,7 +380,7 @@ class V03TempAgendaTest(unittest.TestCase):
             state="manual_prior_art_reviewed",
         )
 
-    def write_baseline_table(self, *, known: bool = True) -> None:
+    def write_baseline_table(self, *, known: bool = True, execution_status: str = "ready") -> None:
         write_run_artifact(
             RUN_DATE,
             "baseline-table.json",
@@ -277,6 +402,16 @@ class V03TempAgendaTest(unittest.TestCase):
                     "metric_or_task": "failure_detection_auc" if known else "",
                 },
                 "baseline_verification_status": "verified" if known else "partial",
+                "baseline_execution_readiness": {
+                    "status": execution_status if known else "unknown",
+                    "source": "manual_prior_art_review" if known else "baseline_table",
+                    "implementation_path": "baselines/diffusion-policy-threshold" if known else "",
+                    "dataset_or_sim": "public sim" if known else "",
+                    "compute_budget": "one GPU day" if known else "",
+                    "metric_automation": "pytest evaluator" if known else "",
+                    "not_applicable_reason": "No executable baseline needed for this protocol seed." if execution_status == "not_applicable" else "",
+                    "blocking_issues": [] if execution_status in {"ready", "not_applicable"} and known else [f"baseline_execution_{execution_status if known else 'unknown'}"],
+                },
             },
             state="baseline_table_built",
         )

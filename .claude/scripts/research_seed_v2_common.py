@@ -39,6 +39,7 @@ ARTIFACT_SCHEMAS: dict[str, str] = {
     "pdf-evidence-anchors.json": "pdf_evidence_anchors.v1",
     "baseline-table.json": "baseline_table.v1",
     "survival-decision.json": "survival_decision.v1",
+    "active-seed-dashboard.json": "active_seed_dashboard.v1",
     "publish-result.json": "publish_result.v1",
 }
 
@@ -132,6 +133,7 @@ def ensure_v2_dirs(run_date: str | None = None) -> None:
         root / "seed-candidates" / "needs-baseline-table",
         root / "seed-candidates" / "needs-pdf-evidence",
         root / "seed-candidates" / "needs-pilot-plan",
+        root / "dashboard",
         root / "parked",
         root / "rescue",
         root / "overrides" / "human-overrides",

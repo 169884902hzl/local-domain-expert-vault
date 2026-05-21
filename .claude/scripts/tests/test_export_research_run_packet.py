@@ -49,14 +49,54 @@ class ExportResearchRunPacketTest(V03TempAgendaTest):
                 "artifact_hashes": {},
             },
         )
+        write_run_artifact(
+            RUN_DATE,
+            "active-seed-dashboard.json",
+            {
+                "schema_version": "active_seed_dashboard.v1",
+                "run_date": RUN_DATE,
+                "generated_at": "2099-03-04T12:00:00+00:00",
+                "source_of_truth": "derived_view_only",
+                "rows": [
+                    {
+                        "candidate_id": "cand-alpha",
+                        "title": "Packet Candidate",
+                        "current_state": "seed_candidate",
+                        "formal_rehearsal_allowed": False,
+                        "active_seed_allowed": False,
+                        "pilot_ready_allowed": False,
+                        "risk_markers": [],
+                        "blocking_reasons": [],
+                    }
+                ],
+                "source_artifact_hashes": {},
+                "boundary": "derived",
+            },
+            state="active_seed_dashboard_rendered",
+        )
+        write_json(
+            Path(self.tmp.name) / "pilots" / "packet-candidate" / "feedback-to-strategy.json",
+            {
+                "schema_version": "pilot_feedback.v1",
+                "seed_slug": "packet-candidate",
+                "candidate_id": "cand-alpha",
+                "strategy_update": {"penalize_patterns": ["weak"], "cannot_weaken_hard_gates": True},
+                "raw_payload": {"token": fake_secret},
+            },
+        )
         manifest = export_packet(RUN_DATE)
         packet_dir = Path(self.tmp.name) / "runs" / RUN_DATE / "publish" / "run-packet"
         self.assertIn("selected-candidates.json", manifest["included"])
+        self.assertIn("active-seed-dashboard.json", manifest["included"])
+        self.assertIn("pilot-artifacts.json", manifest["included"])
         selected = read_json(packet_dir / "selected-candidates.json")
         text = json.dumps(selected, ensure_ascii=False)
         self.assertNotIn(fake_secret, text)
         self.assertNotIn("provider body", text)
         self.assertNotIn(fake_private_path, text)
+        pilot_text = json.dumps(read_json(packet_dir / "pilot-artifacts.json"), ensure_ascii=False)
+        self.assertNotIn(fake_secret, pilot_text)
+        self.assertIn("[redacted]", pilot_text)
         self.assertIn("[redacted]", text)
         self.assertIn("[redacted-private-path]", text)
         packet_manifest = read_json(packet_dir / "manifest.json")

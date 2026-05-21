@@ -222,12 +222,45 @@ def _validate_formal_policy(run_date: str) -> list[str]:
             risks = set(str(risk) for risk in item.get("risks", []))
             for risk in [
                 "manual_prior_art_review_missing",
+                "manual_prior_art_quality_incomplete",
+                "manual_prior_art_query_log_missing",
                 "stale_external_novelty_cache",
                 "strongest_baseline_unknown",
+                "baseline_execution_not_ready",
+                "result_row_unconfirmed",
+                "cross_paper_edge_requires_human_check",
                 "active_seed_without_pilot_plan",
             ]:
                 if risk in risks:
                     errors.append(f"{risk}:{cid}")
+    return errors
+
+
+def _validate_dashboard_alignment(run_date: str) -> list[str]:
+    artifacts = artifact_dir(run_date)
+    survival_path = artifacts / "survival-decision.json"
+    dashboard_path = artifacts / "active-seed-dashboard.json"
+    if not survival_path.exists() or not dashboard_path.exists():
+        return []
+    survival = {
+        str(item.get("candidate_id")): item
+        for item in read_json(survival_path).get("decisions", [])
+        if isinstance(item, dict)
+    }
+    rows = {
+        str(item.get("candidate_id")): item
+        for item in read_json(dashboard_path).get("rows", [])
+        if isinstance(item, dict)
+    }
+    errors: list[str] = []
+    for cid, decision in survival.items():
+        row = rows.get(cid)
+        if not row:
+            errors.append(f"active_seed_dashboard_missing_row:{cid}")
+            continue
+        for field in ["formal_rehearsal_allowed", "active_seed_allowed", "pilot_ready_allowed"]:
+            if bool(row.get(field)) != bool(decision.get(field)):
+                errors.append(f"active_seed_dashboard_mismatch:{cid}:{field}")
     return errors
 
 
@@ -244,6 +277,7 @@ def validate_run(run_date: str, *, strict_publish: bool = False) -> dict[str, An
         errors.extend(f"{artifact_name}:{issue}" for issue in validate_artifact(run_date, artifact_name))
         errors.extend(_validate_referenced_hashes(run_date, artifact_name))
     errors.extend(_validate_candidate_alignment(run_date))
+    errors.extend(_validate_dashboard_alignment(run_date))
     if strict_publish:
         errors.extend(_validate_formal_policy(run_date))
     return {

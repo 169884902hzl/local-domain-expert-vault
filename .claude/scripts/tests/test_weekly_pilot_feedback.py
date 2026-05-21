@@ -36,7 +36,15 @@ class WeeklyPilotFeedbackTest(V03TempAgendaTest):
                         "external_providers_used": [],
                         "codex_action": "rewrite_before_seed",
                         "human_override_used": False,
-                        "risks": ["anchorless_core_evidence_risk", "manual_prior_art_review_missing", "strongest_baseline_unknown"],
+                        "risks": [
+                            "anchorless_core_evidence_risk",
+                            "manual_prior_art_review_missing",
+                            "manual_prior_art_quality_incomplete",
+                            "result_row_unconfirmed",
+                            "cross_paper_edge_requires_human_check",
+                            "strongest_baseline_unknown",
+                            "baseline_execution_not_ready",
+                        ],
                         "formal_rehearsal_allowed": False,
                         "active_seed_allowed": False,
                         "pilot_ready_allowed": False,
@@ -54,6 +62,10 @@ class WeeklyPilotFeedbackTest(V03TempAgendaTest):
         self.assertTrue(queues["manual_prior_art_queue"])
         self.assertTrue(queues["pdf_evidence_queue"])
         self.assertTrue(queues["baseline_table_queue"])
+        self.assertTrue(queues["active_seed_qa_queue"])
+        self.assertTrue(queues["result_row_confirmation_queue"])
+        self.assertTrue(queues["cross_paper_edge_audit_queue"])
+        self.assertTrue(queues["baseline_execution_queue"])
 
     def test_pilot_feedback_writes_feedback_to_strategy(self) -> None:
         plan_args = argparse.Namespace(
@@ -72,7 +84,7 @@ class WeeklyPilotFeedbackTest(V03TempAgendaTest):
             candidate_id="cand-alpha",
             pilot_status="killed",
             result="negative",
-            failure_reason="baseline_killed",
+            failure_reason="generator_signal_failure",
             baseline_result="baseline matched",
             metric_outcome="auc tie",
             what_generator_predicted_wrong="baseline weakness",
@@ -86,5 +98,6 @@ class WeeklyPilotFeedbackTest(V03TempAgendaTest):
         feedback = read_json(root / "feedback-to-strategy.json")
         self.assertEqual(feedback["schema_version"], "pilot_feedback.v1")
         self.assertIn("weak_baseline", feedback["strategy_update"]["penalize_patterns"])
+        self.assertIn("generator_signal_failure", feedback["strategy_update"]["required_future_checks"])
         self.assertTrue(feedback["strategy_update"]["cannot_weaken_hard_gates"])
         self.assertFalse(feedback["boundaries"]["seed_deleted"])
