@@ -8,6 +8,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
+from finalize_reading import extract_sections, strict_contract_issues
 from kb_common import extract_frontmatter, load_schema, parse_frontmatter_map, parse_list_value, safe_print, vault_path
 
 
@@ -86,71 +87,95 @@ def is_generic_batch_summary(summary: str) -> bool:
     return summary.startswith("提出基于") and "的" in summary and "方法" in summary and summary.endswith("。")
 
 
-def audit_topics(schema: dict[str, Any], *, strict_reading: bool = False) -> tuple[list[dict[str, Any]], Counter[str], Counter[str]]:
-    issues = []
-    status_counts: Counter[str] = Counter()
-    tag_counts: Counter[str] = Counter()
-    zkeys: defaultdict[str, list[str]] = defaultdict(list)
+def find_topic_by_key(zotero_key: str) -> Path | None:
+    pattern = re.compile(rf'^zotero_key:\s*"?{re.escape(zotero_key)}"?\s*$', re.MULTILINE)
+    for path in sorted(TOPICS_DIR.glob("*.md")):
+        if pattern.search(read(path)):
+            return path
+    return None
+
+
+def audit_topic_note(
+    path: Path,
+    schema: dict[str, Any],
+    *,
+    strict_reading: bool = False,
+    strict_contract: bool = False,
+) -> tuple[dict[str, str], list[str], str, list[str], str]:
+    fields, body, note_issues = frontmatter(path)
     required = schema["literature"]["required"]
     required_sections = schema["literature"].get("required_sections", [])
     structured_fields = schema["literature"].get("structured_fields", [])
     canonical = schema["literature"]["canonical_order"]
     allowed_status = set(schema["literature"]["fields"]["status"]["values"])
 
+    note_issues.extend(check_required(fields, required))
+    parsed = extract_frontmatter(read(path))
+    keys = [line.split(":", 1)[0].strip() for line in parsed[0].splitlines() if ":" in line] if parsed else []
+    actual = [key for key in keys if key in canonical]
+    expected = [key for key in canonical if key in keys]
+    if actual != expected:
+        note_issues.append("frontmatter_order")
+    status = fields.get("status", "").strip('"')
+    summary = fields.get("summary", "").strip('"')
+    if status not in allowed_status:
+        note_issues.append(f"invalid_status:{status}")
+    tags = parse_list_value(fields.get("tags", ""))
+    if len(tags) > schema["literature"]["fields"]["tags"]["max"]:
+        note_issues.append("too_many_tags")
+    year = fields.get("year", "").strip('"')
+    if year and not re.fullmatch(r"\d{4}", year):
+        note_issues.append("invalid_year")
+    zkey = fields.get("zotero_key", "").strip('"')
+    for heading in required_sections:
+        if heading not in body:
+            note_issues.append(f"missing_heading:{heading}")
+    structured_match = re.search(r"## 结构化提取\s*\n+(.*?)(?=\n## |\Z)", body, flags=re.DOTALL)
+    structured_body = structured_match.group(1) if structured_match else ""
+    structured_names = [
+        name
+        for line in structured_body.splitlines()
+        if (name := structured_field_name(line.strip()))
+    ]
+    duplicates = [field for field, count in Counter(structured_names).items() if count > 1]
+    for field in duplicates:
+        note_issues.append(f"duplicate_structured_field:{field}")
+    for field in structured_fields:
+        if field not in structured_names:
+            note_issues.append(f"missing_structured_field:{field}")
+    if status == "done":
+        if WAITING_TEXT in body:
+            note_issues.append("done_note_contains_waiting_text")
+        if PLACEHOLDER_TEXT in structured_body:
+            note_issues.append("done_note_contains_structured_placeholder")
+        if "## Key Contributions" in body and "## 关键贡献" in body:
+            note_issues.append("duplicate_key_contributions_section")
+        if strict_reading:
+            if "## 证据元数据" not in body:
+                note_issues.append("strict_missing_evidence_metadata")
+            if not summary or WAITING_TEXT in summary:
+                note_issues.append("strict_bad_summary")
+            elif is_generic_batch_summary(summary):
+                note_issues.append("strict_generic_batch_summary")
+            if strict_contract:
+                sections = extract_sections(body)
+                note_issues.extend(f"strict_{issue}" for issue in strict_contract_issues(sections))
+    return fields, note_issues, status, tags, zkey
+
+
+def audit_topics(schema: dict[str, Any], *, strict_reading: bool = False) -> tuple[list[dict[str, Any]], Counter[str], Counter[str]]:
+    issues = []
+    status_counts: Counter[str] = Counter()
+    tag_counts: Counter[str] = Counter()
+    zkeys: defaultdict[str, list[str]] = defaultdict(list)
+
     for path in sorted(TOPICS_DIR.glob("*.md")):
-        fields, body, note_issues = frontmatter(path)
-        note_issues.extend(check_required(fields, required))
-        keys = [line.split(":", 1)[0].strip() for line in extract_frontmatter(read(path))[0].splitlines() if ":" in line] if extract_frontmatter(read(path)) else []
-        actual = [key for key in keys if key in canonical]
-        expected = [key for key in canonical if key in keys]
-        if actual != expected:
-            note_issues.append("frontmatter_order")
-        status = fields.get("status", "").strip('"')
-        summary = fields.get("summary", "").strip('"')
+        fields, note_issues, status, tags, zkey = audit_topic_note(path, schema, strict_reading=strict_reading)
         status_counts[status] += 1
-        if status not in allowed_status:
-            note_issues.append(f"invalid_status:{status}")
-        tags = parse_list_value(fields.get("tags", ""))
         for tag in tags:
             tag_counts[tag] += 1
-        if len(tags) > schema["literature"]["fields"]["tags"]["max"]:
-            note_issues.append("too_many_tags")
-        year = fields.get("year", "").strip('"')
-        if year and not re.fullmatch(r"\d{4}", year):
-            note_issues.append("invalid_year")
-        zkey = fields.get("zotero_key", "").strip('"')
         if zkey:
             zkeys[zkey].append(rel(path))
-        for heading in required_sections:
-            if heading not in body:
-                note_issues.append(f"missing_heading:{heading}")
-        structured_match = re.search(r"## 结构化提取\s*\n+(.*?)(?=\n## |\Z)", body, flags=re.DOTALL)
-        structured_body = structured_match.group(1) if structured_match else ""
-        structured_names = [
-            name
-            for line in structured_body.splitlines()
-            if (name := structured_field_name(line.strip()))
-        ]
-        duplicates = [field for field, count in Counter(structured_names).items() if count > 1]
-        for field in duplicates:
-            note_issues.append(f"duplicate_structured_field:{field}")
-        for field in structured_fields:
-            if field not in structured_names:
-                note_issues.append(f"missing_structured_field:{field}")
-        if status == "done":
-            if WAITING_TEXT in body:
-                note_issues.append("done_note_contains_waiting_text")
-            if PLACEHOLDER_TEXT in structured_body:
-                note_issues.append("done_note_contains_structured_placeholder")
-            if "## Key Contributions" in body and "## 关键贡献" in body:
-                note_issues.append("duplicate_key_contributions_section")
-            if strict_reading:
-                if "## 证据元数据" not in body:
-                    note_issues.append("strict_missing_evidence_metadata")
-                if not summary or WAITING_TEXT in summary:
-                    note_issues.append("strict_bad_summary")
-                elif is_generic_batch_summary(summary):
-                    note_issues.append("strict_generic_batch_summary")
         if note_issues:
             issues.append({"path": rel(path), "issues": note_issues})
 
@@ -194,6 +219,70 @@ def audit_concepts(schema: dict[str, Any], *, strict_concepts: bool = False) -> 
     return issues
 
 
+def resolve_note_path(note: str) -> Path:
+    path = Path(note)
+    if not path.is_absolute():
+        path = vault_path(note)
+    return path.resolve()
+
+
+def target_payload(
+    *,
+    schema: dict[str, Any],
+    args: argparse.Namespace,
+    topic_issues: list[dict[str, Any]],
+    concept_issues: list[dict[str, Any]],
+    entity_issues: list[dict[str, Any]],
+    tags_missing: list[str],
+) -> tuple[dict[str, Any], bool]:
+    issues: list[str] = []
+    target_path: Path | None = None
+    requested_key = (args.zotero_key or "").strip()
+    note_arg = (args.note or "").strip()
+    if requested_key:
+        target_path = find_topic_by_key(requested_key)
+        if target_path is None:
+            issues.append(f"target_note_not_found:{requested_key}")
+    if note_arg:
+        note_path = resolve_note_path(note_arg)
+        if not note_path.exists():
+            issues.append(f"target_note_not_found:{note_arg}")
+        elif target_path is not None and note_path != target_path.resolve():
+            issues.append("target_note_mismatch:zotero_key_and_note_resolve_differently")
+            target_path = note_path
+        else:
+            target_path = note_path
+
+    target_zkey = requested_key
+    if target_path and target_path.exists():
+        fields, note_issues, _status, _tags, zkey = audit_topic_note(
+            target_path,
+            schema,
+            strict_reading=args.strict_reading,
+            strict_contract=args.strict_reading,
+        )
+        target_zkey = zkey or requested_key
+        issues.extend(note_issues)
+        if requested_key and zkey and requested_key.upper() != zkey.upper():
+            issues.append("target_note_mismatch:zotero_key_field_differs")
+    payload = {
+        "target_note": {
+            "path": rel(target_path) if target_path and target_path.exists() else "",
+            "zotero_key": target_zkey,
+            "issues": issues,
+            "strict_reading_pass": not issues,
+        },
+        "global_warnings": {
+            "topic_issues": topic_issues,
+            "concept_issues": concept_issues,
+            "entity_issues": entity_issues,
+            "tags_missing_from_taxonomy": tags_missing,
+        },
+        "exit_policy": "target_note_only",
+    }
+    return payload, not issues
+
+
 def audit_entities(schema: dict[str, Any]) -> list[dict[str, Any]]:
     issues = []
     required = schema["entity"]["required"]
@@ -216,6 +305,8 @@ def main() -> int:
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--strict-reading", action="store_true", help="Also fail done notes that lack evidence metadata or still use generic batch summaries.")
     parser.add_argument("--strict-concepts", action="store_true", help="Also fail concept pages that remain stub-like indexes instead of evidence-grounded expert pages.")
+    parser.add_argument("--zotero-key", default="", help="Audit one topic note by Zotero key and separate target issues from global warnings.")
+    parser.add_argument("--note", default="", help="Audit one topic note by path and separate target issues from global warnings.")
     args = parser.parse_args()
 
     schema = load_schema()
@@ -223,6 +314,18 @@ def main() -> int:
     concept_issues = audit_concepts(schema, strict_concepts=args.strict_concepts)
     entity_issues = audit_entities(schema)
     taxonomy = schema["literature"]["tag_taxonomy"]
+    tags_missing = sorted(set(tag_counts) - set(taxonomy))
+    if args.zotero_key or args.note:
+        payload, ok = target_payload(
+            schema=schema,
+            args=args,
+            topic_issues=topic_issues,
+            concept_issues=concept_issues,
+            entity_issues=entity_issues,
+            tags_missing=tags_missing,
+        )
+        safe_print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return 0 if ok else 1
     payload = {
         "counts": {
             "topics": len(list(TOPICS_DIR.glob("*.md"))),
@@ -231,7 +334,7 @@ def main() -> int:
         },
         "status_counts": dict(status_counts),
         "tag_counts": dict(tag_counts),
-        "tags_missing_from_taxonomy": sorted(set(tag_counts) - set(taxonomy)),
+        "tags_missing_from_taxonomy": tags_missing,
         "topic_issues": topic_issues,
         "concept_issues": concept_issues,
         "entity_issues": entity_issues,

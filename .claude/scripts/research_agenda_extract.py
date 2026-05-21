@@ -62,8 +62,16 @@ TRANSFER_DOMAINS = {
     "VLA": "transfer_to_VLA",
     "sim-to-real": "transfer_to_sim_to_real",
 }
-ANCHOR_TYPES = {"section", "figure", "table", "result_row", "snippet", "abstract", "note_only"}
-STRICT_ANCHOR_TYPES = {"section", "figure", "table", "result_row", "snippet"}
+ANCHOR_TYPES = {"section", "figure", "table", "appendix", "result_row", "snippet", "abstract", "note_only"}
+STRICT_ANCHOR_TYPES = {"section", "figure", "table", "appendix", "result_row", "snippet"}
+WEAK_EVIDENCE_CLASSES = {"note_derived", "abstract_only", "not_evidenced"}
+REVIEW_PRESSURE_SECTIONS = {
+    "Idea Fuel": "idea_fuel",
+    "Baseline Pressure": "baseline_pressure",
+    "Transfer Risk": "transfer_risk",
+    "No-hardware Micro-test": "no_hardware_micro_test",
+    "Evidence Gaps": "evidence_gap",
+}
 PAPER_PRIMITIVE_CLAIMS = [
     "central_claim",
     "method_assumption",
@@ -143,6 +151,85 @@ def _short_snippet(value: str, *, limit: int = 260) -> str:
     if len(text) <= limit:
         return text
     return text[: limit - 1].rstrip() + "…"
+
+
+def _normalize_field_name(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", value.lower())
+
+
+def _normalize_token(value: str) -> str:
+    return re.sub(r"[^a-z0-9_]+", "_", str(value).lower()).strip("_")
+
+
+def _split_table_row(line: str) -> list[str]:
+    return [cell.strip().strip("`").strip("*").strip() for cell in line.strip().strip("|").split("|")]
+
+
+def _is_separator_row(line: str) -> bool:
+    cells = _split_table_row(line)
+    return bool(cells) and all(re.fullmatch(r":?-{3,}:?", cell.strip()) for cell in cells)
+
+
+def _ledger_value(row: dict[str, str], *aliases: str) -> str:
+    for alias in aliases:
+        value = row.get(_normalize_field_name(alias), "")
+        if value:
+            return value.strip()
+    return ""
+
+
+def _parse_evidence_ledger(body: str) -> list[dict[str, str]]:
+    ledger = _section_text(body, "Evidence Ledger")
+    if not ledger:
+        return []
+    table_lines = [line for line in ledger.splitlines() if line.strip().startswith("|") and line.strip().endswith("|")]
+    if len(table_lines) >= 3 and _is_separator_row(table_lines[1]):
+        headers = [_normalize_field_name(header) for header in _split_table_row(table_lines[0])]
+        rows = []
+        for line in table_lines[2:]:
+            if _is_separator_row(line):
+                continue
+            cells = _split_table_row(line)
+            if not any(cell for cell in cells):
+                continue
+            rows.append({headers[index]: cells[index].strip() for index in range(min(len(headers), len(cells)))})
+        return rows
+
+    rows = []
+    current: dict[str, str] = {}
+    for line in ledger.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            if current:
+                rows.append(current)
+                current = {}
+            continue
+        if not stripped.startswith("-") or ":" not in stripped:
+            continue
+        key, value = stripped.lstrip("-").split(":", 1)
+        current[_normalize_field_name(key)] = value.strip()
+    if current:
+        rows.append(current)
+    return rows
+
+
+def _claim_ids(text: str) -> list[str]:
+    return list(dict.fromkeys(re.findall(r"\b[A-Za-z][A-Za-z0-9_-]{1,40}\b", text)))
+
+
+def _strict_ledger_claim_ids(records: list[dict[str, Any]]) -> set[str]:
+    strict_ids = set()
+    for record in records:
+        claim_id = str(record.get("ledger_claim_id") or record.get("claim_id") or "")
+        if not claim_id:
+            continue
+        if record.get("evidence_class") in WEAK_EVIDENCE_CLASSES:
+            continue
+        if record.get("anchor_type") not in STRICT_ANCHOR_TYPES:
+            continue
+        if record.get("evidence_anchor") or record.get("source_snippet"):
+            strict_ids.add(claim_id)
+    return strict_ids
 
 
 def _section_candidates_for_claim(claim_type: str, section: str) -> list[str]:
@@ -256,6 +343,122 @@ def _record(
     return record
 
 
+def _record_from_ledger(
+    *,
+    path: Path,
+    fields: dict[str, str],
+    tags: list[str],
+    structured: dict[str, str],
+    row: dict[str, str],
+    run_date: str,
+) -> dict[str, Any] | None:
+    title = strip_quotes(fields.get("title", "")) or path.stem
+    claim = _clean(_ledger_value(row, "claim"))
+    claim_type = _normalize_token(_ledger_value(row, "claim_type"))
+    if not claim or not claim_type:
+        return None
+    evidence_class = _normalize_token(_ledger_value(row, "evidence_class"))
+    anchor_type = _normalize_token(_ledger_value(row, "anchor_type")) or "note_only"
+    if anchor_type not in ANCHOR_TYPES:
+        anchor_type = "note_only"
+    anchor = _ledger_value(row, "anchor") or _anchor_for(path, "Evidence Ledger")
+    downstream_use = _ledger_value(row, "downstream_use")
+    ledger_claim_id = _ledger_value(row, "claim_id")
+    locator = _ledger_value(row, "page/section/table/figure/appendix")
+    domains = detect_domains(f"{title} {claim} {' '.join(structured.values())}", tags)
+    requires_human_check = (
+        evidence_class in WEAK_EVIDENCE_CLASSES
+        or evidence_class == "result_row_unconfirmed"
+        or "requires_human_check" in _normalize_token(downstream_use)
+    )
+    screening_only = evidence_class in WEAK_EVIDENCE_CLASSES or "screening_only" in _normalize_token(downstream_use)
+    confidence = "low" if screening_only else ("medium" if evidence_class == "result_row_unconfirmed" else "high")
+    record: dict[str, Any] = {
+        "source_note": rel(path),
+        "source_title": title,
+        "zotero_key": strip_quotes(fields.get("zotero_key", "")),
+        "year": strip_quotes(fields.get("year", "")),
+        "venue": strip_quotes(fields.get("venue", "")),
+        "claim_type": claim_type,
+        "statement": claim,
+        "domains": domains,
+        "supports": _supports_for_claim(claim_type, domains),
+        "risks": _risks_for_claim(claim_type, claim, structured),
+        "tags": tags,
+        "run_date": run_date,
+        "evidence_section": "Evidence Ledger",
+        "source_snippet": claim,
+        "source_snippet_type": "evidence_ledger",
+        "evidence_anchor": anchor,
+        "anchor_type": anchor_type,
+        "anchor_source": "evidence_ledger",
+        "extraction_confidence": confidence,
+        "evidence_class": evidence_class,
+        "downstream_use": downstream_use,
+        "ledger_claim_id": ledger_claim_id,
+        "claim_id": ledger_claim_id,
+        "locator": locator,
+        "screening_only": screening_only,
+        "requires_human_check": requires_human_check,
+        "record_role": "evidence_ledger",
+        "evidence_bearing": not screening_only,
+    }
+    for domain, key in TRANSFER_DOMAINS.items():
+        record[key] = domain in domains
+    return record
+
+
+def _review_pressure_record(
+    *,
+    path: Path,
+    fields: dict[str, str],
+    tags: list[str],
+    structured: dict[str, str],
+    section_name: str,
+    claim_type: str,
+    section_text: str,
+    strict_claim_ids: set[str],
+    run_date: str,
+) -> dict[str, Any]:
+    title = strip_quotes(fields.get("title", "")) or path.stem
+    snippet = _short_snippet(section_text, limit=360)
+    ids = [claim_id for claim_id in _claim_ids(section_text) if claim_id in strict_claim_ids]
+    domains = detect_domains(f"{title} {snippet} {' '.join(structured.values())}", tags)
+    record: dict[str, Any] = {
+        "source_note": rel(path),
+        "source_title": title,
+        "zotero_key": strip_quotes(fields.get("zotero_key", "")),
+        "year": strip_quotes(fields.get("year", "")),
+        "venue": strip_quotes(fields.get("venue", "")),
+        "claim_type": claim_type,
+        "statement": snippet,
+        "domains": domains,
+        "supports": _supports_for_claim(claim_type, domains),
+        "risks": _risks_for_claim(claim_type, snippet, structured),
+        "tags": tags,
+        "run_date": run_date,
+        "evidence_section": section_name,
+        "source_snippet": snippet,
+        "source_snippet_type": "review_pressure",
+        "evidence_anchor": _anchor_for(path, section_name),
+        "anchor_type": "note_only",
+        "anchor_source": "note_section",
+        "extraction_confidence": "low",
+        "record_role": "review_pressure",
+        "evidence_bearing": False,
+        "screening_only": True,
+        "requires_human_check": True,
+        "linked_ledger_claim_ids": ids,
+        "linked_strict_anchor": bool(ids),
+        "downstream_use": "screening_only",
+    }
+    if claim_type == "no_hardware_micro_test":
+        record["pilot_ready"] = False
+    for domain, key in TRANSFER_DOMAINS.items():
+        record[key] = domain in domains
+    return record
+
+
 def extract_from_note(path: Path, *, run_date: str, include_decorated_fields: bool = True) -> list[dict[str, Any]]:
     fields, body = read_frontmatter(path)
     if not fields:
@@ -304,6 +507,30 @@ def extract_from_note(path: Path, *, run_date: str, include_decorated_fields: bo
                 body=body,
                 claim_type="open_question",
                 statement=f"What remains unresolved or weakly validated: {structured['Limitations']}",
+                run_date=run_date,
+            )
+        )
+    ledger_records = [
+        record
+        for row in _parse_evidence_ledger(body)
+        if (record := _record_from_ledger(path=path, fields=fields, tags=tags, structured=structured, row=row, run_date=run_date))
+    ]
+    records.extend(ledger_records)
+    strict_ids = _strict_ledger_claim_ids(ledger_records)
+    for section_name, claim_type in REVIEW_PRESSURE_SECTIONS.items():
+        section = _section_text(body, section_name)
+        if not section:
+            continue
+        records.append(
+            _review_pressure_record(
+                path=path,
+                fields=fields,
+                tags=tags,
+                structured=structured,
+                section_name=section_name,
+                claim_type=claim_type,
+                section_text=section,
+                strict_claim_ids=strict_ids,
                 run_date=run_date,
             )
         )
@@ -434,6 +661,11 @@ def _record_anchor(source_note: str, record: dict[str, Any] | None) -> dict[str,
         "baseline_name": record.get("baseline_name", ""),
         "reported_value": record.get("reported_value", ""),
         "task_or_dataset": record.get("task_or_dataset", ""),
+        "evidence_class": record.get("evidence_class", ""),
+        "downstream_use": record.get("downstream_use", ""),
+        "ledger_claim_id": record.get("ledger_claim_id", ""),
+        "screening_only": record.get("screening_only", False),
+        "record_role": record.get("record_role", ""),
     }
 
 
@@ -447,6 +679,13 @@ def _strictly_anchored(anchor: dict[str, Any]) -> bool:
 def _claim_confidence(record: dict[str, Any] | None, claim_type: str, anchor: dict[str, Any]) -> tuple[str, str, bool]:
     if not record:
         return "low", "claim_not_extracted_from_note", True
+    evidence_class = str(record.get("evidence_class", ""))
+    if str(record.get("record_role", "")) == "review_pressure":
+        return "low", "review_pressure_record_is_not_evidence", True
+    if evidence_class in WEAK_EVIDENCE_CLASSES:
+        return "low", f"{evidence_class}_screening_only", True
+    if evidence_class == "result_row_unconfirmed":
+        return "medium", "result_row_unconfirmed_requires_human_check", True
     snippet = str(anchor.get("snippet", ""))
     snippet_type = str(anchor.get("snippet_type", ""))
     anchor_type = str(anchor.get("anchor_type", "note_only"))
@@ -485,7 +724,7 @@ def _claim_from_record(
             confidence = "low"
             confidence_reason = "model_summary_without_strict_anchor_is_low_confidence"
     return {
-        "claim_id": _claim_id(paper_key, claim_type, statement),
+        "claim_id": str(record.get("ledger_claim_id") or record.get("claim_id") or _claim_id(paper_key, claim_type, statement)) if record else _claim_id(paper_key, claim_type, statement),
         "claim_type": claim_type,
         "statement": statement,
         "evidence_anchor": anchor.get("evidence_anchor", ""),
@@ -497,6 +736,10 @@ def _claim_from_record(
         "summary_origin": summary_origin,
         "requires_human_check": requires_human_check,
         "domains": record.get("domains", []) if record else [],
+        "evidence_class": record.get("evidence_class", "") if record else "",
+        "downstream_use": record.get("downstream_use", "") if record else "",
+        "screening_only": bool(record.get("screening_only", False)) if record else False,
+        "record_role": record.get("record_role", "") if record else "",
     }
 
 
@@ -551,6 +794,10 @@ def _legacy_metadata_map(claims: list[dict[str, Any]]) -> dict[str, dict[str, An
             "claim_id": claim["claim_id"],
             "summary_origin": claim["summary_origin"],
             "requires_human_check": claim["requires_human_check"],
+            "evidence_class": claim.get("evidence_class", ""),
+            "downstream_use": claim.get("downstream_use", ""),
+            "screening_only": claim.get("screening_only", False),
+            "record_role": claim.get("record_role", ""),
         }
         for claim in claims
     }
@@ -570,10 +817,10 @@ def build_paper_primitives(records: list[dict[str, Any]]) -> list[dict[str, Any]
     primitives: list[dict[str, Any]] = []
     for source_note, items in sorted(by_source.items()):
         paper_key = str(items[0].get("zotero_key") or Path(source_note).stem)
-        central_claim, central_record = _first_statement(items, {"paper_summary", "problem"})
-        method_assumption, method_record = _first_statement(items, {"method"})
-        strongest_baseline, baseline_record = _first_statement(items, {"metric", "method"})
-        actual_baseline_result, result_record = _first_statement(items, {"metric"})
+        central_claim, central_record = _first_statement(items, {"central_claim", "paper_summary", "problem"})
+        method_assumption, method_record = _first_statement(items, {"method_assumption", "method"})
+        strongest_baseline, baseline_record = _first_statement(items, {"strongest_baseline", "metric", "method"})
+        actual_baseline_result, result_record = _first_statement(items, {"actual_baseline_result", "metric"})
         missing_ablation, ablation_record = _first_prefer_matching(
             items,
             {"limitation", "open_question", "evidence_note"},

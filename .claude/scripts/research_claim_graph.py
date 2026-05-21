@@ -32,7 +32,8 @@ PRIMITIVE_TO_CLAIM = {
     "contradiction": "contradiction",
 }
 CONFIDENCE_ORDER = {"unusable": 0, "low": 1, "medium": 2, "high": 3}
-STRICT_ANCHOR_TYPES = {"section", "snippet", "table", "figure", "result_row"}
+STRICT_ANCHOR_TYPES = {"section", "snippet", "table", "figure", "appendix", "result_row"}
+WEAK_EVIDENCE_CLASSES = {"note_derived", "abstract_only", "not_evidenced"}
 EDGE_RELATIONS = {
     "supports",
     "contradicts",
@@ -114,6 +115,16 @@ def _node_from_claim(paper: dict[str, Any], claim: dict[str, Any]) -> dict[str, 
     conf = _safe_confidence(claim.get("confidence"))
     confidence_reason = str(claim.get("confidence_reason", ""))
     requires_human_check = bool(claim.get("requires_human_check", False))
+    evidence_class = str(claim.get("evidence_class", ""))
+    screening_only = bool(claim.get("screening_only", False))
+    if evidence_class in WEAK_EVIDENCE_CLASSES or screening_only:
+        conf = "low"
+        confidence_reason = confidence_reason or f"{evidence_class or 'screening_only'}_cannot_support_strong_evidence"
+        requires_human_check = True
+    if evidence_class == "result_row_unconfirmed":
+        conf = "medium" if conf == "high" else conf
+        confidence_reason = confidence_reason or "result_row_unconfirmed_requires_human_check"
+        requires_human_check = True
     if conf == "high" and not anchored:
         conf = "low"
         confidence_reason = "high_confidence_requires_section_snippet_table_or_figure_anchor"
@@ -145,6 +156,10 @@ def _node_from_claim(paper: dict[str, Any], claim: dict[str, Any]) -> dict[str, 
         "requires_human_check": requires_human_check,
         "anchor": anchor,
         "domains": claim.get("domains", []),
+        "evidence_class": evidence_class,
+        "downstream_use": claim.get("downstream_use", ""),
+        "screening_only": screening_only,
+        "record_role": claim.get("record_role", ""),
         "supporting_node_ids": [],
     }
 

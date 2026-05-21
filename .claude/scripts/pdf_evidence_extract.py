@@ -50,7 +50,7 @@ def _note_anchor(paper_id: str, claim: dict[str, Any]) -> dict[str, Any] | None:
         anchor_type = "snippet"
     return {
         "anchor_id": _anchor_id(paper_id, anchor_type, f"{section} {snippet}"),
-        "anchor_type": anchor_type if anchor_type in {"section", "figure", "table", "caption", "result_row", "snippet"} else "snippet",
+        "anchor_type": anchor_type if anchor_type in {"section", "figure", "table", "appendix", "caption", "result_row", "snippet"} else "snippet",
         "anchor_source": "note_section",
         "section": section,
         "figure": "",
@@ -58,7 +58,7 @@ def _note_anchor(paper_id: str, claim: dict[str, Any]) -> dict[str, Any] | None:
         "page": anchor.get("pdf_page", None),
         "snippet": snippet[:600],
         "extraction_method": "note_section",
-        "confidence": "medium" if anchor_type in {"section", "snippet", "table", "figure"} else "low",
+        "confidence": "medium" if anchor_type in {"section", "snippet", "table", "figure", "appendix"} else "low",
         "requires_human_check": bool(claim.get("requires_human_check", True)),
         "manual_confirmed": False,
         "confirmed_by": "",

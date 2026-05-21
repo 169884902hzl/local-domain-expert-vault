@@ -28,7 +28,7 @@ from research_seed_v2_common import (
 BROAD_EXTERNAL_NOVELTY_PROVIDERS = {"openalex", "semantic_scholar"}
 WEAK_CORE_CONFIDENCE = {"low", "unusable"}
 UNANCHORED_TYPES = {"note_only", "abstract", ""}
-PDF_VERIFIED_ANCHOR_TYPES = {"section", "snippet", "table", "figure", "result_row"}
+PDF_VERIFIED_ANCHOR_TYPES = {"section", "snippet", "table", "figure", "appendix", "result_row"}
 ACTIVE_SEED_BLOCKING_RISKS = {
     "manual_prior_art_quality_incomplete",
     "manual_prior_art_query_log_missing",

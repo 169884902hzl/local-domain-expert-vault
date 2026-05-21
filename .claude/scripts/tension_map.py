@@ -23,7 +23,7 @@ TENSION_TYPES = [
     "benchmark_gap",
 ]
 CONFIDENCE_ORDER = {"unusable": 0, "low": 1, "medium": 2, "high": 3}
-STRICT_ANCHOR_TYPES = {"section", "snippet", "table", "figure"}
+STRICT_ANCHOR_TYPES = {"section", "snippet", "table", "figure", "appendix", "result_row"}
 
 
 def _tension_id(tension_type: str, nodes: list[str]) -> str:
@@ -218,7 +218,7 @@ def validate_tensions(
         if item.get("confidence") == "high":
             if not any(
                 node_by_id[node].get("confidence") in {"high", "medium"}
-                and node_by_id[node].get("anchor", {}).get("anchor_type") in {"section", "snippet", "table", "figure", "result_row"}
+                and node_by_id[node].get("anchor", {}).get("anchor_type") in STRICT_ANCHOR_TYPES
                 for node in nodes
                 if node in node_by_id
             ):

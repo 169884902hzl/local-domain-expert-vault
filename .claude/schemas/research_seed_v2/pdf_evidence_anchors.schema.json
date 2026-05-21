@@ -44,7 +44,7 @@
         "anchor_id": {"type": "string", "minLength": 1},
         "anchor_type": {
           "type": "string",
-          "enum": ["section", "figure", "table", "caption", "result_row", "snippet"]
+          "enum": ["section", "figure", "table", "appendix", "caption", "result_row", "snippet"]
         },
         "anchor_source": {
           "type": "string",
