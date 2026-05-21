@@ -2,7 +2,19 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Research Governance v1 Novelty Screen",
   "type": "object",
-  "required": ["schema_version", "candidate_id", "screen_status", "screening_only", "stale", "replaces_manual_prior_art_dossier"],
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "candidate_id",
+    "screen_status",
+    "screening_only",
+    "stale",
+    "stale_external_novelty_cache",
+    "replaces_manual_prior_art_dossier",
+    "api_provider_status",
+    "provider_errors",
+    "artifact_hashes"
+  ],
   "properties": {
     "schema_version": {"const": "novelty_screen.v1"},
     "candidate_id": {"type": "string", "minLength": 1},
@@ -12,8 +24,20 @@
     "stale_external_novelty_cache": {"type": "boolean"},
     "replaces_manual_prior_art_dossier": {"type": "boolean"},
     "manual_prior_art_replaced": {"type": "boolean"},
-    "api_provider_status": {"type": "string"},
-    "provider_errors": {"type": "array"},
-    "artifact_hashes": {"type": "array"}
+    "api_provider_status": {"type": "string", "minLength": 1},
+    "provider_errors": {"type": "array", "items": {"type": "string"}},
+    "artifact_hashes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "sha256"],
+        "properties": {
+          "path": {"type": "string", "minLength": 1},
+          "sha256": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "metadata": {"type": "object"}
   }
 }

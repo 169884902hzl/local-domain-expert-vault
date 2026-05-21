@@ -1,1 +1,24 @@
-{"$schema":"https://json-schema.org/draft/2020-12/schema","title":"Research Governance v1 Candidate Record","type":"object","required":["schema_version","candidate_id","title","state","auto_promote_allowed"],"properties":{"schema_version":{"const":"candidate_record.v1"},"candidate_id":{"type":"string"},"title":{"type":"string"},"state":{"type":"string"},"legacy_v03":{"type":"boolean"},"legacy_status":{"type":"string"},"auto_promote_allowed":{"type":"boolean"},"test_provider_used":{"type":"boolean"},"stale_novelty_cache":{"type":"boolean"},"novelty_provider_status":{"type":"string"},"draft_evidence":{"type":"array"}}}
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Research Governance v1 Candidate Record",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "candidate_id", "title", "state", "auto_promote_allowed"],
+  "properties": {
+    "schema_version": {"const": "candidate_record.v1"},
+    "candidate_id": {"type": "string", "minLength": 1},
+    "title": {"type": "string", "minLength": 1},
+    "state": {"type": "string", "minLength": 1},
+    "legacy_v03": {"type": "boolean"},
+    "legacy_status": {"type": "string"},
+    "auto_promote_allowed": {"type": "boolean"},
+    "test_provider_used": {"type": "boolean"},
+    "stale_novelty_cache": {"type": "boolean"},
+    "novelty_provider_status": {"type": "string"},
+    "dashboard_artifact_used_as_input": {"type": "boolean"},
+    "draft_evidence": {"type": "array", "items": {"type": "object"}},
+    "created_at": {"type": "string"},
+    "boundary": {"type": "string"},
+    "metadata": {"type": "object"}
+  }
+}

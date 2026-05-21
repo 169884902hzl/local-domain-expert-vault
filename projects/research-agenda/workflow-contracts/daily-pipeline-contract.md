@@ -2,7 +2,7 @@
 title: "Daily Pipeline Contract"
 tags: [research-agenda, automation, quality]
 created: "2026-05-08"
-updated: "2026-05-14"
+updated: "2026-05-21"
 type: "permanent"
 status: "done"
 summary: "Contract for daily arXiv candidate selection, Zotero import, Claudian reading, agenda update, and quality audit."
@@ -22,7 +22,7 @@ arXiv mirror sync -> candidate ranking -> Zotero new-only import -> Claudian dee
 - Existing Zotero items and local done notes for new-only filtering.
 - Daily candidate window, default `60` days.
 - Read target, default `min_new_imports = 10`.
-- Gemini settings: `gemini-divergent`, timeout `1200`, raw candidate limit `8`, minimum raw candidates `6`, formal seed limit `3`.
+- Gemini settings: `gemini-divergent`, timeout `1200`, raw candidate limit `8`, minimum raw candidates `6`, seed-candidate review limit `3`.
 - DeepSeek battle settings: OpenCode selector `deepseek/deepseek-v4-pro(max)` with provider model id `deepseek-v4-pro(max)`, timeout `1200`, candidate coverage `all` raw greenhouse candidates.
 
 ## Success Criteria
@@ -42,7 +42,7 @@ arXiv mirror sync -> candidate ranking -> Zotero new-only import -> Claudian dee
 - enough successful reads for the day's target or an explicit recovery/backlog reason;
 - Gemini raw archive exists when there are focus keys;
 - raw candidates meet `min_raw_candidates` unless an under-generation warning is recorded;
-- C-tier candidates are not promoted to formal seed;
+- C-tier candidates are not promoted to seed candidates, formal rehearsal packets, or active seed records;
 - mandatory model battle covers all raw Gemini candidates for the date;
 - Codex review is either pending for a fresh run or completed for a past run.
 
@@ -58,7 +58,7 @@ arXiv mirror sync -> candidate ranking -> Zotero new-only import -> Claudian dee
 ## Red Lines
 
 - Do not call Gemini when there are no successfully read focus keys.
-- Do not mark C-tier candidates as formal seeds.
+- Do not mark C-tier candidates as seed candidates, formal rehearsal packets, or active seed records.
 - Do not treat `top1_candidate` as confirmed top-1 paper quality.
 - Do not let a failed read disappear without backlog or retry evidence.
 - Do not let Codex review stale results when a newer successful daily run is pending.
@@ -80,6 +80,6 @@ The run log or quality audit must expose:
 - `readiness_tier_counts`
 - `mandatory_model_battle_status`
 - `mandatory_model_battle_report`
-- `formal_seed_count`
+- `seed_candidate_count`
 - `codex_review_state`
 - `quality_readiness`

@@ -1,1 +1,37 @@
-{"$schema":"https://json-schema.org/draft/2020-12/schema","title":"Research Governance v1 Pilot Result","type":"object","required":["schema_version","candidate_id","pilot_status","proposed_strategy_event"],"properties":{"schema_version":{"const":"pilot_result.v1"},"candidate_id":{"type":"string"},"pilot_status":{"enum":["positive","negative","inconclusive","killed"]},"proposed_strategy_event":{"type":"object"}}}
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Research Governance v1 Pilot Result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "candidate_id",
+    "active_seed_id",
+    "pilot_status",
+    "result_summary",
+    "proposed_strategy_event",
+    "created_at",
+    "boundary"
+  ],
+  "properties": {
+    "schema_version": {"const": "pilot_result.v1"},
+    "candidate_id": {"type": "string", "minLength": 1},
+    "active_seed_id": {"type": "string"},
+    "pilot_status": {"type": "string", "enum": ["positive", "negative", "inconclusive", "killed"]},
+    "result_summary": {"type": "string"},
+    "proposed_strategy_event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["event_type", "candidate_id", "signal", "summary", "applied"],
+      "properties": {
+        "event_type": {"type": "string", "minLength": 1},
+        "candidate_id": {"type": "string", "minLength": 1},
+        "signal": {"type": "string", "minLength": 1},
+        "summary": {"type": "string"},
+        "applied": {"type": "boolean"}
+      }
+    },
+    "created_at": {"type": "string", "minLength": 1},
+    "boundary": {"type": "string"}
+  }
+}

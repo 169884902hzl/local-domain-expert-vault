@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import ast
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -12,8 +13,8 @@ from research_governance_common import SCHEDULED_FORBIDDEN_STATES, STATES, sched
 
 
 SENSITIVE_WRITE_TARGETS = {
-    "seed": ["idea_bank/seed"],
-    "active_seeds": ["governance/active-seeds", "active-seeds"],
+    "seed": ["idea_bank/seed", "projects/research-agenda/idea_bank/seed"],
+    "active_seeds": ["governance/active-seeds", "active-seeds", "active-seed-record.json"],
     "ledger": ["governance/ledger", "governance-ledger.jsonl"],
     "formal_rehearsal": ["formal-rehearsal", "formal_rehearsal", "formal-rehearsals"],
 }
@@ -22,20 +23,39 @@ WRITE_APIS = {
     "Path.open",
     "write_text",
     "write_bytes",
+    "safe_write",
     "safe_write_json",
     "write_json",
     "append_jsonl",
     "copy",
     "copy2",
     "copytree",
+    "move",
+    "rmtree",
+    "remove",
+    "unlink",
     "replace",
     "rename",
     "mkdir",
 }
+POWERSHELL_MUTATION_RE = re.compile(
+    r"\b(Set-Content|Add-Content|Out-File|New-Item|Copy-Item|Move-Item|Remove-Item|Rename-Item)\b",
+    re.IGNORECASE,
+)
 
 
-def _script_files() -> list[Path]:
-    return sorted((vault_path(".claude", "scripts")).glob("*.py"))
+def _source_files() -> list[Path]:
+    roots = [
+        vault_path(".claude", "scripts"),
+        vault_path("tools"),
+    ]
+    files: list[Path] = []
+    for root in roots:
+        if root.exists():
+            files.extend(path for path in root.rglob("*.py") if path.is_file())
+            files.extend(path for path in root.rglob("*.ps1") if path.is_file())
+    files.extend(path for path in vault_path().glob("*.py") if path.is_file())
+    return sorted(set(files))
 
 
 def _node_tokens(node: ast.AST) -> list[str]:
@@ -87,6 +107,8 @@ def _target_kinds(expr: ast.AST, variable_targets: dict[str, set[str]]) -> set[s
         kinds.add("seed")
     if "active_seed_dir()" in normalized:
         kinds.add("active_seeds")
+    if "active-seed-record.json" in normalized:
+        kinds.add("active_seeds")
     if "governance_ledger_path()" in normalized:
         kinds.add("ledger")
     if "governance" in normalized and "ledger" in normalized:
@@ -99,10 +121,25 @@ def _write_target_exprs(node: ast.Call) -> list[ast.AST]:
     short = name.split(".")[-1]
     if short not in {api.split(".")[-1] for api in WRITE_APIS}:
         return []
-    if short in {"copy", "copy2", "copytree"}:
+    if short == "open":
+        mode = ""
+        if len(node.args) > 1 and isinstance(node.args[1], ast.Constant):
+            mode = str(node.args[1].value)
+        for keyword in node.keywords:
+            if keyword.arg == "mode" and isinstance(keyword.value, ast.Constant):
+                mode = str(keyword.value.value)
+        if not any(flag in mode for flag in ("w", "a", "x", "+")):
+            return []
+        return list(node.args[:1])
+    if short in {"copy", "copy2", "copytree", "move"}:
         return list(node.args[1:2])
     if short in {"replace", "rename"} and isinstance(node.func, ast.Attribute):
         return list(node.args[:1])
+    if short in {"unlink", "remove", "rmtree"}:
+        targets = list(node.args[:1])
+        if isinstance(node.func, ast.Attribute):
+            targets.append(node.func.value)
+        return targets
     targets = list(node.args[:1])
     if short in {"write_text", "write_bytes", "mkdir"} and isinstance(node.func, ast.Attribute):
         targets.append(node.func.value)
@@ -110,6 +147,8 @@ def _write_target_exprs(node: ast.Call) -> list[ast.AST]:
 
 
 def _allowed_write(path: Path, kinds: set[str]) -> bool:
+    if "tests" in path.parts:
+        return True
     if path.name == "active_seed_commit.py":
         return kinds <= {"active_seeds", "ledger"}
     if path.name == "formal_rehearsal_packet.py":
@@ -117,6 +156,37 @@ def _allowed_write(path: Path, kinds: set[str]) -> bool:
     if path.name == "migrate_v03_to_v10.py":
         return not (kinds & {"seed", "active_seeds", "ledger", "formal_rehearsal"})
     return False
+
+
+def _kinds_in_text(text: str) -> set[str]:
+    normalized = text.lower().replace("\\", "/")
+    kinds: set[str] = set()
+    for kind, markers in SENSITIVE_WRITE_TARGETS.items():
+        if any(marker in normalized for marker in markers):
+            kinds.add(kind)
+    if "idea_bank" in normalized and "/seed" in normalized:
+        kinds.add("seed")
+    return kinds
+
+
+def scan_powershell_sensitive_writes(path: Path, text: str) -> list[dict[str, Any]]:
+    issues: list[dict[str, Any]] = []
+    for index, line in enumerate(text.splitlines(), start=1):
+        if not POWERSHELL_MUTATION_RE.search(line):
+            continue
+        kinds = _kinds_in_text(line)
+        if kinds and not _allowed_write(path, kinds):
+            issues.append(
+                {
+                    "level": "FAIL",
+                    "code": "sensitive_governance_writer",
+                    "path": str(path),
+                    "line": index,
+                    "targets": sorted(kinds),
+                    "call": POWERSHELL_MUTATION_RE.search(line).group(1),
+                }
+            )
+    return issues
 
 
 def scan_sensitive_writes(path: Path, text: str) -> list[dict[str, Any]]:
@@ -157,9 +227,12 @@ def scan_sensitive_writes(path: Path, text: str) -> list[dict[str, Any]]:
 
 def audit_direct_governance_writers() -> list[dict[str, Any]]:
     issues: list[dict[str, Any]] = []
-    for path in _script_files():
+    for path in _source_files():
         text = path.read_text(encoding="utf-8")
-        issues.extend(scan_sensitive_writes(path, text))
+        if path.suffix.lower() == ".ps1":
+            issues.extend(scan_powershell_sensitive_writes(path, text))
+        else:
+            issues.extend(scan_sensitive_writes(path, text))
     return issues
 
 

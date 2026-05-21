@@ -1,1 +1,15 @@
-{"$schema":"https://json-schema.org/draft/2020-12/schema","title":"Research Governance v1 State Transition","type":"object","required":["schema_version","from_state","to_state","mode","valid"],"properties":{"schema_version":{"const":"state_transition.v1"},"from_state":{"type":"string"},"to_state":{"type":"string"},"mode":{"enum":["manual","scheduled"]},"valid":{"type":"boolean"},"errors":{"type":"array","items":{"type":"string"}}}}
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Research Governance v1 State Transition",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "from_state", "to_state", "mode", "valid", "errors"],
+  "properties": {
+    "schema_version": {"const": "state_transition.v1"},
+    "from_state": {"type": "string", "minLength": 1},
+    "to_state": {"type": "string", "minLength": 1},
+    "mode": {"type": "string", "enum": ["manual", "scheduled"]},
+    "valid": {"type": "boolean"},
+    "errors": {"type": "array", "items": {"type": "string"}}
+  }
+}

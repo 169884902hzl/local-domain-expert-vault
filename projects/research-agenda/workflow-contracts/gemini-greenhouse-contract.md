@@ -2,7 +2,7 @@
 title: "Gemini Greenhouse Contract"
 tags: [research-agenda, gemini, quality]
 created: "2026-05-08"
-updated: "2026-05-13"
+updated: "2026-05-21"
 type: "permanent"
 status: "done"
 summary: "Contract for divergent Gemini idea generation, raw candidate preservation, taxonomy, and seed promotion boundaries."
@@ -94,9 +94,9 @@ Gemini must reason in this order:
 ## Promotion Boundary
 
 - Raw candidates are preserved even when weak.
-- Only S/A candidates may become formal `idea_bank/seed/` entries.
+- Only S/A candidates may enter seed-candidate review or formal rehearsal; active seed records still require human governance artifacts.
 - B candidates go to rewrite or park.
-- C candidates keep rescue signals but are not formal seeds.
+- C candidates keep rescue signals but are not seed candidates, formal rehearsal packets, or active seed records.
 - No candidate is deleted because it is speculative; it is parked, rewritten, or rejected with rescue.
 
 ## Rescue Triggers

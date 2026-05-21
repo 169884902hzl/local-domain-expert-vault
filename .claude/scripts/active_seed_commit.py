@@ -57,6 +57,18 @@ def _release_lock(lock: Path | None, *, dry_run: bool) -> None:
         pass
 
 
+def _quarantine_active_seed_dir(active_seed_id: str) -> Path:
+    source = active_seed_dir(active_seed_id)
+    base = source.with_name(active_seed_id + ".quarantine")
+    target = base
+    counter = 1
+    while target.exists():
+        target = base.with_name(f"{base.name}-{counter}")
+        counter += 1
+    source.rename(target)
+    return target
+
+
 def commit_active_seed(candidate_id: str, *, actor: str, governance_signature: str, human_confirmed: bool, dry_run: bool = False) -> dict[str, Any]:
     active_seed_id = active_seed_id_from_candidate(candidate_id, _candidate_title(candidate_id))
     if not human_confirmed:
@@ -88,10 +100,10 @@ def commit_active_seed(candidate_id: str, *, actor: str, governance_signature: s
             dry_run=dry_run,
         )
     except Exception as exc:
-        quarantine = active_seed_dir(active_seed_id).with_name(active_seed_id + ".quarantine")
+        quarantine = ""
         if not dry_run and target.exists():
-            target.parent.rename(quarantine)
-        return {"schema_version": "active_seed_commit_result.v1", "status": "blocked", "active_seed_id": active_seed_id, "candidate_id": candidate_id, "errors": [f"active_seed_commit_exception:{type(exc).__name__}:{exc}"], "quarantine": str(quarantine)}
+            quarantine = str(_quarantine_active_seed_dir(active_seed_id))
+        return {"schema_version": "active_seed_commit_result.v1", "status": "blocked", "active_seed_id": active_seed_id, "candidate_id": candidate_id, "errors": [f"active_seed_commit_exception:{type(exc).__name__}:{exc}"], "quarantine": quarantine}
     finally:
         _release_lock(lock, dry_run=dry_run)
     return {"schema_version": "active_seed_commit_result.v1", "status": "success" if not dry_run else "dry_run", "active_seed_id": active_seed_id, "candidate_id": candidate_id, "record_path": str(target), "ledger_path": str(governance_ledger_path()), "errors": []}

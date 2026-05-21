@@ -2,7 +2,7 @@
 title: "Daily Readable Workflow Contract"
 tags: [research-agenda, workflow-contract, arxiv]
 created: "2026-05-10"
-updated: "2026-05-14"
+updated: "2026-05-21"
 type: "permanent"
 status: "done"
 summary: "Daily arXiv automation contract that separates formal knowledge, draft context, and review-only artifacts."
@@ -35,7 +35,7 @@ flowchart LR
 ## Artifact Classes
 
 - formal_knowledge: `wiki/topics/`, `projects/research-agenda/evidence/evidence_matrix.jsonl`.
-- formal_agenda: `projects/research-agenda/daily/YYYY-MM-DD-agenda-delta.md`, `projects/research-agenda/idea_bank/seed/`.
+- formal_agenda: `projects/research-agenda/daily/YYYY-MM-DD-agenda-delta.md`, `projects/research-agenda/formal-rehearsals/`, `projects/research-agenda/governance/active-seeds/`.
 - draft_context: `projects/research-agenda/concept-deltas/`, `projects/research-agenda/mechanism-graphs/`, `projects/research-agenda/divergent/`.
 - review_only: `projects/research-agenda/reviews/`, `projects/research-agenda/model-debates/`.
 

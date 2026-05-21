@@ -133,12 +133,19 @@ PUBLIC_FORBIDDEN_PARTS = {
     "attachments/",
     "archive/",
     "/logs/",
+    "logs/",
+    "/cache/",
+    "cache/",
+    ".cache/",
     "backup",
     "secret",
     "projects/research-agenda/runs/",
     "projects/research-agenda/cache/",
+    "projects/research-agenda/idea_bank/seed/",
     "projects/research-agenda/governance/active-seeds/",
     "projects/research-agenda/governance/ledger/",
+    "active-seed-record.json",
+    "governance-ledger.jsonl",
     "projects/arxiv-daily/metadata/",
 }
 
@@ -432,6 +439,10 @@ def _schema_errors(payload: dict[str, Any], schema_version: str) -> list[str]:
     return errors
 
 
+def validate_governance_payload(payload: dict[str, Any], schema_version: str) -> list[str]:
+    return _schema_errors(payload, schema_version)
+
+
 def _hashes_include_current_file(payload: dict[str, Any], path: Path) -> bool:
     if not path.exists():
         return False
@@ -457,6 +468,11 @@ def _provider_review_errors(payload: dict[str, Any]) -> list[str]:
     errors: list[str] = []
     provider_status = payload.get("provider_status", {})
     provider_status = provider_status if isinstance(provider_status, dict) else {}
+    for field in ["generated_by_script", "source_run_id", "provider_mode", "command_hash", "provider_log_hash", "created_at"]:
+        if not str(payload.get(field) or "").strip():
+            errors.append(f"provider_review_missing_{field}")
+    if not str(provider_status.get("status") or "").strip():
+        errors.append("provider_review_missing_provider_status_status")
     provider_backed = payload.get("provider_backed") is True or provider_status.get("provider_backed") is True
     status = str(payload.get("review_status") or payload.get("status") or "")
     provider_state = str(provider_status.get("status") or "")

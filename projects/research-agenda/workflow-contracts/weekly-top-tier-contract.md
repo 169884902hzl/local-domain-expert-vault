@@ -2,10 +2,10 @@
 title: "Weekly Top-Tier Contract"
 tags: [research-agenda, weekly-review, quality]
 created: "2026-05-08"
-updated: "2026-05-08"
+updated: "2026-05-21"
 type: "permanent"
 status: "done"
-summary: "Contract for weekly adversarial review of Gemini greenhouse candidates and formal seeds."
+summary: "Contract for weekly adversarial review of Gemini greenhouse candidates, seed candidates, and active-seed context."
 ---
 
 # Weekly Top-Tier Contract
@@ -19,7 +19,7 @@ The weekly review is a top-tier pressure test over the last 7 days of raw, promo
 - Daily Gemini greenhouse JSON files.
 - Daily agenda deltas.
 - Daily Codex review reports when present.
-- Existing seed titles.
+- Existing seed-candidate titles, formal rehearsal packet titles, and active seed record titles.
 - Local novelty-pressure hits.
 
 ## Rubric

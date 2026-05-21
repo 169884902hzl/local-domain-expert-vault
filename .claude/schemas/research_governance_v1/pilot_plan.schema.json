@@ -1,1 +1,37 @@
-{"$schema":"https://json-schema.org/draft/2020-12/schema","title":"Research Governance v1 Pilot Plan","type":"object","required":["schema_version","candidate_id","plan_status","owner","resource_budget","timeline","kill_criteria","human_confirmed"],"properties":{"schema_version":{"const":"pilot_plan.v1"},"candidate_id":{"type":"string"},"plan_status":{"enum":["draft","ready"]},"owner":{"type":"string"},"resource_budget":{"type":"string"},"timeline":{"type":"string"},"kill_criteria":{"type":"string"},"human_confirmed":{"type":"boolean"}}}
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Research Governance v1 Pilot Plan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "candidate_id",
+    "plan_status",
+    "owner",
+    "resource_budget",
+    "timeline",
+    "metric",
+    "baseline_implementation_path",
+    "kill_criteria",
+    "human_confirmed",
+    "created_at",
+    "boundary"
+  ],
+  "properties": {
+    "schema_version": {"const": "pilot_plan.v1"},
+    "candidate_id": {"type": "string", "minLength": 1},
+    "plan_status": {"type": "string", "enum": ["draft", "ready"]},
+    "owner": {"type": "string"},
+    "resource_budget": {"type": "string"},
+    "timeline": {"type": "string"},
+    "metric": {"type": "string"},
+    "baseline_implementation_path": {"type": "string"},
+    "kill_criteria": {"type": "string"},
+    "human_confirmed": {"type": "boolean"},
+    "confirmed_by": {"type": "string"},
+    "confirmed_at": {"type": "string"},
+    "created_at": {"type": "string"},
+    "boundary": {"type": "string"},
+    "metadata": {"type": "object"}
+  }
+}

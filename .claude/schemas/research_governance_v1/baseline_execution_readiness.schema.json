@@ -1,1 +1,31 @@
-{"$schema":"https://json-schema.org/draft/2020-12/schema","title":"Research Governance v1 Baseline Execution Readiness","type":"object","required":["schema_version","candidate_id","readiness_status"],"properties":{"schema_version":{"const":"baseline_execution_readiness.v1"},"candidate_id":{"type":"string"},"readiness_status":{"enum":["ready","partial","unknown","prohibitive","not_applicable"]},"baseline_name":{"type":"string"},"implementation_path":{"type":"string"},"resource_budget":{"type":"string"},"not_applicable_reason":{"type":"string"},"blocking_issues":{"type":"array"}}}
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Research Governance v1 Baseline Execution Readiness",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "candidate_id",
+    "readiness_status",
+    "baseline_name",
+    "implementation_path",
+    "resource_budget",
+    "not_applicable_reason",
+    "blocking_issues",
+    "created_at",
+    "boundary"
+  ],
+  "properties": {
+    "schema_version": {"const": "baseline_execution_readiness.v1"},
+    "candidate_id": {"type": "string", "minLength": 1},
+    "readiness_status": {"type": "string", "enum": ["ready", "partial", "unknown", "prohibitive", "not_applicable"]},
+    "baseline_name": {"type": "string"},
+    "implementation_path": {"type": "string"},
+    "resource_budget": {"type": "string"},
+    "not_applicable_reason": {"type": "string"},
+    "blocking_issues": {"type": "array", "items": {"type": "string"}},
+    "created_at": {"type": "string"},
+    "boundary": {"type": "string"},
+    "metadata": {"type": "object"}
+  }
+}

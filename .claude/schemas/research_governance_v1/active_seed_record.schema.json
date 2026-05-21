@@ -1,1 +1,49 @@
-{"$schema":"https://json-schema.org/draft/2020-12/schema","title":"Research Governance v1 Active Seed Record","type":"object","required":["schema_version","active_seed_id","candidate_id","owner","resource_budget","timeline","kill_criteria","governance_signature"],"properties":{"schema_version":{"const":"active_seed_record.v1"},"active_seed_id":{"type":"string"},"candidate_id":{"type":"string"},"owner":{"type":"string"},"resource_budget":{"type":"string"},"timeline":{"type":"string"},"kill_criteria":{"type":"string"},"governance_signature":{"type":"string"},"artifact_hashes":{"type":"array"}}}
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Research Governance v1 Active Seed Record",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "state_machine_version",
+    "active_seed_id",
+    "candidate_id",
+    "title",
+    "committed_at",
+    "committed_by",
+    "owner",
+    "resource_budget",
+    "timeline",
+    "kill_criteria",
+    "governance_signature",
+    "artifact_hashes",
+    "boundary"
+  ],
+  "properties": {
+    "schema_version": {"const": "active_seed_record.v1"},
+    "state_machine_version": {"type": "string", "minLength": 1},
+    "active_seed_id": {"type": "string", "minLength": 1},
+    "candidate_id": {"type": "string", "minLength": 1},
+    "title": {"type": "string"},
+    "committed_at": {"type": "string", "minLength": 1},
+    "committed_by": {"type": "string", "minLength": 1},
+    "owner": {"type": "string"},
+    "resource_budget": {"type": "string"},
+    "timeline": {"type": "string"},
+    "kill_criteria": {"type": "string"},
+    "governance_signature": {"type": "string"},
+    "artifact_hashes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "sha256"],
+        "properties": {
+          "path": {"type": "string", "minLength": 1},
+          "sha256": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "boundary": {"type": "string"}
+  }
+}

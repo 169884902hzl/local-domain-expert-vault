@@ -7,6 +7,9 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+if ($args.Count -gt 0) {
+  throw "scheduled_governance_forbidden_arg: $($args -join ' ')"
+}
 
 $ScriptPath = Split-Path -Parent $MyInvocation.MyCommand.Path
 $VaultRoot = Resolve-Path (Join-Path $ScriptPath "..\..")
@@ -123,38 +126,44 @@ $Python = (Get-Command python).Source
 $StartedAt = Get-Date -Format "yyyy-MM-dd HH:mm:ss zzz"
 Write-TaskLog "[$StartedAt] START DailyArxivEmbodiedAIScout"
 $SyncTimeoutSeconds = 900
+$WrapperTestMode = [Environment]::GetEnvironmentVariable("DAILY_ARXIV_WRAPPER_TEST_MODE", "Process") -eq "1"
 
 try {
-  $SyncOutput = Join-Path $LogDir "metadata-sync-last.log"
-  $SyncError = Join-Path $LogDir "metadata-sync-last.err.log"
-  $SyncProcess = Start-Process -FilePath $Python -ArgumentList @(
-    ".claude/scripts/arxiv_metadata_sync.py",
-    "--incremental",
-    "--days-back",
-    "60",
-    "--overlap-days",
-    "3"
-  ) -WorkingDirectory $VaultRoot -NoNewWindow -PassThru -RedirectStandardOutput $SyncOutput -RedirectStandardError $SyncError
-  if (-not $SyncProcess.WaitForExit($SyncTimeoutSeconds * 1000)) {
-    Stop-Process -Id $SyncProcess.Id -Force -ErrorAction SilentlyContinue
-    "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss zzz")] WARN arxiv_metadata_sync_timeout=${SyncTimeoutSeconds}s; continuing with existing mirror/search fallback" |
-      Out-File -FilePath $LogPath -Append -Encoding utf8
+  if ($WrapperTestMode) {
+    Write-TaskLog "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss zzz")] TEST_MODE skip metadata sync"
   }
   else {
-    $SyncProcess.Refresh()
-    if (Test-Path $SyncOutput) {
-      Get-Content -Encoding UTF8 $SyncOutput | Out-File -FilePath $LogPath -Append -Encoding utf8
-    }
-    if (Test-Path $SyncError) {
-      Get-Content -Encoding UTF8 $SyncError | Out-File -FilePath $LogPath -Append -Encoding utf8
-    }
-    $SyncExitCode = $SyncProcess.ExitCode
-    if ($null -eq $SyncExitCode) {
-      $SyncExitCode = 0
-    }
-    if ($SyncExitCode -ne 0) {
-      "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss zzz")] WARN arxiv_metadata_sync_exit_code=$SyncExitCode; continuing with existing mirror/search fallback" |
+    $SyncOutput = Join-Path $LogDir "metadata-sync-last.log"
+    $SyncError = Join-Path $LogDir "metadata-sync-last.err.log"
+    $SyncProcess = Start-Process -FilePath $Python -ArgumentList @(
+      ".claude/scripts/arxiv_metadata_sync.py",
+      "--incremental",
+      "--days-back",
+      "60",
+      "--overlap-days",
+      "3"
+    ) -WorkingDirectory $VaultRoot -NoNewWindow -PassThru -RedirectStandardOutput $SyncOutput -RedirectStandardError $SyncError
+    if (-not $SyncProcess.WaitForExit($SyncTimeoutSeconds * 1000)) {
+      Stop-Process -Id $SyncProcess.Id -Force -ErrorAction SilentlyContinue
+      "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss zzz")] WARN arxiv_metadata_sync_timeout=${SyncTimeoutSeconds}s; continuing with existing mirror/search fallback" |
         Out-File -FilePath $LogPath -Append -Encoding utf8
+    }
+    else {
+      $SyncProcess.Refresh()
+      if (Test-Path $SyncOutput) {
+        Get-Content -Encoding UTF8 $SyncOutput | Out-File -FilePath $LogPath -Append -Encoding utf8
+      }
+      if (Test-Path $SyncError) {
+        Get-Content -Encoding UTF8 $SyncError | Out-File -FilePath $LogPath -Append -Encoding utf8
+      }
+      $SyncExitCode = $SyncProcess.ExitCode
+      if ($null -eq $SyncExitCode) {
+        $SyncExitCode = 0
+      }
+      if ($SyncExitCode -ne 0) {
+        "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss zzz")] WARN arxiv_metadata_sync_exit_code=$SyncExitCode; continuing with existing mirror/search fallback" |
+          Out-File -FilePath $LogPath -Append -Encoding utf8
+      }
     }
   }
   $PipelineArgs = @(
@@ -188,15 +197,35 @@ try {
     $PipelineArgs += @("--codex-execution-provider", $CodexExecutionProvider)
   }
   Assert-NoGovernanceMutationArgs -Arguments $PipelineArgs
-  & $Python @PipelineArgs 2>&1 |
-    ForEach-Object { $_ | Out-File -FilePath $LogPath -Append -Encoding utf8 }
-  $ExitCode = $LASTEXITCODE
+  if ($WrapperTestMode) {
+    $PipelineExitText = [Environment]::GetEnvironmentVariable("DAILY_ARXIV_WRAPPER_TEST_PIPELINE_EXIT", "Process")
+    if ([string]::IsNullOrWhiteSpace($PipelineExitText)) {
+      $PipelineExitText = "0"
+    }
+    $ExitCode = [int]$PipelineExitText
+    Write-TaskLog "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss zzz")] TEST_MODE pipeline_exit_code=$ExitCode"
+  }
+  else {
+    & $Python @PipelineArgs 2>&1 |
+      ForEach-Object { $_ | Out-File -FilePath $LogPath -Append -Encoding utf8 }
+    $ExitCode = $LASTEXITCODE
+  }
   if ($ExitCode -ne 0) {
     Write-TaskLog "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss zzz")] RECOVERY start resume_backlog exit_code=$ExitCode"
     $RecoveryArgs = $PipelineArgs + @("--resume-backlog")
-    & $Python @RecoveryArgs 2>&1 |
-      ForEach-Object { $_ | Out-File -FilePath $LogPath -Append -Encoding utf8 }
-    $RecoveryExitCode = $LASTEXITCODE
+    if ($WrapperTestMode) {
+      $RecoveryExitText = [Environment]::GetEnvironmentVariable("DAILY_ARXIV_WRAPPER_TEST_RECOVERY_EXIT", "Process")
+      if ([string]::IsNullOrWhiteSpace($RecoveryExitText)) {
+        $RecoveryExitText = "1"
+      }
+      $RecoveryExitCode = [int]$RecoveryExitText
+      Write-TaskLog "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss zzz")] TEST_MODE recovery_exit_code=$RecoveryExitCode"
+    }
+    else {
+      & $Python @RecoveryArgs 2>&1 |
+        ForEach-Object { $_ | Out-File -FilePath $LogPath -Append -Encoding utf8 }
+      $RecoveryExitCode = $LASTEXITCODE
+    }
     Write-TaskLog "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss zzz")] RECOVERY end exit_code=$RecoveryExitCode"
     if ($RecoveryExitCode -eq 0) {
       $ExitCode = 0
@@ -204,17 +233,27 @@ try {
   }
   $RunDate = Get-Date -Format "yyyy-MM-dd"
   Write-TaskLog "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss zzz")] QUALITY_AUDIT start run_date=$RunDate"
-  & $Python @(
-    ".claude/scripts/audit_daily_automation_quality.py",
-    "--run-date",
-    $RunDate,
-    "--scheduled-deepseek-provider",
-    $DeepSeekProvider,
-    "--scheduled-codex-execution-provider",
-    $CodexExecutionProvider
-  ) 2>&1 |
-    ForEach-Object { $_ | Out-File -FilePath $LogPath -Append -Encoding utf8 }
-  $QualityExitCode = $LASTEXITCODE
+  if ($WrapperTestMode) {
+    $QualityExitText = [Environment]::GetEnvironmentVariable("DAILY_ARXIV_WRAPPER_TEST_QUALITY_EXIT", "Process")
+    if ([string]::IsNullOrWhiteSpace($QualityExitText)) {
+      $QualityExitText = "0"
+    }
+    $QualityExitCode = [int]$QualityExitText
+    Write-TaskLog "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss zzz")] TEST_MODE quality_exit_code=$QualityExitCode"
+  }
+  else {
+    & $Python @(
+      ".claude/scripts/audit_daily_automation_quality.py",
+      "--run-date",
+      $RunDate,
+      "--scheduled-deepseek-provider",
+      $DeepSeekProvider,
+      "--scheduled-codex-execution-provider",
+      $CodexExecutionProvider
+    ) 2>&1 |
+      ForEach-Object { $_ | Out-File -FilePath $LogPath -Append -Encoding utf8 }
+    $QualityExitCode = $LASTEXITCODE
+  }
   Write-TaskLog "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss zzz")] QUALITY_AUDIT end exit_code=$QualityExitCode"
   if ($QualityExitCode -ne 0) {
     Write-TaskLog "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss zzz")] QUALITY_AUDIT_FAILED exit_code=$QualityExitCode"

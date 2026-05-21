@@ -2,23 +2,75 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Research Governance v1 Provider Review Packet",
   "type": "object",
-  "required": ["schema_version", "candidate_id", "review_status", "provider_backed", "test_provider_used", "provider_status"],
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "candidate_id",
+    "review_status",
+    "provider_backed",
+    "test_provider_used",
+    "generated_by_script",
+    "source_run_id",
+    "provider_mode",
+    "provider_status",
+    "command_hash",
+    "provider_log_hash",
+    "created_at",
+    "reviews",
+    "artifact_hashes"
+  ],
   "properties": {
     "schema_version": {"const": "provider_review_packet.v1"},
     "candidate_id": {"type": "string", "minLength": 1},
     "review_status": {"type": "string", "enum": ["success", "blocked", "timeout", "provider_unavailable", "partial_provider_unavailable"]},
     "provider_backed": {"type": "boolean"},
     "test_provider_used": {"type": "boolean"},
+    "generated_by_script": {"type": "string", "minLength": 1},
+    "source_run_id": {"type": "string", "minLength": 1},
+    "provider_mode": {"type": "string", "minLength": 1},
     "provider_status": {
       "type": "object",
-      "required": ["provider_backed", "mode"],
+      "additionalProperties": false,
+      "required": ["provider_backed", "mode", "status"],
       "properties": {
+        "provider": {"type": "string"},
         "provider_backed": {"type": "boolean"},
-        "mode": {"type": "string"},
-        "status": {"type": "string"}
+        "mode": {"type": "string", "minLength": 1},
+        "status": {"type": "string", "minLength": 1},
+        "test_provider_used": {"type": "boolean"}
       }
     },
-    "reviews": {"type": "array"},
-    "artifact_hashes": {"type": "array"}
+    "command_hash": {"type": "string", "minLength": 1},
+    "provider_log_hash": {"type": "string", "minLength": 1},
+    "created_at": {"type": "string", "minLength": 1},
+    "reviews": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["provider", "status"],
+        "properties": {
+          "provider": {"type": "string", "minLength": 1},
+          "candidate_id": {"type": "string"},
+          "status": {"type": "string", "minLength": 1},
+          "summary": {"type": "string"},
+          "errors": {"type": "array", "items": {"type": "string"}},
+          "metadata": {"type": "object"}
+        }
+      }
+    },
+    "artifact_hashes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "sha256"],
+        "properties": {
+          "path": {"type": "string", "minLength": 1},
+          "sha256": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "metadata": {"type": "object"}
   }
 }

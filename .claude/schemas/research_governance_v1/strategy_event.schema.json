@@ -1,1 +1,20 @@
-{"$schema":"https://json-schema.org/draft/2020-12/schema","title":"Research Governance v1 Strategy Event","type":"object","required":["schema_version","event_type","summary","applied","human_confirmed"],"properties":{"schema_version":{"const":"strategy_event.v1"},"event_type":{"type":"string"},"summary":{"type":"string"},"applied":{"type":"boolean"},"human_confirmed":{"type":"boolean"},"errors":{"type":"array"}}}
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Research Governance v1 Strategy Event",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "event_type", "summary", "applied", "human_confirmed", "errors"],
+  "properties": {
+    "schema_version": {"const": "strategy_event.v1"},
+    "event_type": {"type": "string", "minLength": 1},
+    "candidate_id": {"type": "string"},
+    "summary": {"type": "string"},
+    "applied": {"type": "boolean"},
+    "human_confirmed": {"type": "boolean"},
+    "confirmed_by": {"type": "string"},
+    "confirmed_at": {"type": "string"},
+    "created_at": {"type": "string"},
+    "errors": {"type": "array", "items": {"type": "string"}},
+    "boundary": {"type": "string"}
+  }
+}

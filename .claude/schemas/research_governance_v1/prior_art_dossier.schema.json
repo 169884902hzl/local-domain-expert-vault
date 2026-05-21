@@ -1,1 +1,44 @@
-{"$schema":"https://json-schema.org/draft/2020-12/schema","title":"Research Governance v1 Prior-Art Dossier","type":"object","required":["schema_version","candidate_id","dossier_status","reviewer","human_confirmed"],"properties":{"schema_version":{"const":"prior_art_dossier.v1"},"candidate_id":{"type":"string"},"dossier_status":{"enum":["draft","completed"]},"reviewer":{"type":"string"},"human_confirmed":{"type":"boolean"},"screening_only":{"type":"boolean"},"manual_sources":{"type":"array"},"provider_timeout_seen":{"type":"boolean"},"timeout_covered_by_manual_dossier":{"type":"boolean"}}}
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Research Governance v1 Prior-Art Dossier",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "candidate_id",
+    "dossier_status",
+    "reviewer",
+    "reviewed_at",
+    "human_confirmed",
+    "confirmed_by",
+    "confirmed_at",
+    "screening_only",
+    "manual_sources",
+    "nearest_work_summary",
+    "provider_timeout_seen",
+    "timeout_covered_by_manual_dossier",
+    "boundary"
+  ],
+  "properties": {
+    "schema_version": {"const": "prior_art_dossier.v1"},
+    "candidate_id": {"type": "string", "minLength": 1},
+    "dossier_status": {"type": "string", "enum": ["draft", "completed"]},
+    "reviewer": {"type": "string"},
+    "reviewed_at": {"type": "string"},
+    "human_confirmed": {"type": "boolean"},
+    "confirmed_by": {"type": "string"},
+    "confirmed_at": {"type": "string"},
+    "screening_only": {"type": "boolean"},
+    "manual_sources": {"type": "array", "items": {"type": "string"}},
+    "nearest_work_summary": {"type": "string"},
+    "provider_timeout_seen": {"type": "boolean"},
+    "timeout_covered_by_manual_dossier": {"type": "boolean"},
+    "covered_unavailable_sources": {"type": "array", "items": {"type": "string"}},
+    "coverage_method": {"type": "string"},
+    "search_log_refs": {"type": "array", "items": {"type": "string"}},
+    "reviewer_confirmation": {"type": "string"},
+    "residual_risk_note": {"type": "string"},
+    "boundary": {"type": "string"},
+    "metadata": {"type": "object"}
+  }
+}

@@ -1,1 +1,51 @@
-{"$schema":"https://json-schema.org/draft/2020-12/schema","title":"Research Governance v1 Evidence Packet","type":"object","required":["schema_version","candidate_id","packet_status","core_evidence","human_confirmed"],"properties":{"schema_version":{"const":"evidence_packet.v1"},"candidate_id":{"type":"string"},"packet_status":{"enum":["draft","confirmed"]},"core_evidence":{"type":"array"},"human_confirmed":{"type":"boolean"},"confirmed_by":{"type":"string"},"confirmed_at":{"type":"string"},"artifact_hashes":{"type":"array"}}}
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Research Governance v1 Evidence Packet",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "candidate_id", "packet_status", "core_evidence", "human_confirmed", "artifact_hashes"],
+  "properties": {
+    "schema_version": {"const": "evidence_packet.v1"},
+    "candidate_id": {"type": "string", "minLength": 1},
+    "run_id": {"type": "string"},
+    "packet_status": {"type": "string", "enum": ["draft", "confirmed"]},
+    "created_at": {"type": "string"},
+    "core_evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["evidence_type"],
+        "properties": {
+          "evidence_type": {"type": "string", "minLength": 1},
+          "statement": {"type": "string"},
+          "source_artifact": {"type": "string"},
+          "legacy_only": {"type": "boolean"},
+          "dashboard_source": {"type": "boolean"},
+          "manual_confirmed": {"type": "boolean"},
+          "human_confirmed": {"type": "boolean"},
+          "human_override": {"type": "boolean"},
+          "edge_quality_status": {"type": "string"},
+          "contradiction_status": {"type": "string"},
+          "metadata": {"type": "object"}
+        }
+      }
+    },
+    "human_confirmed": {"type": "boolean"},
+    "confirmed_by": {"type": "string"},
+    "confirmed_at": {"type": "string"},
+    "artifact_hashes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "sha256"],
+        "properties": {
+          "path": {"type": "string", "minLength": 1},
+          "sha256": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "boundary": {"type": "string"}
+  }
+}

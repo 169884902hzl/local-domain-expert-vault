@@ -1,12 +1,14 @@
 # Changelog
 
-## v1.0.1 - Release-Blocking Governance Hardening
+## v1.0.1 - Hardened v1.0 Release Gate
 
 ### Changed
 
 - Hardened scheduled provider command construction with a single helper that guarantees at most one `--provider` and fails closed on `provider_json` / explicit provider conflicts.
+- Tightened v1 governance schemas so root objects are closed and safety-critical provider / novelty / governance fields are schema-covered.
 - Scheduled quality-audit failure now fails `run_daily_arxiv_task.ps1` instead of only logging the failure.
 - Active seed commit now requires independent, schema-validated, hash-linked provider review packet and novelty screen artifacts.
+- Provider review packets must include auditable provenance fields: script, source run, provider mode, provider status, command hash, provider log hash, creation time, and artifact hashes.
 - Disabled the legacy `publish_research_run.py` formal writer surface; formal rehearsal and active seed commitment belong to v1 governance artifacts, not the legacy publish script.
 - Demoted v0.3.x survival / formal publish wording to historical context. `survival_decision.py` is legacy v2 triage only; active seed promotion is governed by v1 human governance artifacts and `active_seed_commit.py`.
 
@@ -15,6 +17,7 @@
 - Scheduled formal/active publish remains disabled.
 - Active seed remains a human governance commitment, not publishability proof.
 - API novelty scans are screening only and cannot replace manual prior-art dossiers.
+- Provider provenance is auditable local artifact linkage, not cryptographic proof of external provider execution.
 - Model critique is not peer review, and this project still does not claim doctoral-level idea generation.
 
 ## v1.0.0 - Research Governance Workbench

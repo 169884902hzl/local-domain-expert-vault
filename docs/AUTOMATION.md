@@ -6,7 +6,7 @@
 
 v1.0 把 research agenda 从 legacy formal publish 路径升级为 Research Governance Workbench。自动化可以生成 intake、candidate drafts、evidence drafts、novelty screening、provider-backed critiques、queues 和 derived dashboards，但这些都不是 active seed。
 
-本轮 v1 release-blocking hotfix 后，scheduled provider review command 由单一 builder 生成并测试，保证 DeepSeek/Codex 命令最多一个 `--provider`；scheduled quality audit 失败会让 scheduled task 非 0 退出；active commit 必须引用并 hash-link 独立的 provider review packet 和 novelty screen；legacy `publish_research_run.py` formal writer surface 已禁用。provider-backed scheduled candidate review 通过 dry-run / command-builder tests 只说明命令构造和 artifact provenance gate 可审计，不等同 peer review 或 novelty proof。
+Hardened v1.0 release gate 要求 scheduled provider review command 由单一 builder 生成并测试，保证 DeepSeek/Codex 命令最多一个 `--provider`；scheduled quality audit 失败会让 scheduled task 非 0 退出；active commit 必须引用并 hash-link 独立的 provider review packet 和 novelty screen；legacy `publish_research_run.py` formal writer surface 已禁用。provider-backed scheduled candidate review 通过 dry-run / command-builder tests 只说明命令构造和 artifact provenance gate 可审计，不等同 peer review 或 novelty proof。
 
 禁止边界：
 
@@ -26,6 +26,8 @@ v1.0 把 research agenda 从 legacy formal publish 路径升级为 Research Gove
 - `killed` 和 `resurrected` 必须通过 governance ledger 表达，不能由 scheduled automation 自动完成。
 
 OpenAlex / Semantic Scholar / arXiv 是 screening only，不是 prior-art review、novelty proof 或 publishability proof。DeepSeek / Codex / provider review 是 model critique only，不是 peer review。本项目不是 doctoral-level idea generator。
+
+Provider review packet 的 provenance 边界是 auditable，而不是 unforgeable：active commit 要求 `generated_by_script`、`source_run_id`、`provider_mode`、`provider_status.status`、`command_hash`、`provider_log_hash`、`created_at` 和 artifact hashes，但这些只能证明本地 artifact trail 可审计，不能提供外部 provider execution 的 cryptographic proof。
 
 ## 自动化分层
 
@@ -397,13 +399,13 @@ Publish outcomes：
 
 Audit invariants：
 
-- 不允许非 `publish_research_run.py` 的脚本创建、移动或修改 formal seed folder。
-- seed folder 必须有 DeepSeek review、novelty scan、Codex execution review、survival decision 和 artifact hashes。
-- formal publish 必须显式设置 formal policy 和 confirmation flag。
-- formal publish 必须通过 OpenAlex 或 Semantic Scholar 参与的外部/混合 novelty verification；不能用 local-only 或 arXiv-only `likely_open` 晋升 formal seed。
+- v1 中不允许 scheduled automation 或 legacy publish script 创建、移动或修改 `idea_bank/seed/`；只有 `active_seed_commit.py` 可以写 governance active seed record 和 governance ledger。
+- Active seed commit 必须有 confirmed evidence packet、manual prior-art dossier、provider review packet、novelty screen、baseline readiness、pilot plan、governance review 和 artifact hashes。
+- v0.2/v0.3 formal publish flags 只是 historical context；v1 active seed 不由 formal policy 或 confirmation flag 触发。
+- v0.2/v0.3 formal publish 的 external novelty 条件只作历史说明；v1 仍要求 OpenAlex/Semantic Scholar/arXiv screening 不能替代 manual prior-art dossier。
 - scheduled wrapper 不得包含 `--v2-publish-policy formal`、`--allow-formal-seed-publish` 或 `--allow-test-provider-for-formal`。
 - `quality_tier`、`sharpness_score`、`evidence_execution_score` 和 `ordinaryness_penalty` 是 potential / display 字段，不是 promotion gates。
-- 没有 seed 是正常结果；未经审查就写 formal seed 是失败。
+- 没有 seed 是正常结果；未经审查就写 active seed record 或 legacy `idea_bank/seed/` 是失败。
 
 ## 8. Gemini CLI
 

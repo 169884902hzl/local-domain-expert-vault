@@ -76,7 +76,7 @@
     {
       "id": "codex_second_review",
       "owner": "Codex CLI",
-      "inputs": ["Gemini raw candidates", "mandatory model battle", "formal seeds", "quality rubric", "provider matrix"],
+      "inputs": ["Gemini raw candidates", "mandatory model battle", "seed candidates", "formal rehearsal context", "quality rubric", "provider matrix"],
       "outputs": ["projects/research-agenda/reviews/YYYY-MM-DD-codex-seed-review.md"],
       "timeout_sec": 7200,
       "failure_semantics": "fallback_report_nonblocking_exit"
@@ -84,7 +84,7 @@
   ],
   "artifact_classes": {
     "formal_knowledge": ["wiki/topics", "projects/research-agenda/evidence/evidence_matrix.jsonl"],
-    "formal_agenda": ["projects/research-agenda/daily/YYYY-MM-DD-agenda-delta.md", "projects/research-agenda/idea_bank/seed"],
+    "formal_agenda": ["projects/research-agenda/daily/YYYY-MM-DD-agenda-delta.md", "projects/research-agenda/formal-rehearsals", "projects/research-agenda/governance/active-seeds"],
     "draft_context": ["projects/research-agenda/concept-deltas", "projects/research-agenda/mechanism-graphs", "projects/research-agenda/divergent"],
     "review_only": ["projects/research-agenda/reviews", "projects/research-agenda/model-debates"]
   }

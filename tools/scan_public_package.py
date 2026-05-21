@@ -14,10 +14,12 @@ from dataclasses import dataclass
 
 ARTIFACT_RE = re.compile(
     r"(?i)(\.pdf$|\.sqlite$|\.sqlite3$|\.db$|\.log$|\.pyc$|\.bak$|__pycache__/|\.env$|"
-    r"settings\.local\.json$|workspace\.json$|attachments/|archive/|/logs/|backup|secret|"
+    r"settings\.local\.json$|workspace\.json$|attachments/|archive/|(^|/)logs/|(^|/)cache/|(^|/)\.cache/|backup|secret|"
     r"projects/research-agenda/runs/|projects/research-agenda/cache/|"
+    r"projects/research-agenda/idea_bank/seed/|"
     r"projects/research-agenda/governance/active-seeds/|"
-    r"projects/research-agenda/governance/ledger/)"
+    r"projects/research-agenda/governance/ledger/|"
+    r"active-seed-record\.json$|governance-ledger\.jsonl$)"
 )
 
 SENSITIVE_PATTERNS = [

@@ -1,1 +1,32 @@
-{"$schema":"https://json-schema.org/draft/2020-12/schema","title":"Research Governance v1 Formal Rehearsal Packet","type":"object","required":["schema_version","candidate_id","packet_status","active_seed_committed","boundary"],"properties":{"schema_version":{"const":"formal_rehearsal_packet.v1"},"candidate_id":{"type":"string"},"packet_status":{"const":"ready"},"active_seed_committed":{"const":false},"boundary":{"type":"string"}}}
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Research Governance v1 Formal Rehearsal Packet",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "candidate_id",
+    "packet_status",
+    "created_at",
+    "evidence_packet_confirmed",
+    "manual_prior_art_dossier_completed",
+    "baseline_execution_ready",
+    "pilot_plan_ready",
+    "notes",
+    "active_seed_committed",
+    "boundary"
+  ],
+  "properties": {
+    "schema_version": {"const": "formal_rehearsal_packet.v1"},
+    "candidate_id": {"type": "string", "minLength": 1},
+    "packet_status": {"const": "ready"},
+    "created_at": {"type": "string", "minLength": 1},
+    "evidence_packet_confirmed": {"type": "boolean"},
+    "manual_prior_art_dossier_completed": {"type": "boolean"},
+    "baseline_execution_ready": {"type": "boolean"},
+    "pilot_plan_ready": {"type": "boolean"},
+    "notes": {"type": "string"},
+    "active_seed_committed": {"const": false},
+    "boundary": {"type": "string"}
+  }
+}

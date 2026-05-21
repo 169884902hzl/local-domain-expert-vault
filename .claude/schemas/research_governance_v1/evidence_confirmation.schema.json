@@ -1,1 +1,14 @@
-{"$schema":"https://json-schema.org/draft/2020-12/schema","title":"Research Governance v1 Evidence Confirmation","type":"object","required":["schema_version","candidate_id","human_confirmed","confirmed_by","confirmed_at"],"properties":{"schema_version":{"const":"evidence_confirmation.v1"},"candidate_id":{"type":"string"},"human_confirmed":{"type":"boolean"},"confirmed_by":{"type":"string"},"confirmed_at":{"type":"string"}}}
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Research Governance v1 Evidence Confirmation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "candidate_id", "human_confirmed", "confirmed_by", "confirmed_at"],
+  "properties": {
+    "schema_version": {"const": "evidence_confirmation.v1"},
+    "candidate_id": {"type": "string", "minLength": 1},
+    "human_confirmed": {"type": "boolean"},
+    "confirmed_by": {"type": "string", "minLength": 1},
+    "confirmed_at": {"type": "string", "minLength": 1}
+  }
+}

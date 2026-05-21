@@ -21,7 +21,7 @@ It is built for graduate students, PI/lab knowledge-base maintainers, and resear
 
 Current public version: `v1.0.0`. `v0.1.0` was the first releasable local-first vault; `v0.2.x` added the research-seed v2 state machine and external-screening hardening; `v0.3.x` added supervised research-validity hardening. `v1.0.0` redesigns the active seed path as a human-governed Research Governance Workbench commitment, not a publish side effect.
 
-The v1 release-ready claim depends on this hotfix: provider command construction is covered by a single-`--provider` builder and tests; scheduled quality-audit failure fails the scheduled task; active commit requires hash-linked provider review and novelty screen artifacts; the legacy `publish_research_run.py` formal writer surface is disabled. v0.3.x survival decision / formal publish wording is historical context, not v1 active truth.
+The hardened v1.0 release gate depends on this hardening pass: v1 governance schemas are strict at the root; provider command construction is covered by a single-`--provider` builder and stage-builder tests; scheduled quality-audit failure fails the scheduled task; active commit requires hash-linked provider review and novelty screen artifacts; the legacy `publish_research_run.py` formal writer surface is disabled. v0.3.x survival decision / formal publish wording is historical context, not v1 active truth.
 
 ## v1.0: Research Governance Workbench
 
@@ -46,6 +46,7 @@ Hard boundaries:
 - Scheduled automation must never create formal rehearsal packets, complete human confirmations, write active seeds, write governance ledger events, kill active seeds, or resurrect active seeds.
 - OpenAlex / Semantic Scholar / arXiv scans are screening only. They are not prior-art review, novelty proof, or publishability proof.
 - DeepSeek / Codex / provider review is model critique only. It is not peer review.
+- Provider review provenance is auditable local artifact linkage, including script/source-run/provider mode, command/log hashes, provider status, creation time, and artifact hashes. It is not cryptographic proof that an external provider call happened.
 - Dashboard is derived-only. It cannot be source of truth or input to state mutation.
 - `formal_rehearsal` is not an active seed and cannot write `idea_bank/seed/`.
 - Legacy v0.3.x seeds are archived legacy artifacts and must never auto-promote.
@@ -126,7 +127,7 @@ Important boundaries:
 - Formal seed publish is disabled by default.
 - `seed-candidates-only` is the default rollout policy.
 - v0.2/v0.3 formal publish flags are historical context. In v1, active seed commitment goes through human governance artifacts, not a legacy publish flag path.
-- No seed today is a normal outcome; an unreviewed seed written to the formal seed folder is a failure.
+- No seed today is a normal outcome; an unreviewed candidate written to an active seed record or the legacy `idea_bank/seed/` path is a failure.
 - Scheduled daily automation should not be described as automatically publishing formal seeds.
 
 v0.2.0 improves state control, review ordering, auditability, and rollout safety. It does not prove that generated ideas are novel, publishable, or doctoral-level by itself. That still requires real prior-art review, human judgment, and pilot outcomes.

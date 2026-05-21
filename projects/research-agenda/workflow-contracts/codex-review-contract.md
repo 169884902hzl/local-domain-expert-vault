@@ -2,17 +2,17 @@
 title: "Codex Review Contract"
 tags: [research-agenda, codex, quality]
 created: "2026-05-08"
-updated: "2026-05-08"
+updated: "2026-05-21"
 type: "permanent"
 status: "done"
-summary: "Contract for daily Codex second-pass review of raw Gemini candidates and formal seeds."
+summary: "Contract for daily Codex second-pass review of raw Gemini candidates and seed candidates."
 ---
 
 # Codex Review Contract
 
 ## Purpose
 
-Codex is the daily second-pass reviewer. It reviews raw Gemini candidates, formal seeds, local evidence briefs, and quality labels. It is not the final reviewer and cannot delete, promote, or claim novelty.
+Codex is the daily second-pass reviewer. It reviews raw Gemini candidates, seed candidates, formal rehearsal context, local evidence briefs, and quality labels. It is not the final reviewer and cannot delete, promote, write active seed records, or claim novelty.
 
 ## Required Packet Contents
 
@@ -25,7 +25,8 @@ The daily packet must include:
 - `quality_boundary`
 - potential/readiness boundary (`quality_tier` is potential only; `readiness_tier` and `promotion_decision` indicate seed-readiness)
 - `local_evidence_briefs`
-- `formal_seed_titles`
+- `seed_candidate_titles`
+- `formal_rehearsal_packet_titles`
 - allowed actions and forbidden actions
 
 ## Allowed Actions

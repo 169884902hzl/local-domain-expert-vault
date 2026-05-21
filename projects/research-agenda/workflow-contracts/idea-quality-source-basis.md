@@ -19,7 +19,7 @@ summary: "Basis for idea scoring dimensions, novelty-pressure boundaries, and cr
 | Require strongest baseline and killer experiment. | A credible robotics idea must be falsifiable against the method most likely to make it unnecessary. |
 | Preserve raw candidates even when weak. | Creative ideas often arrive as flawed sketches. Deleting them loses the pathology, interface, or experiment that may be useful after mutation. |
 | Treat method improvement as a valid contribution shape. | Engineering research often advances by changing a failure mechanism, interface, feedback loop, constraint, sensing path, or evaluation signal inside an existing method. |
-| Do not promote C-tier ideas. | Weak candidates should not pollute the formal seed bank. They belong in greenhouse, rewrite, park, or rescue. |
+| Do not promote C-tier ideas. | Weak candidates should not pollute seed-candidate review, formal rehearsal packets, or active seed records. They belong in greenhouse, rewrite, park, or rescue. |
 | Require one-sentence falsifiable claim compression. | A vague combination cannot be pressure-tested; a compressed claim exposes the mechanism, measurement, and rejection condition. |
 
 ## Rubric Dimensions

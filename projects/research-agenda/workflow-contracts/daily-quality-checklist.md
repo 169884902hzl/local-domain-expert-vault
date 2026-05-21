@@ -2,7 +2,7 @@
 title: "Daily Quality Checklist"
 tags: [research-agenda, automation, quality]
 created: "2026-05-08"
-updated: "2026-05-08"
+updated: "2026-05-21"
 type: "permanent"
 status: "done"
 summary: "Checklist used by the daily automation quality audit."
@@ -32,11 +32,11 @@ summary: "Checklist used by the daily automation quality audit."
 - Both `evidence_bound` and `wild_engineering` are represented when free divergence is enabled.
 - Each raw candidate has non-obvious claim, anti-combination test, strongest baseline, killer experiment, rescue mutation, and claim compression.
 - `quality_tier`/`potential_tier` are treated as potential only; `readiness_tier` and `promotion_decision` carry seed-readiness meaning.
-- C-tier candidates are not promoted to formal seeds.
+- C-tier candidates are not promoted to seed candidates, formal rehearsal packets, or active seed records.
 
 ## Codex Review
 
-- Packet contains raw candidates, formal seeds, allowed actions, potential/readiness boundary, quality boundary, and evidence briefs.
+- Packet contains raw candidates, seed candidates, formal rehearsal context, allowed actions, potential/readiness boundary, quality boundary, and evidence briefs.
 - Allowed actions are exactly `accept_for_user_review / rewrite / park / reject_with_rescue`.
 - Report is completed or pending for a fresh run.
 - Codex does not review stale results.

@@ -15,6 +15,7 @@ from research_seed_v2_common import (
     ARTIFACT_SCHEMAS,
     FORMAL_SEED_REQUIRED_FILES,
     PUBLISH_REQUIRED_ARTIFACTS,
+    agenda_v2_path,
     artifact_dir,
     run_dir,
     validate_artifact,
@@ -133,10 +134,11 @@ def _pdf_repair_verification(run_date: str) -> tuple[str, int]:
 
 
 def _rel(path: Path) -> str:
-    try:
-        return str(path.relative_to(vault_path())).replace("\\", "/")
-    except ValueError:
-        return str(path)
+    return v2_rel(path)
+
+
+def _agenda_runtime_path(*parts: str) -> Path:
+    return agenda_v2_path(*parts)
 
 
 def _read_lines_for_section(text: str, heading: str) -> list[str]:
@@ -187,40 +189,40 @@ def _backlog_path(run_date: str) -> Path:
 
 
 def _greenhouse_path(run_date: str) -> Path:
-    return vault_path("projects", "research-agenda", "divergent", f"{run_date}-gemini-raw-candidates.json")
+    return _agenda_runtime_path("divergent", f"{run_date}-gemini-raw-candidates.json")
 
 
 def _codex_report_path(run_date: str) -> Path:
-    return vault_path("projects", "research-agenda", "reviews", f"{run_date}-codex-seed-review.md")
+    return _agenda_runtime_path("reviews", f"{run_date}-codex-seed-review.md")
 
 
 def _codex_packet_path(run_date: str) -> Path:
-    return vault_path("projects", "research-agenda", "reviews", f"{run_date}-codex-seed-review-packet.json")
+    return _agenda_runtime_path("reviews", f"{run_date}-codex-seed-review-packet.json")
 
 
 def _codex_pending_path(run_date: str) -> Path:
-    return vault_path("projects", "research-agenda", "reviews", f"{run_date}-codex-review-pending.json")
+    return _agenda_runtime_path("reviews", f"{run_date}-codex-review-pending.json")
 
 
 def _battle_packet_path(run_date: str) -> Path:
-    return vault_path("projects", "research-agenda", "model-debates", f"{run_date}-gemini-deepseek-debate-packet.json")
+    return _agenda_runtime_path("model-debates", f"{run_date}-gemini-deepseek-debate-packet.json")
 
 
 def _battle_report_path(run_date: str) -> Path:
-    return vault_path("projects", "research-agenda", "reviews", f"{run_date}-gemini-deepseek-debate.md")
+    return _agenda_runtime_path("reviews", f"{run_date}-gemini-deepseek-debate.md")
 
 
 def _agenda_delta_path(run_date: str) -> Path:
-    return vault_path("projects", "research-agenda", "daily", f"{run_date}-agenda-delta.md")
+    return _agenda_runtime_path("daily", f"{run_date}-agenda-delta.md")
 
 
 def _concept_delta_paths(run_date: str) -> tuple[Path, Path]:
-    root = vault_path("projects", "research-agenda", "concept-deltas")
+    root = _agenda_runtime_path("concept-deltas")
     return root / f"{run_date}-concept-delta.json", root / f"{run_date}-concept-delta.md"
 
 
 def _mechanism_graph_dir(run_date: str) -> Path:
-    return vault_path("projects", "research-agenda", "mechanism-graphs", run_date)
+    return _agenda_runtime_path("mechanism-graphs", run_date)
 
 
 def _classify_codex_state(run_date: str) -> dict[str, Any]:
@@ -644,7 +646,7 @@ def _audit_v2_state_machine(run_date: str) -> tuple[dict[str, Any], list[dict[st
                     )
                 )
 
-    seed_root = vault_path("projects", "research-agenda", "idea_bank", "seed")
+    seed_root = _agenda_runtime_path("idea_bank", "seed")
     v2_seed_count = 0
     legacy_seed_count = 0
     if seed_root.exists():
@@ -658,7 +660,7 @@ def _audit_v2_state_machine(run_date: str) -> tuple[dict[str, Any], list[dict[st
             else:
                 legacy_seed_count += 1
 
-    override_root = vault_path("projects", "research-agenda", "overrides", "human-overrides", run_date)
+    override_root = _agenda_runtime_path("overrides", "human-overrides", run_date)
     override_count = 0
     if override_root.exists():
         for override_path in sorted(override_root.glob("*.json")):
@@ -889,7 +891,7 @@ def audit_run(
         issue_list.append(_issue("INFO", "quality_no_top_tier_seed_today", "No S/A raw candidate survived the local rubric; preserve greenhouse for review.", _rel(greenhouse_path)))
 
     mandatory_battle = _classify_mandatory_battle(run_date, agenda_delta_text)
-    v2_deepseek = _json_read(vault_path("projects", "research-agenda", "runs", run_date, "artifacts", "deepseek-review.json"))
+    v2_deepseek = _json_read(artifact_dir(run_date) / "deepseek-review.json")
     v2_deepseek_ok = bool(
         v2_deepseek.get("status") == "success"
         and isinstance(v2_deepseek.get("provider_status"), dict)

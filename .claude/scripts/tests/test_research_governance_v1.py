@@ -15,9 +15,17 @@ if str(SCRIPT_DIR) not in sys.path:
 
 from active_seed_commit import commit_active_seed
 from audit_public_package_v1 import scan as scan_public_v1
+from baseline_execution_readiness import write_readiness
+from evidence_packet_build import build_packet as build_evidence_packet
+from evidence_packet_confirm import confirm_packet
+from formal_rehearsal_packet import build_packet as build_formal_rehearsal_packet
+from governance_review import write_review
 from paper_intake_triage import build_triage
+from pilot_plan import write_plan
 from pilot_result_interpret import write_result as write_pilot_result_v1
+from prior_art_dossier import write_dossier
 from research_governance_common import (
+    SCHEMA_ROOT,
     active_commit_validation,
     active_seed_dir,
     active_seed_id_from_candidate,
@@ -32,13 +40,15 @@ from research_governance_common import (
     provider_review_dir,
     read_json,
     transition_errors,
+    validate_governance_payload,
     write_json,
 )
-from state_machine_guard import run_audit as run_state_machine_audit, scan_sensitive_writes
+from state_machine_guard import audit_direct_governance_writers, run_audit as run_state_machine_audit, scan_powershell_sensitive_writes, scan_sensitive_writes
 from strategy_ledger import build_event
 import active_seed_dashboard
 import active_seed_commit
 import migrate_v03_to_v10
+import state_machine_guard
 
 
 CID = "cand-alpha"
@@ -62,20 +72,22 @@ class GovernanceV1Test(unittest.TestCase):
         write_json(candidate_dir(CID) / "candidate-record.json", {"schema_version": "candidate_record.v1", "candidate_id": CID, "title": "Governed Seed", "state": "governance_review_requested", "auto_promote_allowed": True})
         write_json(
             evidence_packet_dir(CID) / "evidence-packet.confirmed.json",
-            {"schema_version": "evidence_packet.v1", "candidate_id": CID, "packet_status": "confirmed", "human_confirmed": True, "confirmed_by": "human", "confirmed_at": "2026-05-21T00:00:00Z", "core_evidence": [{"evidence_type": "anchored_claim", "statement": "supported"}]},
+            {"schema_version": "evidence_packet.v1", "candidate_id": CID, "run_id": "run-1", "packet_status": "confirmed", "created_at": "2026-05-21T00:00:00Z", "human_confirmed": True, "confirmed_by": "human", "confirmed_at": "2026-05-21T00:00:00Z", "core_evidence": [{"evidence_type": "anchored_claim", "statement": "supported"}], "artifact_hashes": [], "boundary": "test fixture"},
         )
-        write_json(prior_art_dir(CID) / "manual-prior-art-dossier.json", {"schema_version": "prior_art_dossier.v1", "candidate_id": CID, "dossier_status": "completed", "reviewer": "human", "reviewed_at": "2026-05-21T00:00:00Z", "human_confirmed": True, "confirmed_by": "human", "confirmed_at": "2026-05-21T00:00:00Z", "screening_only": False})
+        write_json(prior_art_dir(CID) / "manual-prior-art-dossier.json", {"schema_version": "prior_art_dossier.v1", "candidate_id": CID, "dossier_status": "completed", "reviewer": "human", "reviewed_at": "2026-05-21T00:00:00Z", "human_confirmed": True, "confirmed_by": "human", "confirmed_at": "2026-05-21T00:00:00Z", "screening_only": False, "manual_sources": ["manual:fixture"], "nearest_work_summary": "Nearest work checked manually.", "provider_timeout_seen": False, "timeout_covered_by_manual_dossier": False, "boundary": "test fixture"})
         provider_path = provider_review_dir(CID) / "provider-review-packet.json"
         novelty_path = novelty_screen_dir(CID) / "novelty-screen.json"
-        write_json(provider_path, {"schema_version": "provider_review_packet.v1", "candidate_id": CID, "review_status": "success", "provider_backed": True, "test_provider_used": False, "provider_status": {"provider_backed": True, "mode": "opencode", "status": "success"}, "reviews": [{"provider": "deepseek", "status": "success"}, {"provider": "codex", "status": "success"}]})
-        write_json(novelty_path, {"schema_version": "novelty_screen.v1", "candidate_id": CID, "screen_status": "success", "screening_only": True, "stale": False, "stale_external_novelty_cache": False, "replaces_manual_prior_art_dossier": False, "api_provider_status": "success", "provider_errors": []})
-        write_json(baseline_readiness_dir(CID) / "baseline-execution-readiness.json", {"schema_version": "baseline_execution_readiness.v1", "candidate_id": CID, "readiness_status": "ready"})
-        write_json(Path(self.tmp.name) / "pilot-plans" / CID / "pilot-plan.json", {"schema_version": "pilot_plan.v1", "candidate_id": CID, "plan_status": "ready", "owner": "human", "resource_budget": "2 weeks", "timeline": "2026Q2", "kill_criteria": "baseline wins", "human_confirmed": True, "confirmed_by": "human", "confirmed_at": "2026-05-21T00:00:00Z"})
+        write_json(provider_path, {"schema_version": "provider_review_packet.v1", "candidate_id": CID, "review_status": "success", "provider_backed": True, "test_provider_used": False, "generated_by_script": "provider_review_packet.py", "source_run_id": "run-1", "provider_mode": "opencode+codex-cli", "provider_status": {"provider": "combined", "provider_backed": True, "mode": "opencode+codex-cli", "status": "success"}, "command_hash": "sha256:command", "provider_log_hash": "sha256:provider-log", "created_at": "2026-05-21T00:00:00Z", "reviews": [{"provider": "deepseek", "status": "success"}, {"provider": "codex", "status": "success"}], "artifact_hashes": []})
+        write_json(novelty_path, {"schema_version": "novelty_screen.v1", "candidate_id": CID, "screen_status": "success", "screening_only": True, "stale": False, "stale_external_novelty_cache": False, "replaces_manual_prior_art_dossier": False, "api_provider_status": "success", "provider_errors": [], "artifact_hashes": []})
+        write_json(baseline_readiness_dir(CID) / "baseline-execution-readiness.json", {"schema_version": "baseline_execution_readiness.v1", "candidate_id": CID, "readiness_status": "ready", "baseline_name": "baseline", "implementation_path": "baselines/baseline", "resource_budget": "2 weeks", "not_applicable_reason": "", "blocking_issues": [], "created_at": "2026-05-21T00:00:00Z", "boundary": "test fixture"})
+        write_json(Path(self.tmp.name) / "pilot-plans" / CID / "pilot-plan.json", {"schema_version": "pilot_plan.v1", "candidate_id": CID, "plan_status": "ready", "owner": "human", "resource_budget": "2 weeks", "timeline": "2026Q2", "metric": "success_rate", "baseline_implementation_path": "baselines/baseline", "kill_criteria": "baseline wins", "human_confirmed": True, "confirmed_by": "human", "confirmed_at": "2026-05-21T00:00:00Z", "created_at": "2026-05-21T00:00:00Z", "boundary": "test fixture"})
         write_json(
             governance_review_dir(CID) / "governance-review.json",
             {
                 "schema_version": "governance_review.v1",
                 "candidate_id": CID,
+                "title": "Governed Seed",
+                "review_status": "requested",
                 "owner": "human",
                 "resource_budget": "2 weeks",
                 "timeline": "2026Q2",
@@ -83,16 +95,68 @@ class GovernanceV1Test(unittest.TestCase):
                 "human_confirmed": True,
                 "confirmed_by": "human",
                 "confirmed_at": "2026-05-21T00:00:00Z",
+                "reviewer": "human",
+                "reviewed_at": "2026-05-21T00:00:00Z",
                 "governance_signature": "sig",
+                "created_at": "2026-05-21T00:00:00Z",
                 "artifact_hashes": [
                     {"path": str(provider_path), "sha256": file_sha256(provider_path)},
                     {"path": str(novelty_path), "sha256": file_sha256(novelty_path)},
                 ],
+                "boundary": "test fixture",
             },
         )
 
     def assertBlocks(self, code: str) -> None:
         self.assertIn(code, active_commit_validation(CID).errors)
+
+    def test_all_v1_schema_roots_are_closed(self) -> None:
+        for schema_path in SCHEMA_ROOT.glob("*.schema.json"):
+            schema = read_json(schema_path)
+            self.assertIs(schema.get("additionalProperties"), False, schema_path.name)
+
+    def test_current_governance_fixture_validates_against_tightened_schemas(self) -> None:
+        payloads = [
+            (read_json(candidate_dir(CID) / "candidate-record.json"), "candidate_record.v1"),
+            (read_json(evidence_packet_dir(CID) / "evidence-packet.confirmed.json"), "evidence_packet.v1"),
+            (read_json(prior_art_dir(CID) / "manual-prior-art-dossier.json"), "prior_art_dossier.v1"),
+            (read_json(provider_review_dir(CID) / "provider-review-packet.json"), "provider_review_packet.v1"),
+            (read_json(novelty_screen_dir(CID) / "novelty-screen.json"), "novelty_screen.v1"),
+            (read_json(baseline_readiness_dir(CID) / "baseline-execution-readiness.json"), "baseline_execution_readiness.v1"),
+            (read_json(Path(self.tmp.name) / "pilot-plans" / CID / "pilot-plan.json"), "pilot_plan.v1"),
+            (read_json(governance_review_dir(CID) / "governance-review.json"), "governance_review.v1"),
+        ]
+        for payload, schema_version in payloads:
+            self.assertEqual(validate_governance_payload(payload, schema_version), [], schema_version)
+
+    def test_v1_writer_outputs_validate_against_tightened_schemas(self) -> None:
+        draft = build_evidence_packet(CID, run_id="run-1", dry_run=False)
+        confirmed = confirm_packet(CID, confirmed_by="human", human_confirmed=True, dry_run=False)
+        dossier = write_dossier(argparse.Namespace(candidate_id=CID, reviewer="human", manual_sources="OpenAlex;Semantic Scholar", nearest_work_summary="nearest checked", screening_only=False, provider_timeout_seen=False, timeout_covered_by_manual_dossier=False, human_confirmed=True, dry_run=True))
+        readiness = write_readiness(argparse.Namespace(candidate_id=CID, status="ready", baseline_name="baseline", implementation_path="baselines/baseline", resource_budget="2 weeks", not_applicable_reason="", blocking_issue=[], dry_run=True))
+        pilot = write_plan(argparse.Namespace(candidate_id=CID, owner="human", resource_budget="2 weeks", timeline="2026Q2", metric="success_rate", baseline_implementation_path="baselines/baseline", kill_criteria="baseline wins", human_confirmed=True, dry_run=True))
+        review = write_review(argparse.Namespace(candidate_id=CID, title="Governed Seed", owner="human", resource_budget="2 weeks", timeline="2026Q2", kill_criteria="baseline wins", reviewer="human", human_confirmed=True, governance_signature="sig", dry_run=True))
+        rehearsal = build_formal_rehearsal_packet(argparse.Namespace(candidate_id=CID, evidence_packet_confirmed=True, manual_prior_art_dossier_completed=True, baseline_execution_ready=True, pilot_plan_ready=True, notes="", dry_run=True))
+        pilot_result = write_pilot_result_v1(argparse.Namespace(candidate_id=CID, active_seed_id="", status="positive", result_summary="ok", dry_run=True))
+        strategy_event = build_event(argparse.Namespace(event_type="pilot_feedback", candidate_id=CID, summary="x", apply=False, human_confirmed=False, confirmed_by="human"))
+        for payload, schema_version in [
+            (draft, "evidence_packet.v1"),
+            (confirmed, "evidence_packet.v1"),
+            (dossier, "prior_art_dossier.v1"),
+            (readiness, "baseline_execution_readiness.v1"),
+            (pilot, "pilot_plan.v1"),
+            (review, "governance_review.v1"),
+            (rehearsal, "formal_rehearsal_packet.v1"),
+            (pilot_result, "pilot_result.v1"),
+            (strategy_event, "strategy_event.v1"),
+        ]:
+            self.assertEqual(validate_governance_payload(payload, schema_version), [], schema_version)
+
+    def test_tightened_schema_rejects_extra_root_property(self) -> None:
+        payload = read_json(candidate_dir(CID) / "candidate-record.json")
+        payload["unexpected_root"] = True
+        errors = validate_governance_payload(payload, "candidate_record.v1")
+        self.assertTrue(any("Additional properties are not allowed" in error for error in errors), errors)
 
     def test_no_direct_seed_writer(self) -> None:
         self.assertEqual(run_state_machine_audit()["status"], "success")
@@ -102,10 +166,45 @@ class GovernanceV1Test(unittest.TestCase):
         issues = scan_sensitive_writes(Path("bad_writer.py"), source)
         self.assertTrue(any(issue["code"] == "sensitive_governance_writer" for issue in issues))
 
+    def test_guard_flags_pathlib_write_text_to_active_seed(self) -> None:
+        source = "from pathlib import Path\nPath('projects/research-agenda/governance/active-seeds/x/active-seed-record.json').write_text('x')\n"
+        issues = scan_sensitive_writes(Path("bad_active_seed.py"), source)
+        self.assertTrue(any("active_seeds" in issue["targets"] for issue in issues))
+
+    def test_guard_flags_safe_write_to_idea_bank_seed(self) -> None:
+        source = "from helper import safe_write\nsafe_write('projects/research-agenda/idea_bank/seed/x.md', 'x')\n"
+        issues = scan_sensitive_writes(Path("bad_safe_write.py"), source)
+        self.assertTrue(any("seed" in issue["targets"] for issue in issues))
+
     def test_state_machine_guard_detects_shutil_copy_to_seed(self) -> None:
         source = "import shutil\nshutil.copy2('a', 'projects/research-agenda/idea_bank/seed/a')\n"
         issues = scan_sensitive_writes(Path("bad_copy.py"), source)
         self.assertTrue(any("seed" in issue["targets"] for issue in issues))
+
+    def test_guard_flags_shutil_move_to_governance_ledger(self) -> None:
+        source = "import shutil\nshutil.move('tmp.jsonl', 'projects/research-agenda/governance/ledger/governance-ledger.jsonl')\n"
+        issues = scan_sensitive_writes(Path("bad_move.py"), source)
+        self.assertTrue(any("ledger" in issue["targets"] for issue in issues))
+
+    def test_guard_flags_unlink_under_active_seed_path(self) -> None:
+        source = "from pathlib import Path\nPath('projects/research-agenda/governance/active-seeds/x/active-seed-record.json').unlink()\n"
+        issues = scan_sensitive_writes(Path("bad_unlink.py"), source)
+        self.assertTrue(any("active_seeds" in issue["targets"] for issue in issues))
+
+    def test_guard_scans_powershell_sensitive_path(self) -> None:
+        source = "Set-Content -Path 'projects/research-agenda/governance/ledger/governance-ledger.jsonl' -Value '{}'\n"
+        issues = scan_powershell_sensitive_writes(Path("bad.ps1"), source)
+        self.assertTrue(any("ledger" in issue["targets"] for issue in issues))
+
+    def test_guard_scans_tools_directory(self) -> None:
+        root = Path(self.tmp.name) / "repo"
+        tool = root / "tools" / "bad_writer.py"
+        tool.parent.mkdir(parents=True)
+        tool.write_text("from pathlib import Path\nPath('projects/research-agenda/idea_bank/seed/x').mkdir()\n", encoding="utf-8")
+        (root / ".claude" / "scripts").mkdir(parents=True)
+        with patch.object(state_machine_guard, "vault_path", lambda *parts: root.joinpath(*parts)):
+            issues = audit_direct_governance_writers()
+        self.assertTrue(any(issue["path"].endswith("bad_writer.py") for issue in issues))
 
     def test_state_machine_guard_detects_path_rename_to_seed(self) -> None:
         source = "from pathlib import Path\nPath('tmp').rename(Path('projects/research-agenda/idea_bank/seed/tmp'))\n"
@@ -167,6 +266,22 @@ class GovernanceV1Test(unittest.TestCase):
         provider["reviews"].append({"provider": "codex", "status": "success", "note": "changed"})
         write_json(provider_path, provider)
         self.assertTrue(any("hash_mismatch" in error for error in active_commit_validation(CID).errors))
+
+    def test_active_commit_rejects_provider_packet_missing_command_hash(self) -> None:
+        provider_path = provider_review_dir(CID) / "provider-review-packet.json"
+        provider = read_json(provider_path)
+        provider.pop("command_hash", None)
+        write_json(provider_path, provider)
+        self.refresh_governance_hashes()
+        self.assertBlocks("provider_review_missing_command_hash")
+
+    def test_active_commit_rejects_provider_packet_missing_provider_log_hash(self) -> None:
+        provider_path = provider_review_dir(CID) / "provider-review-packet.json"
+        provider = read_json(provider_path)
+        provider.pop("provider_log_hash", None)
+        write_json(provider_path, provider)
+        self.refresh_governance_hashes()
+        self.assertBlocks("provider_review_missing_provider_log_hash")
 
     def test_active_commit_rejects_novelty_screen_hash_mismatch(self) -> None:
         novelty_path = novelty_screen_dir(CID) / "novelty-screen.json"
@@ -244,6 +359,36 @@ class GovernanceV1Test(unittest.TestCase):
         with patch.object(active_seed_commit, "write_json", side_effect=RuntimeError("boom")):
             result = active_seed_commit.commit_active_seed(CID, actor="human", governance_signature="sig", human_confirmed=True)
         self.assertTrue(any("active_seed_commit_exception" in error for error in result["errors"]))
+
+    def test_validation_failure_does_not_create_quarantine(self) -> None:
+        (prior_art_dir(CID) / "manual-prior-art-dossier.json").unlink()
+        active_id = active_seed_id_from_candidate(CID, "Governed Seed")
+        result = commit_active_seed(CID, actor="human", governance_signature="sig", human_confirmed=True)
+        self.assertEqual(result["status"], "blocked")
+        self.assertFalse((active_seed_dir(active_id).with_name(active_id + ".quarantine")).exists())
+        self.assertFalse(active_seed_dir(active_id).exists())
+        self.assertFalse(active_seed_dir(active_id).with_suffix(".commit.lock").exists())
+
+    def test_ledger_append_failure_after_record_write_creates_quarantine(self) -> None:
+        active_id = active_seed_id_from_candidate(CID, "Governed Seed")
+        with patch.object(active_seed_commit, "append_jsonl", side_effect=RuntimeError("ledger boom")):
+            result = active_seed_commit.commit_active_seed(CID, actor="human", governance_signature="sig", human_confirmed=True)
+        quarantine = Path(result["quarantine"])
+        self.assertTrue(quarantine.exists())
+        self.assertFalse((active_seed_dir(active_id) / "active-seed-record.json").exists())
+        self.assertFalse(active_seed_dir(active_id).exists())
+        self.assertFalse(active_seed_dir(active_id).with_suffix(".commit.lock").exists())
+
+    def test_quarantine_name_collision_safe(self) -> None:
+        active_id = active_seed_id_from_candidate(CID, "Governed Seed")
+        existing = active_seed_dir(active_id).with_name(active_id + ".quarantine")
+        existing.mkdir(parents=True)
+        with patch.object(active_seed_commit, "append_jsonl", side_effect=RuntimeError("ledger boom")):
+            result = active_seed_commit.commit_active_seed(CID, actor="human", governance_signature="sig", human_confirmed=True)
+        self.assertTrue(str(result["quarantine"]).endswith(".quarantine-1"))
+        self.assertTrue(Path(result["quarantine"]).exists())
+        self.assertTrue(existing.exists())
+        self.assertFalse(active_seed_dir(active_id).with_suffix(".commit.lock").exists())
 
     def test_concurrent_publish_no_overwrite(self) -> None:
         active_id = active_seed_id_from_candidate(CID, "Governed Seed")

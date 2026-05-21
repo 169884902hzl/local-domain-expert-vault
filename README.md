@@ -19,7 +19,7 @@
 
 当前公开版本：`v1.0.0`。`v0.1.0` 是首个可发行 local-first vault 版本；`v0.2.x` 加入 research-seed v2 状态机和 external screening hardening；`v0.3.x` 加入 supervised research-validity hardening。`v1.0.0` 把 active seed 从 publish side effect 重构为人工治理的 Research Governance Workbench 承诺。
 
-v1 release-ready 依赖本轮 hardening：provider command construction 现在有单 `--provider` builder 和测试；scheduled quality audit 非 0 会让任务失败；active commit 必须 hash-link 独立的 provider review packet 与 novelty screen；legacy `publish_research_run.py` formal writer surface 已禁用。v0.3.x 的 survival decision / formal publish 说明只保留为 historical context，不是 v1 active truth。
+Hardened v1.0 release gate 依赖本轮 hardening：v1 governance schemas 根对象默认 strict；provider command construction 有单 `--provider` builder 和 stage-builder tests；scheduled quality audit 非 0 会让任务失败；active commit 必须 hash-link 独立的 provider review packet 与 novelty screen；legacy `publish_research_run.py` formal writer surface 已禁用。v0.3.x 的 survival decision / formal publish 说明只保留为 historical context，不是 v1 active truth。
 
 ## v1.0: Research Governance Workbench
 
@@ -44,6 +44,7 @@ legacy-v03/migration-report.json
 - Scheduled automation must never create formal rehearsal packets, complete human confirmations, write active seeds, write governance ledger events, kill active seeds, or resurrect active seeds.
 - OpenAlex / Semantic Scholar / arXiv scans are screening only. They are not prior-art review, novelty proof, or publishability proof.
 - DeepSeek / Codex / provider review is model critique only. It is not peer review.
+- Provider review provenance is auditable local artifact linkage, including script/source-run/provider mode, command/log hashes, provider status, creation time, and artifact hashes. It is not cryptographic proof that an external provider call happened.
 - Dashboard is derived-only. It cannot be source of truth or input to state mutation.
 - `formal_rehearsal` is not an active seed and cannot write `idea_bank/seed/`.
 - Legacy v0.3.x seeds are archived legacy artifacts and must never auto-promote.

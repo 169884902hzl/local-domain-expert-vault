@@ -1,1 +1,14 @@
-{"$schema":"https://json-schema.org/draft/2020-12/schema","title":"Research Governance v1 Legacy Migration","type":"object","required":["schema_version","legacy_status","auto_promote_allowed","rollback_plan"],"properties":{"schema_version":{"const":"legacy_migration.v1"},"legacy_status":{"const":"archived_legacy"},"auto_promote_allowed":{"const":false},"migrated_novelty_caches_marked_stale":{"type":"boolean"},"rollback_plan":{"type":"array"}}}
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Research Governance v1 Legacy Migration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "legacy_status", "auto_promote_allowed", "rollback_plan"],
+  "properties": {
+    "schema_version": {"const": "legacy_migration.v1"},
+    "legacy_status": {"const": "archived_legacy"},
+    "auto_promote_allowed": {"const": false},
+    "migrated_novelty_caches_marked_stale": {"type": "boolean"},
+    "rollback_plan": {"type": "array", "items": {"type": "string"}}
+  }
+}

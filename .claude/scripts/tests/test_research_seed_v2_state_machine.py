@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -44,7 +45,7 @@ from survival_decision import decide
 from tension_map import build_tensions, validate_tensions
 from validate_research_run import validate_run
 from weekly_strategy_review import sanitize_overrides
-from audit_daily_automation_quality import _audit_v2_state_machine, _moved_to_v2_missing_artifact_issues, _provider_backed_artifact_issue, _scan_text_for_seed_writer
+from audit_daily_automation_quality import CONTRACT_DIR, _audit_v2_state_machine, _moved_to_v2_missing_artifact_issues, _provider_backed_artifact_issue, _scan_text_for_seed_writer
 import research_agenda_review as agenda_review
 import novelty_baseline_scan as novelty_scan
 import candidate_portfolio_select as portfolio_select
@@ -146,12 +147,66 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
             ],
             cwd=REPO_ROOT,
             capture_output=True,
+            encoding="utf-8",
             text=True,
             timeout=30,
         )
         output = result.stdout + result.stderr
         self.assertEqual(result.returncode, 0, output)
         return output
+
+    def review_stage_commands(self, **overrides: object) -> dict[str, list[str]]:
+        values = {
+            "deepseek_provider": "none",
+            "deepseek_provider_json": "",
+            "deepseek_model": "deepseek/test-model",
+            "deepseek_timeout": 123,
+            "codex_execution_provider": "none",
+            "codex_execution_provider_json": "",
+            "idea_timeout": 45,
+            "allow_human_override": False,
+            "v2_publish_policy": "seed-candidates-only",
+            "novelty_max_external_queries": 1,
+            "novelty_external_timeout": 12,
+        }
+        values.update(overrides)
+        stages = build_v2_review_stages(Namespace(**values), RUN_DATE)
+        return {name: command for name, command, _timeout in stages}
+
+    def run_daily_wrapper_test(
+        self,
+        *,
+        pipeline_exit: int = 0,
+        recovery_exit: int = 1,
+        quality_exit: int = 0,
+        extra_args: tuple[str, ...] = (),
+    ) -> tuple[subprocess.CompletedProcess[str], Path]:
+        root = Path(self.tmp.name) / "wrapper-root"
+        script_dir = root / ".claude" / "scripts"
+        script_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(SCRIPTS_DIR / "run_daily_arxiv_task.ps1", script_dir / "run_daily_arxiv_task.ps1")
+        env = os.environ.copy()
+        env["DAILY_ARXIV_WRAPPER_TEST_MODE"] = "1"
+        env["DAILY_ARXIV_WRAPPER_TEST_PIPELINE_EXIT"] = str(pipeline_exit)
+        env["DAILY_ARXIV_WRAPPER_TEST_RECOVERY_EXIT"] = str(recovery_exit)
+        env["DAILY_ARXIV_WRAPPER_TEST_QUALITY_EXIT"] = str(quality_exit)
+        result = subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(script_dir / "run_daily_arxiv_task.ps1"),
+                *extra_args,
+            ],
+            cwd=root,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        return result, root
 
     def write_bom_json(self, path: Path, payload: dict[str, object]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -1787,6 +1842,10 @@ def bad(source, recommended):
         self.assertNotIn("--allow-formal-seed-publish", text)
         self.assertNotIn("--allow-test-provider-for-formal", text)
 
+    def test_registered_action_contains_quoted_file_path(self) -> None:
+        text = self.register_daily_arxiv_dry_run()
+        self.assertIn('-File "<vault-root>\\.claude\\scripts\\run_daily_arxiv_task.ps1"', text)
+
     def test_register_daily_explicit_provider_dry_run_has_only_safe_wrapper_flags(self) -> None:
         text = self.register_daily_arxiv_dry_run(
             "-DeepSeekProvider",
@@ -1800,6 +1859,13 @@ def bad(source, recommended):
         self.assertNotIn("--v2-publish-policy formal", text)
         self.assertNotIn("--allow-formal-seed-publish", text)
         self.assertNotIn("--allow-test-provider-for-formal", text)
+        self.assertNotIn("--commit-active-seed", text)
+
+    def test_registered_action_handles_non_ascii_vault_path(self) -> None:
+        text = self.register_daily_arxiv_dry_run("-ShowLocalPaths")
+        self.assertIn("胡至伦", text)
+        self.assertIn('-File "', text)
+        self.assertIn("run_daily_arxiv_task.ps1", text)
 
     def test_run_daily_explicit_provider_params_translate_to_pipeline_flags(self) -> None:
         wrapper = SCRIPTS_DIR / "run_daily_arxiv_task.ps1"
@@ -1861,6 +1927,28 @@ def bad(source, recommended):
         self.assertIn("OpenAlex", docs)
         self.assertIn("Semantic Scholar", docs)
         self.assertIn("Scheduled formal publish remains disabled", docs)
+
+    def test_docs_do_not_claim_provider_status_is_unforgeable(self) -> None:
+        docs = "\n".join(
+            (REPO_ROOT / path).read_text(encoding="utf-8")
+            for path in ["README.md", "README_EN.md", "docs/AUTOMATION.md"]
+        )
+        normalized = docs.lower()
+        self.assertIn("auditable", normalized)
+        self.assertIn("not cryptographic proof", normalized)
+        self.assertNotIn("provider status is unforgeable", normalized)
+        self.assertNotIn("cryptographic proof that an external provider call happened.", normalized.replace("not cryptographic proof that an external provider call happened.", ""))
+
+    def test_workflow_contracts_do_not_use_stale_formal_seed_wording(self) -> None:
+        contract_root = REPO_ROOT / "projects" / "research-agenda" / "workflow-contracts"
+        stale_hits: list[str] = []
+        for path in contract_root.glob("*"):
+            if path.suffix not in {".md", ".json"}:
+                continue
+            text = path.read_text(encoding="utf-8").lower()
+            if "formal seed" in text or "formal_seed" in text or "idea_bank/seed" in text:
+                stale_hits.append(path.name)
+        self.assertEqual([], stale_hits)
 
     def test_audit_catches_policy_manifest_mismatch(self) -> None:
         manifest = read_json(run_dir(RUN_DATE) / "manifest.json")
@@ -1941,6 +2029,41 @@ def bad(source, recommended):
         self.assertIn("--target-policy", by_name["survival_decision"])
         self.assertIn("--allow-human-override", by_name["survival_decision"])
 
+    def test_build_v2_review_stages_deepseek_opencode_has_exactly_one_provider(self) -> None:
+        cmd = self.review_stage_commands(deepseek_provider="opencode")["deepseek_review"]
+        self.assertEqual(cmd.count("--provider"), 1)
+        self.assertEqual(cmd[cmd.index("--provider") + 1], "opencode")
+
+    def test_build_v2_review_stages_codex_cli_has_exactly_one_provider(self) -> None:
+        cmd = self.review_stage_commands(codex_execution_provider="codex-cli")["codex_execution_review"]
+        self.assertEqual(cmd.count("--provider"), 1)
+        self.assertEqual(cmd[cmd.index("--provider") + 1], "codex-cli")
+
+    def test_build_v2_review_stages_json_provider_has_exactly_one_provider(self) -> None:
+        commands = self.review_stage_commands(deepseek_provider_json="deepseek-provider.json", codex_execution_provider_json="codex-provider.json")
+        for name in ["deepseek_review", "codex_execution_review"]:
+            cmd = commands[name]
+            self.assertEqual(cmd.count("--provider"), 1)
+            self.assertEqual(cmd[cmd.index("--provider") + 1], "json")
+            self.assertIn("--provider-review-json", cmd)
+
+    def test_build_v2_review_stages_provider_none_has_exactly_one_provider(self) -> None:
+        commands = self.review_stage_commands()
+        for name in ["deepseek_review", "codex_execution_review"]:
+            cmd = commands[name]
+            self.assertEqual(cmd.count("--provider"), 1)
+            self.assertEqual(cmd[cmd.index("--provider") + 1], "none")
+
+    def test_build_v2_review_stages_rejects_provider_json_conflict(self) -> None:
+        with self.assertRaisesRegex(ValueError, "provider_json_conflicts_with_explicit_provider"):
+            self.review_stage_commands(deepseek_provider="opencode", deepseek_provider_json="deepseek-provider.json")
+
+    def test_build_v2_review_stages_preserves_seed_candidates_only_policy(self) -> None:
+        commands = self.review_stage_commands(v2_publish_policy="formal")
+        for name in ["novelty_scan", "survival_decision"]:
+            cmd = commands[name]
+            self.assertEqual(cmd[cmd.index("--target-policy") + 1], "seed-candidates-only")
+
     def test_pipeline_provider_args_single_provider_deepseek(self) -> None:
         cmd = ["python", "deepseek_scientific_review.py"]
         append_provider_args(cmd, provider="opencode", model="deepseek/test-model", timeout=123)
@@ -1962,6 +2085,11 @@ def bad(source, recommended):
         with self.assertRaisesRegex(ValueError, "provider_json_conflicts_with_explicit_provider"):
             append_provider_args(cmd, provider="opencode", provider_json="provider.json")
 
+    def test_pipeline_provider_args_reject_duplicate_provider(self) -> None:
+        cmd = ["python", "deepseek_scientific_review.py", "--provider", "none"]
+        with self.assertRaisesRegex(ValueError, "provider_arg_already_present"):
+            append_provider_args(cmd, provider="opencode")
+
     def test_pipeline_provider_json_uses_single_json_provider(self) -> None:
         cmd = ["python", "deepseek_scientific_review.py"]
         append_provider_args(cmd, provider="none", provider_json="provider.json")
@@ -1974,6 +2102,23 @@ def bad(source, recommended):
         self.assertIn("if ($QualityExitCode -ne 0)", text)
         self.assertIn("$ExitCode = $QualityExitCode", text)
         self.assertIn("exit $ExitCode", text)
+
+    def test_run_daily_wrapper_quality_audit_failure_exits_nonzero(self) -> None:
+        result, _root = self.run_daily_wrapper_test(pipeline_exit=0, quality_exit=7)
+        self.assertEqual(result.returncode, 7, result.stdout + result.stderr)
+
+    def test_run_daily_wrapper_pipeline_success_quality_failure_exits_quality_code(self) -> None:
+        result, _root = self.run_daily_wrapper_test(pipeline_exit=0, recovery_exit=0, quality_exit=9)
+        self.assertEqual(result.returncode, 9, result.stdout + result.stderr)
+
+    def test_run_daily_wrapper_lock_released_on_quality_failure(self) -> None:
+        result, root = self.run_daily_wrapper_test(pipeline_exit=0, quality_exit=7)
+        self.assertEqual(result.returncode, 7, result.stdout + result.stderr)
+        self.assertFalse((root / "projects" / "arxiv-daily" / "daily_arxiv_pipeline.lock").exists())
+
+    def test_run_daily_wrapper_forbidden_formal_active_args_rejected(self) -> None:
+        result, _root = self.run_daily_wrapper_test(extra_args=("--allow-human-override",))
+        self.assertNotEqual(result.returncode, 0)
 
     def test_scheduled_wrapper_forbids_human_override_and_governance_mutation_args(self) -> None:
         text = (SCRIPTS_DIR / "run_daily_arxiv_task.ps1").read_text(encoding="utf-8")
@@ -2005,6 +2150,21 @@ def bad(source, recommended):
         self.assertIn("v2_missing_survival_decision", codes)
         self.assertIn("v2_missing_publish_result", codes)
 
+    def test_moved_to_v2_state_machine_missing_publish_result_still_fails(self) -> None:
+        issues = _moved_to_v2_missing_artifact_issues(RUN_DATE, mandatory_battle_status="moved_to_v2_state_machine", v2_deepseek_ok=True)
+        self.assertTrue(any(issue["code"] == "v2_missing_publish_result" for issue in issues))
+
+    def test_moved_to_v2_state_machine_deepseek_not_provider_backed_still_fails(self) -> None:
+        write_run_artifact(
+            RUN_DATE,
+            "deepseek-review.json",
+            {"schema_version": "deepseek_review.v1", "run_date": RUN_DATE, "status": "partial_provider_unavailable", "provider_status": {"provider": "deepseek", "provider_backed": False, "mode": "opencode"}, "reviews": [], "artifact_hashes": {}},
+            state="attacked_by_deepseek",
+        )
+        issue = _provider_backed_artifact_issue(run_date=RUN_DATE, artifact_name="deepseek-review.json", expected_mode="opencode", code="scheduled_deepseek_provider_not_provider_backed")
+        self.assertIsNotNone(issue)
+        self.assertEqual(issue["level"], "FAIL")
+
     def test_audit_fails_when_scheduled_deepseek_provider_not_provider_backed(self) -> None:
         write_run_artifact(
             RUN_DATE,
@@ -2015,6 +2175,24 @@ def bad(source, recommended):
         issue = _provider_backed_artifact_issue(run_date=RUN_DATE, artifact_name="deepseek-review.json", expected_mode="opencode", code="scheduled_deepseek_provider_not_provider_backed")
         self.assertIsNotNone(issue)
         self.assertEqual(issue["level"], "FAIL")
+
+    def test_audit_runtime_root_uses_temp_agenda_root(self) -> None:
+        repo_artifact = REPO_ROOT / "projects" / "research-agenda" / "runs" / RUN_DATE / "artifacts" / "deepseek-review.json"
+        self.assertFalse(repo_artifact.exists())
+        write_run_artifact(
+            RUN_DATE,
+            "deepseek-review.json",
+            {"schema_version": "deepseek_review.v1", "run_date": RUN_DATE, "status": "success", "provider_status": {"provider": "deepseek", "provider_backed": True, "mode": "opencode", "status": "success"}, "reviews": [], "artifact_hashes": {}},
+            state="attacked_by_deepseek",
+        )
+        issue = _provider_backed_artifact_issue(run_date=RUN_DATE, artifact_name="deepseek-review.json", expected_mode="opencode", code="scheduled_deepseek_provider_not_provider_backed")
+        self.assertIsNone(issue)
+
+    def test_workflow_contracts_still_read_from_repo_root(self) -> None:
+        fake_contract_dir = Path(self.tmp.name) / "projects" / "research-agenda" / "workflow-contracts"
+        fake_contract_dir.mkdir(parents=True)
+        self.assertFalse(str(CONTRACT_DIR).startswith(str(fake_contract_dir.parent)))
+        self.assertTrue((CONTRACT_DIR / "daily-pipeline-contract.md").exists())
 
     def test_audit_fails_when_scheduled_codex_provider_not_provider_backed(self) -> None:
         write_run_artifact(

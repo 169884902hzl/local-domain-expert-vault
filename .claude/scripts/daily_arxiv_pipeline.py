@@ -786,6 +786,9 @@ def append_provider_args(
     provider = provider or "none"
     provider_json = provider_json or ""
 
+    if "--provider" in cmd:
+        raise ValueError("provider_arg_already_present")
+
     if provider_json and provider not in {"json", "none", ""}:
         raise ValueError("provider_json_conflicts_with_explicit_provider")
 
