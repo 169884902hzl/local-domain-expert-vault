@@ -1862,7 +1862,32 @@ def bad(source, recommended):
         self.assertNotIn("--commit-active-seed", text)
 
     def test_registered_action_handles_non_ascii_vault_path(self) -> None:
-        text = self.register_daily_arxiv_dry_run("-ShowLocalPaths")
+        vault_root = Path(self.tmp.name) / "胡至伦 vault"
+        script_dir = vault_root / ".claude" / "scripts"
+        script_dir.mkdir(parents=True)
+        script_path = script_dir / "register_daily_arxiv_task.ps1"
+        shutil.copy2(SCRIPTS_DIR / "register_daily_arxiv_task.ps1", script_path)
+        result = subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(script_path),
+                "-DryRun",
+                "-ShowLocalPaths",
+                "-Time",
+                "12:00",
+            ],
+            cwd=vault_root,
+            capture_output=True,
+            encoding="utf-8",
+            text=True,
+            timeout=30,
+        )
+        text = result.stdout + result.stderr
+        self.assertEqual(result.returncode, 0, text)
         self.assertIn("胡至伦", text)
         self.assertIn('-File "', text)
         self.assertIn("run_daily_arxiv_task.ps1", text)
