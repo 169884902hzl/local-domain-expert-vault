@@ -20,6 +20,8 @@ def _git_files(root: Path) -> list[str]:
 def audit_public_artifact_paths(root: Path) -> list[dict[str, Any]]:
     issues: list[dict[str, Any]] = []
     for rel in _git_files(root):
+        if Path(rel).name == ".gitkeep":
+            continue
         lower = rel.lower()
         if Path(lower).suffix in PUBLIC_FORBIDDEN_SUFFIXES:
             issues.append({"level": "FAIL", "code": "tracked_runtime_private_artifact", "path": rel})

@@ -11,39 +11,155 @@ from kb_common import vault_path
 from research_governance_common import SCHEDULED_FORBIDDEN_STATES, STATES, scheduled_command_errors, transition_errors
 
 
-ALLOWED_GOVERNANCE_WRITERS = {"active_seed_commit.py", "research_governance_common.py"}
+SENSITIVE_WRITE_TARGETS = {
+    "seed": ["idea_bank/seed"],
+    "active_seeds": ["governance/active-seeds", "active-seeds"],
+    "ledger": ["governance/ledger", "governance-ledger.jsonl"],
+    "formal_rehearsal": ["formal-rehearsal", "formal_rehearsal", "formal-rehearsals"],
+}
+WRITE_APIS = {
+    "open",
+    "Path.open",
+    "write_text",
+    "write_bytes",
+    "safe_write_json",
+    "write_json",
+    "append_jsonl",
+    "copy",
+    "copy2",
+    "copytree",
+    "replace",
+    "rename",
+    "mkdir",
+}
 
 
 def _script_files() -> list[Path]:
     return sorted((vault_path(".claude", "scripts")).glob("*.py"))
 
 
-def _has_write_call(tree: ast.AST) -> bool:
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        func = node.func
-        if isinstance(func, ast.Name) and func.id in {"write_json", "append_jsonl", "write_text", "write_run_artifact", "open"}:
-            return True
-        if isinstance(func, ast.Attribute) and func.attr in {"write_text", "rename", "mkdir"}:
-            return True
+def _node_tokens(node: ast.AST) -> list[str]:
+    if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Div, ast.Add)):
+        return [*_node_tokens(node.left), *_node_tokens(node.right)]
+    if isinstance(node, ast.Constant):
+        return [str(node.value)]
+    if isinstance(node, ast.Name):
+        return [node.id]
+    if isinstance(node, ast.Attribute):
+        return [node.attr, *_node_tokens(node.value)]
+    if isinstance(node, ast.Call):
+        tokens: list[str] = []
+        for arg in node.args:
+            tokens.extend(_node_tokens(arg))
+        for keyword in node.keywords:
+            tokens.extend(_node_tokens(keyword.value))
+        if isinstance(node.func, ast.Name):
+            return [f"{node.func.id}()", *tokens]
+        if isinstance(node.func, ast.Attribute):
+            return [node.func.attr, *_node_tokens(node.func.value), *tokens]
+    if isinstance(node, ast.Subscript):
+        return [*_node_tokens(node.value), *_node_tokens(node.slice)]
+    if isinstance(node, ast.JoinedStr):
+        return ["".join(str(part.value) for part in node.values if isinstance(part, ast.Constant))]
+    return []
+
+
+def _call_name(node: ast.Call) -> str:
+    func = node.func
+    if isinstance(func, ast.Name):
+        return func.id
+    if isinstance(func, ast.Attribute):
+        base = ".".join(_node_tokens(func.value))
+        return f"{base}.{func.attr}" if base else func.attr
+    return ""
+
+
+def _target_kinds(expr: ast.AST, variable_targets: dict[str, set[str]]) -> set[str]:
+    tokens = _node_tokens(expr)
+    kinds: set[str] = set()
+    for token in tokens:
+        kinds.update(variable_targets.get(token, set()))
+    normalized = "/".join(token.lower().replace("\\", "/") for token in tokens)
+    for kind, markers in SENSITIVE_WRITE_TARGETS.items():
+        if any(marker in normalized for marker in markers):
+            kinds.add(kind)
+    if "idea_bank" in normalized and "/seed" in normalized:
+        kinds.add("seed")
+    if "active_seed_dir()" in normalized:
+        kinds.add("active_seeds")
+    if "governance_ledger_path()" in normalized:
+        kinds.add("ledger")
+    if "governance" in normalized and "ledger" in normalized:
+        kinds.add("ledger")
+    return kinds
+
+
+def _write_target_exprs(node: ast.Call) -> list[ast.AST]:
+    name = _call_name(node)
+    short = name.split(".")[-1]
+    if short not in {api.split(".")[-1] for api in WRITE_APIS}:
+        return []
+    if short in {"copy", "copy2", "copytree"}:
+        return list(node.args[1:2])
+    if short in {"replace", "rename"} and isinstance(node.func, ast.Attribute):
+        return list(node.args[:1])
+    targets = list(node.args[:1])
+    if short in {"write_text", "write_bytes", "mkdir"} and isinstance(node.func, ast.Attribute):
+        targets.append(node.func.value)
+    return targets
+
+
+def _allowed_write(path: Path, kinds: set[str]) -> bool:
+    if path.name == "active_seed_commit.py":
+        return kinds <= {"active_seeds", "ledger"}
+    if path.name == "formal_rehearsal_packet.py":
+        return kinds <= {"formal_rehearsal"}
+    if path.name == "migrate_v03_to_v10.py":
+        return not (kinds & {"seed", "active_seeds", "ledger", "formal_rehearsal"})
     return False
+
+
+def scan_sensitive_writes(path: Path, text: str) -> list[dict[str, Any]]:
+    issues: list[dict[str, Any]] = []
+    try:
+        tree = ast.parse(text.lstrip("\ufeff"), filename=str(path))
+    except SyntaxError as exc:
+        return [{"level": "FAIL", "code": "state_machine_guard_parse_failed", "path": str(path), "detail": f"{type(exc).__name__}:{exc}"}]
+    variable_targets: dict[str, set[str]] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Assign, ast.AnnAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            value = node.value
+            if value is None:
+                continue
+            kinds = _target_kinds(value, variable_targets)
+            if kinds:
+                for target in targets:
+                    if isinstance(target, ast.Name):
+                        variable_targets.setdefault(target.id, set()).update(kinds)
+        if isinstance(node, ast.Call):
+            kinds: set[str] = set()
+            for expr in _write_target_exprs(node):
+                kinds.update(_target_kinds(expr, variable_targets))
+            if kinds and not _allowed_write(path, kinds):
+                issues.append(
+                    {
+                        "level": "FAIL",
+                        "code": "sensitive_governance_writer",
+                        "path": str(path),
+                        "line": getattr(node, "lineno", 0),
+                        "targets": sorted(kinds),
+                        "call": _call_name(node),
+                    }
+                )
+    return issues
 
 
 def audit_direct_governance_writers() -> list[dict[str, Any]]:
     issues: list[dict[str, Any]] = []
     for path in _script_files():
         text = path.read_text(encoding="utf-8")
-        mentions_target = any(token in text.replace("\\", "/") for token in ["governance/active-seeds", "governance-ledger.jsonl"])
-        mentions_parts = any(token in text for token in ['"active-seeds"', "'active-seeds'", '"governance-ledger.jsonl"', "'governance-ledger.jsonl'"])
-        if not (mentions_target or mentions_parts):
-            continue
-        try:
-            writes = _has_write_call(ast.parse(text))
-        except SyntaxError:
-            writes = True
-        if writes and path.name not in ALLOWED_GOVERNANCE_WRITERS:
-            issues.append({"level": "FAIL", "code": "direct_governance_writer_outside_active_seed_commit", "path": str(path)})
+        issues.extend(scan_sensitive_writes(path, text))
     return issues
 
 

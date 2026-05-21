@@ -30,7 +30,14 @@ function Assert-NoGovernanceMutationArgs {
     "--target-policy " + "formal",
     "--v2-publish-policy " + "formal",
     "--allow-formal" + "-seed-publish",
+    "--allow-human" + "-override",
     "--commit-active" + "-seed",
+    "formal_rehearsal" + "_packet.py",
+    "governance" + "_review.py",
+    "active_seed" + "_commit.py",
+    "strategy" + "_ledger.py",
+    "--apply" + "-strategy",
+    "--active-seed" + "-id",
     "--human" + "-confirmed",
     "--governance" + "-signature"
   )
@@ -200,11 +207,19 @@ try {
   & $Python @(
     ".claude/scripts/audit_daily_automation_quality.py",
     "--run-date",
-    $RunDate
+    $RunDate,
+    "--scheduled-deepseek-provider",
+    $DeepSeekProvider,
+    "--scheduled-codex-execution-provider",
+    $CodexExecutionProvider
   ) 2>&1 |
     ForEach-Object { $_ | Out-File -FilePath $LogPath -Append -Encoding utf8 }
   $QualityExitCode = $LASTEXITCODE
   Write-TaskLog "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss zzz")] QUALITY_AUDIT end exit_code=$QualityExitCode"
+  if ($QualityExitCode -ne 0) {
+    Write-TaskLog "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss zzz")] QUALITY_AUDIT_FAILED exit_code=$QualityExitCode"
+    $ExitCode = $QualityExitCode
+  }
   $FinishedAt = Get-Date -Format "yyyy-MM-dd HH:mm:ss zzz"
   Write-TaskLog "[$FinishedAt] END exit_code=$ExitCode"
   exit $ExitCode

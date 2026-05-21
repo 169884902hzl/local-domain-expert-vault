@@ -775,30 +775,58 @@ def _v2_stage(
     return True
 
 
+def append_provider_args(
+    cmd: list[str],
+    *,
+    provider: str,
+    provider_json: str = "",
+    model: str = "",
+    timeout: int | None = None,
+) -> None:
+    provider = provider or "none"
+    provider_json = provider_json or ""
+
+    if provider_json and provider not in {"json", "none", ""}:
+        raise ValueError("provider_json_conflicts_with_explicit_provider")
+
+    if provider_json:
+        cmd.extend(["--provider", "json", "--provider-review-json", provider_json])
+        return
+
+    if provider in {"opencode", "codex-cli"}:
+        cmd.extend(["--provider", provider])
+        if provider == "opencode" and model:
+            cmd.extend(["--model", model])
+        if timeout is not None:
+            cmd.extend(["--timeout", str(timeout)])
+        return
+
+    if provider in {"json", "none", ""}:
+        cmd.extend(["--provider", provider if provider else "none"])
+        return
+
+    raise ValueError(f"unsupported_provider:{provider}")
+
+
 def build_v2_review_stages(args: argparse.Namespace, run_date: str) -> list[tuple[str, list[str], int]]:
     scheduled_policy = "seed-candidates-only" if resolve_v2_publish_policy(args) != "disabled" else "disabled"
     deepseek_cmd = [sys.executable, ".claude/scripts/deepseek_scientific_review.py", "--run-date", run_date]
-    deepseek_provider = getattr(args, "deepseek_provider", "none")
-    if deepseek_provider == "opencode":
-        deepseek_cmd.extend(["--provider", "opencode", "--model", args.deepseek_model, "--timeout", str(args.deepseek_timeout)])
-    elif deepseek_provider == "json":
-        deepseek_cmd.extend(["--provider", "json"])
-        if getattr(args, "deepseek_provider_json", ""):
-            deepseek_cmd.extend(["--provider-review-json", args.deepseek_provider_json])
-    else:
-        deepseek_cmd.extend(["--provider", "none"])
+    append_provider_args(
+        deepseek_cmd,
+        provider=getattr(args, "deepseek_provider", "none"),
+        provider_json=getattr(args, "deepseek_provider_json", ""),
+        model=getattr(args, "deepseek_model", ""),
+        timeout=getattr(args, "deepseek_timeout", None),
+    )
 
     codex_timeout = 1200
     codex_cmd = [sys.executable, ".claude/scripts/codex_seed_review.py", "execution-review", "--run-date", run_date]
-    codex_provider = getattr(args, "codex_execution_provider", "none")
-    if codex_provider == "codex-cli":
-        codex_cmd.extend(["--provider", "codex-cli", "--timeout", str(codex_timeout)])
-    elif codex_provider == "json":
-        codex_cmd.extend(["--provider", "json"])
-        if getattr(args, "codex_execution_provider_json", ""):
-            codex_cmd.extend(["--provider-review-json", args.codex_execution_provider_json])
-    else:
-        codex_cmd.extend(["--provider", "none"])
+    append_provider_args(
+        codex_cmd,
+        provider=getattr(args, "codex_execution_provider", "none"),
+        provider_json=getattr(args, "codex_execution_provider_json", ""),
+        timeout=codex_timeout,
+    )
 
     novelty_cmd = [
         sys.executable,
@@ -981,7 +1009,15 @@ def run_research_seed_v2(
     if not _v2_stage("raw_candidates", ideate_args, timeout=max(900, args.idea_timeout + 300), result=result, errors=errors):
         return result
 
-    for stage, command, timeout in build_v2_review_stages(args, run_date):
+    try:
+        review_stages = build_v2_review_stages(args, run_date)
+    except ValueError as exc:
+        errors.append(f"research_seed_v2_provider_command_error:{exc}")
+        result["status"] = "partial"
+        result["boundary"] = f"Provider command construction failed closed: {exc}"
+        return result
+
+    for stage, command, timeout in review_stages:
         if not _v2_stage(stage, command, timeout=timeout, result=result, errors=errors):
             return result
 
@@ -1011,10 +1047,6 @@ def run_research_seed_v2(
         "--target-policy",
         v2_publish_policy,
     ]
-    if formal_seed_publish_allowed:
-        publish_args.append("--allow-formal-seed-publish")
-    if getattr(args, "allow_test_provider_for_formal", False):
-        publish_args.append("--allow-test-provider-for-formal")
     publish_stage = "publish_disabled" if v2_publish_policy == "disabled" else f"publish_{v2_publish_policy}"
     if not _v2_stage(publish_stage, publish_args, timeout=300, result=result, errors=errors):
         return result
@@ -2515,16 +2547,6 @@ def main() -> int:
         choices=["disabled", "seed-candidates-only"],
         default=DEFAULT_V2_PUBLISH_POLICY,
         help="V2 rollout publish policy for scheduled/daily runs. Formal production seed publish is disabled in v1.",
-    )
-    parser.add_argument(
-        "--allow-formal-seed-publish",
-        action="store_true",
-        help="Required with --v2-publish-policy formal; scheduled daily wrappers must not set this by default.",
-    )
-    parser.add_argument(
-        "--allow-test-provider-for-formal",
-        action="store_true",
-        help="Manual-only test override for formal mode with json providers. Scheduled daily wrappers must not set this.",
     )
     parser.add_argument(
         "--allow-human-override",

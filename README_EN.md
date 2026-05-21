@@ -21,6 +21,8 @@ It is built for graduate students, PI/lab knowledge-base maintainers, and resear
 
 Current public version: `v1.0.0`. `v0.1.0` was the first releasable local-first vault; `v0.2.x` added the research-seed v2 state machine and external-screening hardening; `v0.3.x` added supervised research-validity hardening. `v1.0.0` redesigns the active seed path as a human-governed Research Governance Workbench commitment, not a publish side effect.
 
+The v1 release-ready claim depends on this hotfix: provider command construction is covered by a single-`--provider` builder and tests; scheduled quality-audit failure fails the scheduled task; active commit requires hash-linked provider review and novelty screen artifacts; the legacy `publish_research_run.py` formal writer surface is disabled. v0.3.x survival decision / formal publish wording is historical context, not v1 active truth.
+
 ## v1.0: Research Governance Workbench
 
 The v1.0 source of truth moves out of the legacy `idea_bank/seed/` publish path and into the governance layout under `projects/research-agenda/`:
@@ -119,11 +121,11 @@ Important boundaries:
 
 - `research_agenda_ideate.py` generates raw candidates only.
 - `research_agenda_update.py` does not write formal seeds.
-- `publish_research_run.py` is the only script allowed to write `projects/research-agenda/idea_bank/seed/`.
+- v1 disables the legacy `publish_research_run.py` formal writer surface; `projects/research-agenda/idea_bank/seed/` is not written by scheduled automation or the legacy publish script.
 - `quality_tier`, `sharpness_score`, `evidence_execution_score`, and `ordinaryness_penalty` are potential/display fields only, not promotion gates.
 - Formal seed publish is disabled by default.
 - `seed-candidates-only` is the default rollout policy.
-- Formal seed publish requires both `--v2-publish-policy formal` and `--allow-formal-seed-publish`, plus all hard gates passing.
+- v0.2/v0.3 formal publish flags are historical context. In v1, active seed commitment goes through human governance artifacts, not a legacy publish flag path.
 - No seed today is a normal outcome; an unreviewed seed written to the formal seed folder is a failure.
 - Scheduled daily automation should not be described as automatically publishing formal seeds.
 
@@ -178,7 +180,7 @@ v0.3.0 is not scheduled formal publish enablement, and it is not a doctoral-leve
 State semantics are now explicit:
 
 - `formal_rehearsal_candidate` may only write under `projects/research-agenda/seed-candidates/formal-rehearsal/`; it never writes `projects/research-agenda/idea_bank/seed/`.
-- `active_seed` may write through the manual `--v2-publish-policy formal` path only when `active_seed_allowed=true`.
+- The v0.3.x `active_seed_allowed` / manual formal publish path is historical. In v1, active seed commitment is governed only by human governance artifacts and `active_seed_commit.py`, not by a `publish_research_run.py` formal side effect.
 - `pilot_ready` is not the same as active seed; it additionally requires an executable pilot plan, metric automation, baseline implementation path, and resource budget.
 
 Research-validity boundaries:

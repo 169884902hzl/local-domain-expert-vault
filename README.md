@@ -19,6 +19,8 @@
 
 当前公开版本：`v1.0.0`。`v0.1.0` 是首个可发行 local-first vault 版本；`v0.2.x` 加入 research-seed v2 状态机和 external screening hardening；`v0.3.x` 加入 supervised research-validity hardening。`v1.0.0` 把 active seed 从 publish side effect 重构为人工治理的 Research Governance Workbench 承诺。
 
+v1 release-ready 依赖本轮 hardening：provider command construction 现在有单 `--provider` builder 和测试；scheduled quality audit 非 0 会让任务失败；active commit 必须 hash-link 独立的 provider review packet 与 novelty screen；legacy `publish_research_run.py` formal writer surface 已禁用。v0.3.x 的 survival decision / formal publish 说明只保留为 historical context，不是 v1 active truth。
+
 ## v1.0: Research Governance Workbench
 
 v1.0 的核心变化是 source-of-truth 从 legacy `idea_bank/seed/` 发布路径迁移到 `projects/research-agenda/` 的治理布局：
@@ -103,11 +105,11 @@ Zotero/arXiv
 
 - `research_agenda_ideate.py` 只生成 raw candidates。
 - `research_agenda_update.py` 不写 formal seeds。
-- `publish_research_run.py` 是唯一允许写入 `projects/research-agenda/idea_bank/seed/` 的脚本。
+- v1 禁用 legacy `publish_research_run.py` formal writer surface；`projects/research-agenda/idea_bank/seed/` 不再由 scheduled 或 legacy publish 写入。
 - `quality_tier`、`sharpness_score`、`evidence_execution_score` 和 `ordinaryness_penalty` 只是 potential / display 字段，不是 promotion gates。
 - formal seed publish 默认关闭。
 - 默认 v2 publish policy 是 `seed-candidates-only`，通过的候选先进入 `seed-candidates/`，而不是直接进入 formal seed。
-- formal seed publish 必须同时满足 `--v2-publish-policy formal`、`--allow-formal-seed-publish` 和全部 hard gates。
+- formal seed publish 的 v0.2/v0.3 flag 说明已经是 historical context；v1 只允许通过人工治理 artifact 提交 active seed。
 - 没有 seed 是正常结果；未经审查就写 seed 才是失败。
 - scheduled daily 不应被理解为自动发布 formal seeds。
 
@@ -162,7 +164,7 @@ v0.3.0 不是 scheduled formal publish enablement，也不是 doctoral-level ide
 状态语义被拆开：
 
 - `formal_rehearsal_candidate` 只能写 `projects/research-agenda/seed-candidates/formal-rehearsal/`，不写 `projects/research-agenda/idea_bank/seed/`。
-- `active_seed` 只有在 `active_seed_allowed=true` 时，才允许手动 `--v2-publish-policy formal` 路径写 formal seed。
+- `active_seed` 的 v0.3.x `active_seed_allowed` / manual formal publish 语义是历史设计；v1 active seed 只能通过 human governance artifacts 与 `active_seed_commit.py`，不是 `publish_research_run.py` 的 formal side effect。
 - `pilot_ready` 不等同于 active seed；它还需要可执行 pilot plan、metric automation、baseline implementation path 和 resource budget。
 
 新的有效性边界：

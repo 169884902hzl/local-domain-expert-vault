@@ -20,7 +20,7 @@ if str(SCRIPTS_DIR) not in sys.path:
 from candidate_portfolio_select import select_portfolio
 from codex_seed_review import execution_review
 from arxiv_ranker import ArxivPaper, RankedPaper
-from daily_arxiv_pipeline import _filter_import_candidates_by_v2_triage, build_v2_review_stages, resolve_v2_publish_policy, run_research_seed_v2
+from daily_arxiv_pipeline import _filter_import_candidates_by_v2_triage, append_provider_args, build_v2_review_stages, resolve_v2_publish_policy, run_research_seed_v2
 from deepseek_scientific_review import build_payload as build_deepseek_payload
 from paper_intake_triage import build_triage
 from publish_research_run import publish
@@ -44,7 +44,7 @@ from survival_decision import decide
 from tension_map import build_tensions, validate_tensions
 from validate_research_run import validate_run
 from weekly_strategy_review import sanitize_overrides
-from audit_daily_automation_quality import _audit_v2_state_machine, _scan_text_for_seed_writer
+from audit_daily_automation_quality import _audit_v2_state_machine, _moved_to_v2_missing_artifact_issues, _provider_backed_artifact_issue, _scan_text_for_seed_writer
 import research_agenda_review as agenda_review
 import novelty_baseline_scan as novelty_scan
 import candidate_portfolio_select as portfolio_select
@@ -1245,7 +1245,7 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
         self.assertIn("formal_novelty_arxiv_only_scope_not_broad_prior_art", survival["decisions"][0]["blocks"])
         self.assertIn("formal_novelty_requires_openalex_or_semantic_scholar", survival["decisions"][0]["blocks"])
         write_run_artifact(RUN_DATE, "survival-decision.json", survival, state="survival_decided")
-        result = publish(RUN_DATE, dry_run=False, target_policy="formal", allow_formal_seed_publish=True)
+        result = publish(RUN_DATE, dry_run=False, target_policy="formal")
         self.assert_legacy_formal_publish_disabled(result)
 
     def test_strict_publish_rejects_missing_external_broad_provider(self) -> None:
@@ -1398,7 +1398,7 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
         )
         survival = decide(run_date=RUN_DATE, allow_human_override=False, target_policy="formal")
         write_run_artifact(RUN_DATE, "survival-decision.json", survival, state="survival_decided")
-        result = publish(RUN_DATE, dry_run=False, target_policy="formal", allow_formal_seed_publish=True)
+        result = publish(RUN_DATE, dry_run=False, target_policy="formal")
         self.assert_legacy_formal_publish_disabled(result)
 
     def test_openalex_partial_overlap_with_remaining_delta_can_pass_novelty_gate(self) -> None:
@@ -1631,7 +1631,7 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
         self.write_review_artifacts(verification_scope="local_plus_s2_or_openalex")
         survival = decide(run_date=RUN_DATE, allow_human_override=False, target_policy="formal")
         write_run_artifact(RUN_DATE, "survival-decision.json", survival, state="survival_decided")
-        result = publish(RUN_DATE, dry_run=False, target_policy="formal", allow_formal_seed_publish=True)
+        result = publish(RUN_DATE, dry_run=False, target_policy="formal")
         self.assert_legacy_formal_publish_disabled(result)
 
     def test_formal_provider_json_manual_override_records_risk(self) -> None:
@@ -1639,13 +1639,7 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
         self.write_active_seed_support()
         survival = decide(run_date=RUN_DATE, allow_human_override=False, target_policy="formal")
         write_run_artifact(RUN_DATE, "survival-decision.json", survival, state="survival_decided")
-        result = publish(
-            RUN_DATE,
-            dry_run=False,
-            target_policy="formal",
-            allow_formal_seed_publish=True,
-            allow_test_provider_for_formal=True,
-        )
+        result = publish(RUN_DATE, dry_run=False, target_policy="formal")
         self.assert_legacy_formal_publish_disabled(result)
 
     def test_formal_publish_with_allow_still_requires_existing_gates(self) -> None:
@@ -1658,7 +1652,7 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
         self.write_active_seed_support()
         survival = decide(run_date=RUN_DATE, allow_human_override=False, target_policy="formal")
         write_run_artifact(RUN_DATE, "survival-decision.json", survival, state="survival_decided")
-        result = publish(RUN_DATE, dry_run=False, target_policy="formal", allow_formal_seed_publish=True)
+        result = publish(RUN_DATE, dry_run=False, target_policy="formal")
         self.assert_legacy_formal_publish_disabled(result)
 
     def test_backfill_cannot_formal_publish(self) -> None:
@@ -1668,7 +1662,7 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
         self.write_review_artifacts()
         survival = decide(run_date=RUN_DATE, allow_human_override=False)
         write_run_artifact(RUN_DATE, "survival-decision.json", survival, state="survival_decided")
-        result = publish(RUN_DATE, dry_run=False, target_policy="formal", allow_formal_seed_publish=True)
+        result = publish(RUN_DATE, dry_run=False, target_policy="formal")
         self.assert_legacy_formal_publish_disabled(result)
 
     def test_publish_actual_staged_rename_writes_required_artifacts(self) -> None:
@@ -1680,7 +1674,7 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
         self.write_active_seed_support()
         survival = decide(run_date=RUN_DATE, allow_human_override=False, target_policy="formal")
         write_run_artifact(RUN_DATE, "survival-decision.json", survival, state="survival_decided")
-        result = publish(RUN_DATE, dry_run=False, target_policy="formal", allow_formal_seed_publish=True)
+        result = publish(RUN_DATE, dry_run=False, target_policy="formal")
         self.assert_legacy_formal_publish_disabled(result)
         manifest = json.loads((run_dir(RUN_DATE) / "manifest.json").read_text(encoding="utf-8"))
         self.assertFalse(manifest.get("formal_seed_written", False))
@@ -1698,7 +1692,7 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
         seed_dir.mkdir(parents=True, exist_ok=True)
         marker = seed_dir / "idea.md"
         marker.write_text("existing", encoding="utf-8")
-        result = publish(RUN_DATE, dry_run=False, target_policy="formal", allow_formal_seed_publish=True)
+        result = publish(RUN_DATE, dry_run=False, target_policy="formal")
         self.assertEqual(result["status"], LEGACY_FORMAL_DISABLED_STATUS)
         self.assertEqual(result["published"], [])
         self.assertEqual(marker.read_text(encoding="utf-8"), "existing")
@@ -1717,7 +1711,7 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
         lock = Path(self.tmp.name) / "idea_bank" / "seed" / "anchored-contact-failure-benchmark.publish.lock"
         lock.parent.mkdir(parents=True, exist_ok=True)
         lock.write_text("held", encoding="utf-8")
-        result = publish(RUN_DATE, dry_run=False, target_policy="formal", allow_formal_seed_publish=True)
+        result = publish(RUN_DATE, dry_run=False, target_policy="formal")
         self.assertEqual(result["status"], LEGACY_FORMAL_DISABLED_STATUS)
         self.assertEqual(result["published"], [])
         self.assertEqual(list((Path(self.tmp.name) / "idea_bank" / "seed").glob("anchored-contact-failure-benchmark")), [])
@@ -1731,8 +1725,7 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
         self.write_active_seed_support()
         survival = decide(run_date=RUN_DATE, allow_human_override=False, target_policy="formal")
         write_run_artifact(RUN_DATE, "survival-decision.json", survival, state="survival_decided")
-        with patch("publish_research_run.FORMAL_SEED_REQUIRED_FILES", ["idea.md", "missing-required.txt"]):
-            result = publish(RUN_DATE, dry_run=False, target_policy="formal", allow_formal_seed_publish=True)
+        result = publish(RUN_DATE, dry_run=False, target_policy="formal")
         self.assertEqual(result["status"], LEGACY_FORMAL_DISABLED_STATUS)
         self.assertEqual(result["published"], [])
         quarantine = Path(self.tmp.name) / "quarantine"
@@ -1947,6 +1940,136 @@ def bad(source, recommended):
         self.assertIn("seed-candidates-only", by_name["novelty_scan"])
         self.assertIn("--target-policy", by_name["survival_decision"])
         self.assertIn("--allow-human-override", by_name["survival_decision"])
+
+    def test_pipeline_provider_args_single_provider_deepseek(self) -> None:
+        cmd = ["python", "deepseek_scientific_review.py"]
+        append_provider_args(cmd, provider="opencode", model="deepseek/test-model", timeout=123)
+        self.assertEqual(cmd.count("--provider"), 1)
+        self.assertIn("opencode", cmd)
+        self.assertNotIn("none", cmd)
+        self.assertIn("--model", cmd)
+        self.assertIn("--timeout", cmd)
+
+    def test_pipeline_provider_args_single_provider_codex(self) -> None:
+        cmd = ["python", "codex_seed_review.py"]
+        append_provider_args(cmd, provider="codex-cli", timeout=1200)
+        self.assertEqual(cmd.count("--provider"), 1)
+        self.assertIn("codex-cli", cmd)
+        self.assertNotIn("none", cmd)
+
+    def test_pipeline_provider_json_and_explicit_provider_conflict(self) -> None:
+        cmd = ["python", "deepseek_scientific_review.py"]
+        with self.assertRaisesRegex(ValueError, "provider_json_conflicts_with_explicit_provider"):
+            append_provider_args(cmd, provider="opencode", provider_json="provider.json")
+
+    def test_pipeline_provider_json_uses_single_json_provider(self) -> None:
+        cmd = ["python", "deepseek_scientific_review.py"]
+        append_provider_args(cmd, provider="none", provider_json="provider.json")
+        self.assertEqual(cmd.count("--provider"), 1)
+        self.assertIn("json", cmd)
+        self.assertIn("--provider-review-json", cmd)
+
+    def test_wrapper_quality_audit_failure_fails_scheduled_task(self) -> None:
+        text = (SCRIPTS_DIR / "run_daily_arxiv_task.ps1").read_text(encoding="utf-8")
+        self.assertIn("if ($QualityExitCode -ne 0)", text)
+        self.assertIn("$ExitCode = $QualityExitCode", text)
+        self.assertIn("exit $ExitCode", text)
+
+    def test_scheduled_wrapper_forbids_human_override_and_governance_mutation_args(self) -> None:
+        text = (SCRIPTS_DIR / "run_daily_arxiv_task.ps1").read_text(encoding="utf-8")
+        for token in [
+            '"--allow-human" + "-override"',
+            '"formal_rehearsal" + "_packet.py"',
+            '"governance" + "_review.py"',
+            '"active_seed" + "_commit.py"',
+            '"strategy" + "_ledger.py"',
+            '"--apply" + "-strategy"',
+            '"--active-seed" + "-id"',
+        ]:
+            self.assertIn(token, text)
+
+    def test_moved_to_v2_state_machine_only_suppresses_old_battle(self) -> None:
+        issues = _moved_to_v2_missing_artifact_issues(RUN_DATE, mandatory_battle_status="moved_to_v2_state_machine", v2_deepseek_ok=True)
+        codes = {issue["code"] for issue in issues}
+        self.assertNotIn("mandatory_model_battle_not_success", codes)
+        self.assertIn("v2_missing_codex_execution_review", codes)
+
+    def test_moved_to_v2_does_not_suppress_missing_codex(self) -> None:
+        issues = _moved_to_v2_missing_artifact_issues(RUN_DATE, mandatory_battle_status="moved_to_v2_state_machine", v2_deepseek_ok=True)
+        self.assertTrue(any(issue["code"] == "v2_missing_codex_execution_review" for issue in issues))
+
+    def test_moved_to_v2_does_not_suppress_missing_novelty_survival_publish(self) -> None:
+        issues = _moved_to_v2_missing_artifact_issues(RUN_DATE, mandatory_battle_status="moved_to_v2_state_machine", v2_deepseek_ok=True)
+        codes = {issue["code"] for issue in issues}
+        self.assertIn("v2_missing_novelty_scan", codes)
+        self.assertIn("v2_missing_survival_decision", codes)
+        self.assertIn("v2_missing_publish_result", codes)
+
+    def test_audit_fails_when_scheduled_deepseek_provider_not_provider_backed(self) -> None:
+        write_run_artifact(
+            RUN_DATE,
+            "deepseek-review.json",
+            {"schema_version": "deepseek_review.v1", "run_date": RUN_DATE, "status": "partial_provider_unavailable", "provider_status": {"provider": "deepseek", "provider_backed": False, "mode": "opencode"}, "reviews": [], "artifact_hashes": {}},
+            state="attacked_by_deepseek",
+        )
+        issue = _provider_backed_artifact_issue(run_date=RUN_DATE, artifact_name="deepseek-review.json", expected_mode="opencode", code="scheduled_deepseek_provider_not_provider_backed")
+        self.assertIsNotNone(issue)
+        self.assertEqual(issue["level"], "FAIL")
+
+    def test_audit_fails_when_scheduled_codex_provider_not_provider_backed(self) -> None:
+        write_run_artifact(
+            RUN_DATE,
+            "codex-execution-review.json",
+            {"schema_version": "codex_execution_review.v1", "run_date": RUN_DATE, "status": "partial_provider_unavailable", "provider_status": {"provider": "codex", "provider_backed": False, "mode": "codex-cli"}, "reviews": [], "artifact_hashes": {}},
+            state="execution_reviewed",
+        )
+        issue = _provider_backed_artifact_issue(run_date=RUN_DATE, artifact_name="codex-execution-review.json", expected_mode="codex-cli", code="scheduled_codex_provider_not_provider_backed")
+        self.assertIsNotNone(issue)
+        self.assertEqual(issue["level"], "FAIL")
+
+    def test_survival_decision_not_called_only_promotion_brain(self) -> None:
+        self.write_review_artifacts()
+        payload = decide(run_date=RUN_DATE, allow_human_override=False)
+        self.assertNotIn("only promotion brain", payload["boundary"])
+        self.assertIn("Legacy v2 triage decision only", payload["boundary"])
+
+    def test_survival_active_fields_are_legacy_or_hard_false(self) -> None:
+        self.write_review_artifacts()
+        payload = decide(run_date=RUN_DATE, allow_human_override=False)
+        decision = payload["decisions"][0]
+        self.assertFalse(decision["active_seed_allowed"])
+        self.assertFalse(decision["legacy_active_seed_allowed"])
+        self.assertTrue(decision["requires_human_governance"])
+
+    def test_publish_formal_parser_rejects_or_disabled_before_writes(self) -> None:
+        result = subprocess.run(
+            [sys.executable, str(SCRIPTS_DIR / "publish_research_run.py"), "--run-date", RUN_DATE, "--target-policy", "formal", "--dry-run"],
+            cwd=REPO_ROOT,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+            timeout=30,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((Path(self.tmp.name) / "runs" / RUN_DATE / "publish" / "publish-result.json").exists())
+
+    def test_no_idea_bank_seed_mutation_except_migration_tool(self) -> None:
+        publish_text = (SCRIPTS_DIR / "publish_research_run.py").read_text(encoding="utf-8")
+        migrate_text = (SCRIPTS_DIR / "migrate_v03_to_v10.py").read_text(encoding="utf-8")
+        self.assertNotIn("idea_bank/seed", publish_text)
+        self.assertIn("idea_bank/seed", migrate_text)
+
+    def test_publish_research_run_no_longer_writes_idea_bank_seed(self) -> None:
+        publish_text = (SCRIPTS_DIR / "publish_research_run.py").read_text(encoding="utf-8")
+        self.assertNotIn("_write_seed_stage", publish_text)
+        self.assertNotIn("publish.lock", publish_text)
+        self.assertNotIn("--allow-formal-seed-publish", publish_text)
+
+    def test_migrate_v03_to_v10_is_only_legacy_marker_writer(self) -> None:
+        publish_text = (SCRIPTS_DIR / "publish_research_run.py").read_text(encoding="utf-8")
+        self.assertNotIn("migrate_legacy_status", publish_text)
+        self.assertTrue((SCRIPTS_DIR / "migrate_v03_to_v10.py").exists())
 
 
 if __name__ == "__main__":

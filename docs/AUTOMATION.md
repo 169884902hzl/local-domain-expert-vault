@@ -6,6 +6,8 @@
 
 v1.0 把 research agenda 从 legacy formal publish 路径升级为 Research Governance Workbench。自动化可以生成 intake、candidate drafts、evidence drafts、novelty screening、provider-backed critiques、queues 和 derived dashboards，但这些都不是 active seed。
 
+本轮 v1 release-blocking hotfix 后，scheduled provider review command 由单一 builder 生成并测试，保证 DeepSeek/Codex 命令最多一个 `--provider`；scheduled quality audit 失败会让 scheduled task 非 0 退出；active commit 必须引用并 hash-link 独立的 provider review packet 和 novelty screen；legacy `publish_research_run.py` formal writer surface 已禁用。provider-backed scheduled candidate review 通过 dry-run / command-builder tests 只说明命令构造和 artifact provenance gate 可审计，不等同 peer review 或 novelty proof。
+
 禁止边界：
 
 - Scheduled automation must never create formal rehearsal packets, complete human confirmations, write active seeds, write governance ledger events, kill active seeds, or resurrect active seeds.
@@ -320,11 +322,11 @@ v2 相关 CLI flags：
 | `--codex-execution-provider` | `json`, `codex-cli`, `none` | Codex execution review 的 provider；正式 v2 gate 需要 provider-backed review。 |
 | `--codex-execution-provider-json PATH` | path | 读取已有 `codex_execution_review.v1` JSON，适合复现或 CI fixture。 |
 | `--v2-publish-policy` | `disabled`, `seed-candidates-only`, `formal` | v2 rollout publish policy；默认是 `seed-candidates-only`。 |
-| `--allow-formal-seed-publish` | flag | formal seed publish 的第二道显式确认。仅设置 `--v2-publish-policy formal` 不够。 |
+| `--allow-formal-seed-publish` | historical | v0.2/v0.3 时代的 formal publish 确认；v1 legacy publish script 不再接受此 flag。 |
 | `--target-deep-read` | integer | v2 daily deep-read target；默认 3。 |
 | `--max-deep-read` | integer | v2 daily deep-read hard cap；默认 4。 |
 | `--legacy-import-fill` | flag | 手动恢复旧的 import fill 行为。默认关闭，所以 `min_new_imports=10` 不会强制 v2 import/read 10 篇。 |
-| `--allow-test-provider-for-formal` | flag | 仅限手动测试。允许 formal mode 使用 JSON provider fixture，并记录 test-provider risk；scheduled wrappers 不得设置。 |
+| `--allow-test-provider-for-formal` | historical | v0.2/v0.3 时代的 formal test-provider override；v1 legacy publish script 不再接受此 flag。 |
 
 Scheduled daily wrapper 另有 PowerShell 参数：
 
@@ -335,12 +337,12 @@ Scheduled daily wrapper 另有 PowerShell 参数：
 
 默认 scheduled wrapper 不传 provider 参数，因此 provider-backed DeepSeek/Codex gates 不会被误报为完成。没有 provider 参数时，v2 fail-closed / `partial` 是预期安全行为，不是 silent success。
 
-默认 publish policy 是 `seed-candidates-only`：通过 pre-publish gates 的候选写入 `projects/research-agenda/seed-candidates/`，不会写入 `projects/research-agenda/idea_bank/seed/`。formal seed publish 默认关闭，必须同时满足：
+默认 publish policy 是 `seed-candidates-only`：通过 pre-publish gates 的候选写入 `projects/research-agenda/seed-candidates/`，不会写入 `projects/research-agenda/idea_bank/seed/`。以下 formal publish 条件是 v0.2/v0.3 historical context，v1 中 legacy publish script 已禁用 formal writer surface：
 
-- `--v2-publish-policy formal`
-- `--allow-formal-seed-publish`
+- `--v2-publish-policy formal`（historical）
+- `--allow-formal-seed-publish`（historical）
 - novelty verification scope 必须包含 broad external provider：`external_providers_used` 至少有 `openalex` 或 `semantic_scholar`；`local_plus_arxiv_api` 只允许进入 `seed-candidates/` 或 `parked/`
-- DeepSeek provider mode 是 `opencode`，Codex execution provider mode 是 `codex-cli`，除非显式手动设置 `--allow-test-provider-for-formal`
+- DeepSeek provider mode 是 `opencode`，Codex execution provider mode 是 `codex-cli`；test-provider override 只作为 historical context 保留
 - DeepSeek scientific review、novelty/baseline scan、Codex execution review、survival decision、artifact hash 等 hard gates 全部通过
 
 v0.2.1 里，`paper_intake_triage.py` 会输出 `selected_for_deep_read`，daily pipeline 用这些 stable `arxiv_id` 同时控制 Zotero import attempts 和 Claudian deep-read attempts。默认 target 是 3 篇，hard cap 是 4 篇；除非显式启用 `--legacy-import-fill`，旧的 `min_new_imports=10` 不再把 v2 import/read 数量拉回 10。
@@ -355,7 +357,7 @@ v0.3.0 是 supervised research-validity hardening，不是 scheduled formal publ
 
 - `seed-candidates-only`：manual review、baseline table、pilot plan 都是 optional risk；不会写 formal seed。
 - `formal_rehearsal_candidate`：需要 completed manual prior-art review 和 baseline table；只写 `projects/research-agenda/seed-candidates/formal-rehearsal/`，不写 `idea_bank/seed/`。
-- `active_seed`：需要 human `allow_active_seed`、known strongest baseline、fresh broad novelty、anchored core evidence、DeepSeek survive、Codex accept 和 minimal pilot plan；只有 `active_seed_allowed=true` 时，手动 `--v2-publish-policy formal` 才能写 `idea_bank/seed/`。
+- `active_seed`：这里描述的是 v0.3.x historical semantics。v1 中 `active_seed_allowed` 不再是 active truth；active seed 只能由 human governance artifacts、hash-linked provider review / novelty screen、manual prior-art dossier 和 `active_seed_commit.py` 提交，legacy publish script 不能写 `idea_bank/seed/`。
 - `pilot_ready`：在 active seed 基础上还需要 executable pilot plan、metric automation、baseline implementation path 和 resource budget。
 
 OpenAlex / Semantic Scholar / arXiv 仍只是 external probes，不是完整人工 prior-art review；pilot feedback 只用于 strategy calibration，不是 publication proof。`note_section` anchor 不等价于 PDF/table verified evidence；`result_row` 需要 page/table/row/metric/baseline/reported value 等字段。Manual artifact 不能绕过 DeepSeek fatal flaw、Codex reject/rewrite、external novelty failure、stale cache、anchorless evidence、speculative tension 或 missing survival decision。
@@ -366,7 +368,7 @@ v0.3.1 active seed 额外要求 manual prior-art QA checklist、query log、nega
 
 Formal rehearsal 仍不等于 active seed；active seed 仍不是 publication proof；pilot feedback 只做 strategy calibration，不能 auto-promote、删除 seed、修改 `raw/` 或放宽 hard gates。Scheduled formal publish 仍禁用，scheduled wrapper 不得包含 formal/active publish flags。
 
-Formal provider provenance 也更严格：`provider=json` 可以继续用于 seed-candidates-only fixture 和 CI，但 formal mode 默认拒绝它。只有手动传入 `--allow-test-provider-for-formal` 才能继续测试 formal path，并且 manifest / publish result / audit 会记录 `test_provider_used_for_formal=true` 和 `formal_publish_risk=test_provider_not_production_provenance`。
+Formal provider provenance 的 v0.3.x 说明只作为历史背景保留。v1 不再通过 legacy publish script 测试 formal path；scheduled formal/active publish 仍禁止，`provider=json` 只能作为 fixture / replay 输入，不能证明 active readiness。
 
 backfill 运行的默认操作策略应是 `ingest-only`：只补齐 intake / reading / metadata，不生成 formal seed。做 backfill 时请显式传入：
 
@@ -388,7 +390,7 @@ Provider-backed 要求：
 
 Publish outcomes：
 
-- `projects/research-agenda/idea_bank/seed/` 只能由 `publish_research_run.py` 写入。
+- v1 禁用 legacy `publish_research_run.py` formal writer surface；`projects/research-agenda/idea_bank/seed/` 不能由 scheduled automation 或 legacy publish script 写入。
 - `projects/research-agenda/seed-candidates/` 保存 accepted-but-not-formal rollout 候选。
 - `projects/research-agenda/parked/` 和 `projects/research-agenda/rescue/` 保存 blocked、non-accepted 或需要 rescue mutation 的候选。
 - `research_agenda_ideate.py` 只生成 raw candidates；`research_agenda_update.py` 不写 formal seeds。

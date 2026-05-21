@@ -320,6 +320,52 @@ def _scan_scheduled_daily_rollout_policy() -> list[dict[str, str]]:
     return issues
 
 
+def _provider_backed_artifact_issue(
+    *,
+    run_date: str,
+    artifact_name: str,
+    expected_mode: str,
+    code: str,
+) -> dict[str, str] | None:
+    path = artifact_dir(run_date) / artifact_name
+    data = _json_read(path)
+    if not data or data.get("_read_error"):
+        return _issue("FAIL", code, f"{artifact_name} is missing or invalid for explicit scheduled provider `{expected_mode}`.", _rel(path))
+    provider = data.get("provider_status", {})
+    status = str(data.get("status") or provider.get("status") or "")
+    mode = str(provider.get("mode") or data.get("mode") or "")
+    provider_backed = provider.get("provider_backed") is True or data.get("provider_backed") is True
+    if status != "success" or not provider_backed or mode != expected_mode:
+        detail = f"{artifact_name} status={status or 'missing'} provider_backed={provider_backed} mode={mode or 'missing'} expected_mode={expected_mode}"
+        return _issue("FAIL", code, detail, _rel(path))
+    return None
+
+
+def _moved_to_v2_missing_artifact_issues(
+    run_date: str,
+    *,
+    mandatory_battle_status: str,
+    v2_deepseek_ok: bool,
+) -> list[dict[str, str]]:
+    if not (mandatory_battle_status == "moved_to_v2_state_machine" and v2_deepseek_ok):
+        return []
+    issues: list[dict[str, str]] = []
+    required_v2_artifacts = {
+        "codex-execution-review.json": "v2_missing_codex_execution_review",
+        "novelty-scan.json": "v2_missing_novelty_scan",
+        "survival-decision.json": "v2_missing_survival_decision",
+    }
+    for artifact_name, code in required_v2_artifacts.items():
+        path = artifact_dir(run_date) / artifact_name
+        if not path.exists():
+            issues.append(_issue("FAIL", code, f"{artifact_name} is required after moved_to_v2_state_machine.", _rel(path)))
+    publish_result = run_dir(run_date) / "publish" / "publish-result.json"
+    legacy_publish_result = artifact_dir(run_date) / "publish-result.json"
+    if not publish_result.exists() and not legacy_publish_result.exists():
+        issues.append(_issue("FAIL", "v2_missing_publish_result", "publish-result.json is required after moved_to_v2_state_machine.", _rel(publish_result)))
+    return issues
+
+
 def _node_tokens(node: ast.AST) -> list[str]:
     if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Div, ast.Add)):
         return [*_node_tokens(node.left), *_node_tokens(node.right)]
@@ -425,6 +471,8 @@ def _audit_v2_state_machine(run_date: str) -> tuple[dict[str, Any], list[dict[st
         publish_result = legacy_publish_result
     manifest_path = run_path / "manifest.json"
     manifest = _json_read(manifest_path)
+    formal_context = bool(manifest.get("v2_publish_policy") == "formal" or manifest.get("formal_seed_written") is True)
+    active_context_candidate_ids: set[str] = set()
     validation: dict[str, Any]
     if run_path.exists():
         validation = validate_v2_run(run_date, strict_publish=publish_result.exists())
@@ -522,6 +570,7 @@ def _audit_v2_state_machine(run_date: str) -> tuple[dict[str, Any], list[dict[st
                     )
                 )
             if decision.get("active_seed_allowed") is True:
+                active_context_candidate_ids.add(cid)
                 fatal = sorted(decision_risks & ACTIVE_SEED_FATAL_RISKS)
                 if fatal:
                     issues.append(
@@ -575,7 +624,8 @@ def _audit_v2_state_machine(run_date: str) -> tuple[dict[str, Any], list[dict[st
             for marker in ["external_scope_arxiv_only_not_full_prior_art", "stale_external_novelty_cache"]:
                 if marker in risk_text or scan.get(marker) is True:
                     risk_markers[marker] += 1
-                    issues.append(_issue("WARN", marker, f"{cid}: {marker}", _rel(novelty_path)))
+                    level = "FAIL" if marker == "stale_external_novelty_cache" and (formal_context or cid in active_context_candidate_ids) else "WARN"
+                    issues.append(_issue(level, marker, f"{cid}: {marker}", _rel(novelty_path)))
 
     tension_path = artifacts_path / "tension-map.json"
     tension_data = _json_read(tension_path)
@@ -658,7 +708,12 @@ def _readiness_from_label(label: str) -> str:
     return "untriaged"
 
 
-def audit_run(run_date: str) -> dict[str, Any]:
+def audit_run(
+    run_date: str,
+    *,
+    scheduled_deepseek_provider: str = "",
+    scheduled_codex_execution_provider: str = "",
+) -> dict[str, Any]:
     run_path, run_text = _run_log(run_date)
     recovery_path, recovery_text = _recovery_log(run_date)
     greenhouse_path = _greenhouse_path(run_date)
@@ -857,7 +912,34 @@ def audit_run(run_date: str) -> dict[str, Any]:
     if battle_expected and mandatory_battle["selected_items"] and len(raw_candidates) and mandatory_battle["selected_items"] < len(raw_candidates):
         issue_list.append(_issue("WARN", "mandatory_model_battle_partial_candidate_coverage", f"Battle selected {mandatory_battle['selected_items']} of {len(raw_candidates)} raw candidates.", mandatory_battle["packet_path"]))
 
+    issue_list.extend(
+        _moved_to_v2_missing_artifact_issues(
+            run_date,
+            mandatory_battle_status=str(mandatory_battle["status"]),
+            v2_deepseek_ok=v2_deepseek_ok,
+        )
+    )
+
+    if scheduled_deepseek_provider == "opencode":
+        issue = _provider_backed_artifact_issue(
+            run_date=run_date,
+            artifact_name="deepseek-review.json",
+            expected_mode="opencode",
+            code="scheduled_deepseek_provider_not_provider_backed",
+        )
+        if issue:
+            issue_list.append(issue)
+
     codex = _classify_codex_state(run_date)
+    if scheduled_codex_execution_provider == "codex-cli":
+        issue = _provider_backed_artifact_issue(
+            run_date=run_date,
+            artifact_name="codex-execution-review.json",
+            expected_mode="codex-cli",
+            code="scheduled_codex_provider_not_provider_backed",
+        )
+        if issue:
+            issue_list.append(issue)
     if greenhouse_path.exists() and codex["state"] == "missing":
         issue_list.append(_issue("WARN", "codex_review_missing", "No Codex packet, pending marker, or report found for this run.", _rel(_codex_report_path(run_date))))
     if codex["packet_path"] and codex["raw_gemini_candidate_count"] != len(raw_candidates):
@@ -910,6 +992,10 @@ def audit_run(run_date: str) -> dict[str, Any]:
 
     return {
         "run_date": run_date,
+        "scheduled_provider_config": {
+            "deepseek_provider": scheduled_deepseek_provider or "none",
+            "codex_execution_provider": scheduled_codex_execution_provider or "none",
+        },
         "quality_readiness": quality_readiness,
         "status": status,
         "agenda_update_status": agenda_status,
@@ -1108,9 +1194,15 @@ def main() -> int:
     parser.add_argument("--run-date", default=date.today().isoformat())
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--scheduled-deepseek-provider", choices=["none", "opencode"], default="none")
+    parser.add_argument("--scheduled-codex-execution-provider", choices=["none", "codex-cli"], default="none")
     args = parser.parse_args()
 
-    report = audit_run(args.run_date)
+    report = audit_run(
+        args.run_date,
+        scheduled_deepseek_provider=args.scheduled_deepseek_provider,
+        scheduled_codex_execution_provider=args.scheduled_codex_execution_provider,
+    )
     QUALITY_REPORT_DIR.mkdir(parents=True, exist_ok=True)
     json_path = QUALITY_REPORT_DIR / f"{args.run_date}-daily-quality-audit.json"
     md_path = QUALITY_REPORT_DIR / f"{args.run_date}-daily-quality-audit.md"

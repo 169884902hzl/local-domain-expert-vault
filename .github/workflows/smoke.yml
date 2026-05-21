@@ -77,6 +77,10 @@ jobs:
             throw "Fresh clone mirror-first dry-run unexpectedly used Search API fallback"
           }
 
+      - name: Check provider review command builder dry-run
+        shell: pwsh
+        run: python .claude/scripts/daily_arxiv_pipeline.py --dry-run --source mirror-first --max-candidates 5 --days-back 14 --idea-mode template --skip-read --deepseek-provider opencode --codex-execution-provider codex-cli
+
       - name: Check Zotero preflight fails safely without private config
         shell: pwsh
         run: |
@@ -95,8 +99,13 @@ jobs:
         shell: pwsh
         run: powershell -ExecutionPolicy Bypass -File .claude/scripts/register_daily_arxiv_task.ps1 -DryRun -Time "12:00"
 
+      - name: Check scheduled task provider dry-run
+        shell: pwsh
+        run: powershell -ExecutionPolicy Bypass -File .claude/scripts/register_daily_arxiv_task.ps1 -DryRun -Time "12:00" -DeepSeekProvider opencode -CodexExecutionProvider codex-cli
+
       - name: Check tracked artifacts and secrets
         shell: pwsh
         run: |
           python tools/scan_public_package.py
+          python tools/scan_public_package.py --scan-tree
           python .claude/scripts/audit_public_package_v1.py

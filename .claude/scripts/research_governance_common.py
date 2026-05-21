@@ -19,6 +19,11 @@ from typing import Any
 from kb_common import vault_path
 from research_agenda_common import AGENDA_ROOT, slugify
 
+try:
+    from jsonschema import Draft202012Validator
+except Exception:  # pragma: no cover
+    Draft202012Validator = None  # type: ignore[assignment]
+
 
 SCHEMA_ROOT = vault_path(".claude", "schemas", "research_governance_v1")
 STATE_MACHINE_VERSION = "research_governance_state_machine.v1"
@@ -107,17 +112,29 @@ FORBIDDEN_SCHEDULED_TOKENS = [
     "--target-policy formal",
     "--v2-publish-policy formal",
     "--allow-formal-seed-publish",
+    "--allow-human-override",
     "--commit-active-seed",
+    "formal_rehearsal_packet.py",
+    "governance_review.py",
+    "active_seed_commit.py",
+    "strategy_ledger.py",
+    "--apply-strategy",
+    "--active-seed-id",
     "--human-confirmed",
     "--governance-signature",
 ]
 
-PUBLIC_FORBIDDEN_SUFFIXES = {".pdf", ".sqlite", ".sqlite3", ".db", ".log", ".pyc"}
+PUBLIC_FORBIDDEN_SUFFIXES = {".pdf", ".sqlite", ".sqlite3", ".db", ".log", ".pyc", ".bak"}
 PUBLIC_FORBIDDEN_PARTS = {
     ".env",
     "__pycache__",
     ".pytest_cache",
     ".mypy_cache",
+    "attachments/",
+    "archive/",
+    "/logs/",
+    "backup",
+    "secret",
     "projects/research-agenda/runs/",
     "projects/research-agenda/cache/",
     "projects/research-agenda/governance/active-seeds/",
@@ -129,9 +146,22 @@ REQUIRED_ACTIVE_ARTIFACTS = {
     "candidate_record": "candidates/{candidate_id}/candidate-record.json",
     "confirmed_evidence_packet": "evidence-packets/{candidate_id}/evidence-packet.confirmed.json",
     "manual_prior_art_dossier": "prior-art-dossiers/{candidate_id}/manual-prior-art-dossier.json",
+    "provider_review_packet": "provider-reviews/{candidate_id}/provider-review-packet.json",
+    "novelty_screen": "novelty-screens/{candidate_id}/novelty-screen.json",
     "baseline_execution_readiness": "baseline-readiness/{candidate_id}/baseline-execution-readiness.json",
     "pilot_plan": "pilot-plans/{candidate_id}/pilot-plan.json",
     "governance_review": "governance/reviews/{candidate_id}/governance-review.json",
+}
+
+GOVERNANCE_SCHEMA_BY_ARTIFACT = {
+    "candidate_record": "candidate_record.v1",
+    "confirmed_evidence_packet": "evidence_packet.v1",
+    "manual_prior_art_dossier": "prior_art_dossier.v1",
+    "provider_review_packet": "provider_review_packet.v1",
+    "novelty_screen": "novelty_screen.v1",
+    "baseline_execution_readiness": "baseline_execution_readiness.v1",
+    "pilot_plan": "pilot_plan.v1",
+    "governance_review": "governance_review.v1",
 }
 
 
@@ -161,6 +191,14 @@ def evidence_packet_dir(candidate_id: str) -> Path:
 
 def prior_art_dir(candidate_id: str) -> Path:
     return governance_path("prior-art-dossiers", candidate_id)
+
+
+def provider_review_dir(candidate_id: str) -> Path:
+    return governance_path("provider-reviews", candidate_id)
+
+
+def novelty_screen_dir(candidate_id: str) -> Path:
+    return governance_path("novelty-screens", candidate_id)
 
 
 def nearest_work_dir(candidate_id: str) -> Path:
@@ -217,6 +255,8 @@ def ensure_v1_dirs(candidate_id: str | None = None) -> None:
         governance_path("candidates"),
         governance_path("evidence-packets"),
         governance_path("prior-art-dossiers"),
+        governance_path("provider-reviews"),
+        governance_path("novelty-screens"),
         governance_path("nearest-work-matrices"),
         governance_path("baseline-readiness"),
         governance_path("formal-rehearsals"),
@@ -234,6 +274,8 @@ def ensure_v1_dirs(candidate_id: str | None = None) -> None:
                 candidate_dir(candidate_id),
                 evidence_packet_dir(candidate_id),
                 prior_art_dir(candidate_id),
+                provider_review_dir(candidate_id),
+                novelty_screen_dir(candidate_id),
                 nearest_work_dir(candidate_id),
                 baseline_readiness_dir(candidate_id),
                 formal_rehearsal_dir(candidate_id),
@@ -364,6 +406,93 @@ def artifact_hash_errors(payload: dict[str, Any]) -> list[str]:
     return errors
 
 
+def _schema_path(schema_version: str) -> Path:
+    stem = schema_version.removesuffix(".v1").replace(".", "_")
+    return SCHEMA_ROOT / f"{stem}.schema.json"
+
+
+def _schema_errors(payload: dict[str, Any], schema_version: str) -> list[str]:
+    if payload.get("schema_version") != schema_version:
+        return [f"schema_version_mismatch:expected={schema_version}:actual={payload.get('schema_version')}"]
+    path = _schema_path(schema_version)
+    if not path.exists():
+        return [f"missing_schema:{path}"]
+    schema = read_json(path)
+    if Draft202012Validator is None:
+        return [f"missing_field:{field}" for field in schema.get("required", []) if field not in payload]
+    try:
+        Draft202012Validator.check_schema(schema)
+    except Exception as exc:
+        return [f"schema_invalid:{schema_version}:{type(exc).__name__}:{exc}"]
+    validator = Draft202012Validator(schema)
+    errors = []
+    for error in sorted(validator.iter_errors(payload), key=lambda err: list(err.absolute_path)):
+        where = ".".join(str(part) for part in error.absolute_path) or "$"
+        errors.append(f"jsonschema:{schema_version}:{where}:{error.message}")
+    return errors
+
+
+def _hashes_include_current_file(payload: dict[str, Any], path: Path) -> bool:
+    if not path.exists():
+        return False
+    expected = file_sha256(path)
+    resolved = path.resolve()
+    rel = str(path.relative_to(agenda_root())).replace("\\", "/") if path.is_relative_to(agenda_root()) else ""
+    for item in payload.get("artifact_hashes", []):
+        if not isinstance(item, dict):
+            continue
+        path_text = str(item.get("path") or "")
+        actual_hash = str(item.get("sha256") or "")
+        if actual_hash != expected:
+            continue
+        candidate = Path(path_text)
+        if candidate.is_absolute() and candidate.resolve() == resolved:
+            return True
+        if path_text.replace("\\", "/") == rel:
+            return True
+    return False
+
+
+def _provider_review_errors(payload: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    provider_status = payload.get("provider_status", {})
+    provider_status = provider_status if isinstance(provider_status, dict) else {}
+    provider_backed = payload.get("provider_backed") is True or provider_status.get("provider_backed") is True
+    status = str(payload.get("review_status") or payload.get("status") or "")
+    provider_state = str(provider_status.get("status") or "")
+    if not provider_backed:
+        errors.append("provider_review_not_provider_backed")
+    if payload.get("test_provider_used") is True or provider_status.get("test_provider_used") is True:
+        errors.append("test_provider_review_blocks_active")
+    if status != "success":
+        errors.append("provider_review_not_success")
+    if status in {"timeout", "provider_unavailable", "partial_provider_unavailable"} or provider_state in {"timeout", "provider_unavailable", "partial_provider_unavailable"}:
+        errors.append("provider_review_unavailable_blocks_active")
+    return errors
+
+
+def _novelty_screen_errors(payload: dict[str, Any], dossier: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    status = str(payload.get("screen_status") or payload.get("status") or "")
+    if status != "success":
+        errors.append("novelty_screen_not_success")
+    if payload.get("stale") is True or payload.get("stale_external_novelty_cache") is True or payload.get("cache_status") == "stale":
+        errors.append("stale_novelty_screen_blocks_active")
+    if payload.get("screening_only") is not True:
+        errors.append("api_screening_must_be_screening_only")
+    if payload.get("replaces_manual_prior_art_dossier") is True or payload.get("manual_prior_art_replaced") is True:
+        errors.append("api_screening_cannot_replace_manual_prior_art_dossier")
+    provider_status = str(payload.get("provider_status") or payload.get("api_provider_status") or "")
+    provider_errors = [str(item) for item in payload.get("provider_errors", []) if item]
+    provider_unavailable = provider_status in {"timeout", "provider_unavailable", "partial_provider_unavailable"} or any(
+        marker in " ".join(provider_errors).lower()
+        for marker in ["timeout", "provider_unavailable", "unavailable"]
+    )
+    if provider_unavailable and dossier.get("timeout_covered_by_manual_dossier") is not True:
+        errors.append("novelty_provider_unavailable_not_covered_by_manual_dossier")
+    return errors
+
+
 def active_commit_validation(candidate_id: str, *, active_seed_id: str | None = None) -> ValidationResult:
     errors: list[str] = []
     paths = {name: governance_path(template.format(candidate_id=candidate_id)) for name, template in REQUIRED_ACTIVE_ARTIFACTS.items()}
@@ -371,10 +500,16 @@ def active_commit_validation(candidate_id: str, *, active_seed_id: str | None = 
     for name, payload in payloads.items():
         if not payload:
             errors.append(f"missing_{name}")
+            continue
+        schema_version = GOVERNANCE_SCHEMA_BY_ARTIFACT.get(name)
+        if schema_version:
+            errors.extend(_schema_errors(payload, schema_version))
 
     candidate = payloads.get("candidate_record", {})
     evidence = payloads.get("confirmed_evidence_packet", {})
     dossier = payloads.get("manual_prior_art_dossier", {})
+    provider_review = payloads.get("provider_review_packet", {})
+    novelty_screen = payloads.get("novelty_screen", {})
     baseline = payloads.get("baseline_execution_readiness", {})
     pilot = payloads.get("pilot_plan", {})
     review = payloads.get("governance_review", {})
@@ -391,6 +526,10 @@ def active_commit_validation(candidate_id: str, *, active_seed_id: str | None = 
             errors.append("prior_art_screening_not_dossier")
         if dossier.get("provider_timeout_seen") is True and dossier.get("timeout_covered_by_manual_dossier") is not True:
             errors.append("provider_timeout_not_covered_by_manual_dossier")
+    if provider_review:
+        errors.extend(_provider_review_errors(provider_review))
+    if novelty_screen:
+        errors.extend(_novelty_screen_errors(novelty_screen, dossier))
     if baseline:
         status = str(baseline.get("readiness_status") or "")
         if status not in {"ready", "not_applicable"}:
@@ -406,6 +545,10 @@ def active_commit_validation(candidate_id: str, *, active_seed_id: str | None = 
         for field in ["owner", "resource_budget", "timeline", "kill_criteria"]:
             if not str(review.get(field) or "").strip():
                 errors.append(f"active_seed_record_missing_{field}")
+        errors.extend(artifact_hash_errors(review))
+        for name in ["provider_review_packet", "novelty_screen"]:
+            if not _hashes_include_current_file(review, paths[name]):
+                errors.append(f"missing_{name}_hash")
     if candidate:
         if candidate.get("legacy_status") == "archived_legacy" or (candidate.get("auto_promote_allowed") is False and candidate.get("legacy_v03") is True):
             errors.append("legacy_seed_never_auto_promotes")

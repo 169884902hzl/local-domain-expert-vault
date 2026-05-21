@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Research Governance v1 Novelty Screen",
+  "type": "object",
+  "required": ["schema_version", "candidate_id", "screen_status", "screening_only", "stale", "replaces_manual_prior_art_dossier"],
+  "properties": {
+    "schema_version": {"const": "novelty_screen.v1"},
+    "candidate_id": {"type": "string", "minLength": 1},
+    "screen_status": {"type": "string", "enum": ["success", "blocked", "timeout", "provider_unavailable", "partial_provider_unavailable"]},
+    "screening_only": {"type": "boolean"},
+    "stale": {"type": "boolean"},
+    "stale_external_novelty_cache": {"type": "boolean"},
+    "replaces_manual_prior_art_dossier": {"type": "boolean"},
+    "manual_prior_art_replaced": {"type": "boolean"},
+    "api_provider_status": {"type": "string"},
+    "provider_errors": {"type": "array"},
+    "artifact_hashes": {"type": "array"}
+  }
+}

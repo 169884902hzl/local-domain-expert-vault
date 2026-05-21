@@ -36,13 +36,7 @@ class ActiveSeedDashboardTest(V03TempAgendaTest):
         dashboard = build_dashboard(RUN_DATE)
         dashboard["rows"][0]["active_seed_allowed"] = True
         write_json(artifact_dir(RUN_DATE) / "active-seed-dashboard.json", dashboard)
-        result = publish(
-            RUN_DATE,
-            dry_run=True,
-            target_policy="formal",
-            allow_formal_seed_publish=True,
-            allow_test_provider_for_formal=True,
-        )
+        result = publish(RUN_DATE, dry_run=True, target_policy="formal")
         self.assertEqual(result["status"], "legacy_formal_publish_disabled_use_formal_rehearsal_packet")
         self.assertEqual(result["published"], [])
         self.assertIn("v1_disables_legacy_formal_seed_writing", result["blocked"])

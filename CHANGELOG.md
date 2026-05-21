@@ -1,5 +1,22 @@
 # Changelog
 
+## v1.0.1 - Release-Blocking Governance Hardening
+
+### Changed
+
+- Hardened scheduled provider command construction with a single helper that guarantees at most one `--provider` and fails closed on `provider_json` / explicit provider conflicts.
+- Scheduled quality-audit failure now fails `run_daily_arxiv_task.ps1` instead of only logging the failure.
+- Active seed commit now requires independent, schema-validated, hash-linked provider review packet and novelty screen artifacts.
+- Disabled the legacy `publish_research_run.py` formal writer surface; formal rehearsal and active seed commitment belong to v1 governance artifacts, not the legacy publish script.
+- Demoted v0.3.x survival / formal publish wording to historical context. `survival_decision.py` is legacy v2 triage only; active seed promotion is governed by v1 human governance artifacts and `active_seed_commit.py`.
+
+### Safety
+
+- Scheduled formal/active publish remains disabled.
+- Active seed remains a human governance commitment, not publishability proof.
+- API novelty scans are screening only and cannot replace manual prior-art dossiers.
+- Model critique is not peer review, and this project still does not claim doctoral-level idea generation.
+
 ## v1.0.0 - Research Governance Workbench
 
 ### Added
@@ -67,7 +84,7 @@
 ### Changed
 
 - `formal_rehearsal_candidate` writes only to the seed-candidates formal-rehearsal bucket and never to `idea_bank/seed/`.
-- `--v2-publish-policy formal` writes formal seeds only when `active_seed_allowed=true`.
+- Historical v0.3.x note: `--v2-publish-policy formal` and `active_seed_allowed` are no longer v1 active truth; v1 active seed commitment is handled by governance artifacts and `active_seed_commit.py`.
 - Active seed now requires completed human manual prior-art review, known strongest baseline, fresh broad external novelty, anchored core evidence, DeepSeek survival, Codex acceptance, and a minimal pilot plan.
 - `note_section` anchors are no longer treated as PDF/table verified evidence; `result_row` anchors require page/table/row/metric/baseline/reported value fields.
 - Novelty provider cache metadata now records TTL, expiry, provider status, normalized result fields, and provider health; stale cache is a risk marker only and cannot support active/formal promotion.
@@ -143,7 +160,7 @@
 - Daily v2 deep-read target defaults to 3 papers with a hard cap of 4 papers.
 - Legacy `min_new_imports=10` no longer forces v2 import/read back to 10 papers unless `--legacy-import-fill` is explicitly set.
 - Formal mode requires DeepSeek provider mode `opencode` and Codex execution provider mode `codex-cli` by default.
-- `provider=json` remains available for seed-candidates-only fixtures and manual review, but formal mode blocks it unless `--allow-test-provider-for-formal` is explicitly passed and risk is recorded.
+- Historical v0.2.x note: `provider=json` remains available for seed-candidates-only fixtures and manual review; v1 no longer supports legacy formal test-provider override in `publish_research_run.py`.
 - CI now installs `jsonschema` explicitly and verifies the Draft 2020-12 validation path.
 
 ### Safety
@@ -173,12 +190,12 @@
 
 - Formal seed publishing is no longer part of Gemini/local-score generation.
 - `research_agenda_ideate.py` and `research_agenda_update.py` no longer write formal seeds.
-- `publish_research_run.py` is the only script allowed to write `projects/research-agenda/idea_bank/seed/`.
+- Historical v0.2.x note: legacy formal seed writing previously lived in `publish_research_run.py`; v1 disables that writer surface.
 - `quality_tier`, `sharpness_score`, `evidence_execution_score`, and `ordinaryness_penalty` are display / potential fields only, not promotion gates.
 
 ### Safety
 
-- Formal publish requires both `--v2-publish-policy formal` and `--allow-formal-seed-publish`.
+- Historical v0.2.x note: formal publish flags no longer define v1 active truth.
 - Missing provider-backed DeepSeek or Codex reviews fail closed.
 - Unknown novelty does not auto-promote.
 - Backfill is `ingest-only` by default as an operating policy and cannot formal-publish.

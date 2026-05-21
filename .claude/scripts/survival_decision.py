@@ -439,6 +439,7 @@ def decide(
                 "governance_review_possible": governance_review_possible,
                 "active_commit_forbidden_reasons": active_commit_forbidden_reasons,
                 "requires_human_governance": True,
+                "legacy_active_seed_allowed": False,
                 "active_seed_allowed": active_seed_allowed,
                 "pilot_ready_allowed": pilot_ready_allowed,
                 "publish_target": (
@@ -469,7 +470,7 @@ def decide(
                 "baseline-table.json",
             ],
         ),
-        "boundary": "This is the only promotion brain; publish_research_run.py must follow these decisions and re-check hashes.",
+        "boundary": "Legacy v2 triage decision only. Active seed promotion is governed by v1 human governance artifacts and active_seed_commit.py.",
     }
 
 

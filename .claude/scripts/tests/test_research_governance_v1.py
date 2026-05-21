@@ -27,11 +27,14 @@ from research_governance_common import (
     file_sha256,
     formal_rehearsal_dir,
     governance_review_dir,
+    novelty_screen_dir,
     prior_art_dir,
+    provider_review_dir,
+    read_json,
     transition_errors,
     write_json,
 )
-from state_machine_guard import run_audit as run_state_machine_audit
+from state_machine_guard import run_audit as run_state_machine_audit, scan_sensitive_writes
 from strategy_ledger import build_event
 import active_seed_dashboard
 import active_seed_commit
@@ -62,15 +65,61 @@ class GovernanceV1Test(unittest.TestCase):
             {"schema_version": "evidence_packet.v1", "candidate_id": CID, "packet_status": "confirmed", "human_confirmed": True, "confirmed_by": "human", "confirmed_at": "2026-05-21T00:00:00Z", "core_evidence": [{"evidence_type": "anchored_claim", "statement": "supported"}]},
         )
         write_json(prior_art_dir(CID) / "manual-prior-art-dossier.json", {"schema_version": "prior_art_dossier.v1", "candidate_id": CID, "dossier_status": "completed", "reviewer": "human", "reviewed_at": "2026-05-21T00:00:00Z", "human_confirmed": True, "confirmed_by": "human", "confirmed_at": "2026-05-21T00:00:00Z", "screening_only": False})
+        provider_path = provider_review_dir(CID) / "provider-review-packet.json"
+        novelty_path = novelty_screen_dir(CID) / "novelty-screen.json"
+        write_json(provider_path, {"schema_version": "provider_review_packet.v1", "candidate_id": CID, "review_status": "success", "provider_backed": True, "test_provider_used": False, "provider_status": {"provider_backed": True, "mode": "opencode", "status": "success"}, "reviews": [{"provider": "deepseek", "status": "success"}, {"provider": "codex", "status": "success"}]})
+        write_json(novelty_path, {"schema_version": "novelty_screen.v1", "candidate_id": CID, "screen_status": "success", "screening_only": True, "stale": False, "stale_external_novelty_cache": False, "replaces_manual_prior_art_dossier": False, "api_provider_status": "success", "provider_errors": []})
         write_json(baseline_readiness_dir(CID) / "baseline-execution-readiness.json", {"schema_version": "baseline_execution_readiness.v1", "candidate_id": CID, "readiness_status": "ready"})
         write_json(Path(self.tmp.name) / "pilot-plans" / CID / "pilot-plan.json", {"schema_version": "pilot_plan.v1", "candidate_id": CID, "plan_status": "ready", "owner": "human", "resource_budget": "2 weeks", "timeline": "2026Q2", "kill_criteria": "baseline wins", "human_confirmed": True, "confirmed_by": "human", "confirmed_at": "2026-05-21T00:00:00Z"})
-        write_json(governance_review_dir(CID) / "governance-review.json", {"schema_version": "governance_review.v1", "candidate_id": CID, "owner": "human", "resource_budget": "2 weeks", "timeline": "2026Q2", "kill_criteria": "baseline wins", "human_confirmed": True, "confirmed_by": "human", "confirmed_at": "2026-05-21T00:00:00Z", "governance_signature": "sig"})
+        write_json(
+            governance_review_dir(CID) / "governance-review.json",
+            {
+                "schema_version": "governance_review.v1",
+                "candidate_id": CID,
+                "owner": "human",
+                "resource_budget": "2 weeks",
+                "timeline": "2026Q2",
+                "kill_criteria": "baseline wins",
+                "human_confirmed": True,
+                "confirmed_by": "human",
+                "confirmed_at": "2026-05-21T00:00:00Z",
+                "governance_signature": "sig",
+                "artifact_hashes": [
+                    {"path": str(provider_path), "sha256": file_sha256(provider_path)},
+                    {"path": str(novelty_path), "sha256": file_sha256(novelty_path)},
+                ],
+            },
+        )
 
     def assertBlocks(self, code: str) -> None:
         self.assertIn(code, active_commit_validation(CID).errors)
 
     def test_no_direct_seed_writer(self) -> None:
         self.assertEqual(run_state_machine_audit()["status"], "success")
+
+    def test_state_machine_guard_detects_write_text_to_seed(self) -> None:
+        source = "from pathlib import Path\np = Path('projects/research-agenda/idea_bank/seed/x.md')\np.write_text('x')\n"
+        issues = scan_sensitive_writes(Path("bad_writer.py"), source)
+        self.assertTrue(any(issue["code"] == "sensitive_governance_writer" for issue in issues))
+
+    def test_state_machine_guard_detects_shutil_copy_to_seed(self) -> None:
+        source = "import shutil\nshutil.copy2('a', 'projects/research-agenda/idea_bank/seed/a')\n"
+        issues = scan_sensitive_writes(Path("bad_copy.py"), source)
+        self.assertTrue(any("seed" in issue["targets"] for issue in issues))
+
+    def test_state_machine_guard_detects_path_rename_to_seed(self) -> None:
+        source = "from pathlib import Path\nPath('tmp').rename(Path('projects/research-agenda/idea_bank/seed/tmp'))\n"
+        issues = scan_sensitive_writes(Path("bad_rename.py"), source)
+        self.assertTrue(any("seed" in issue["targets"] for issue in issues))
+
+    def test_state_machine_guard_allows_active_seed_commit_ledger_only(self) -> None:
+        source = "from research_governance_common import active_seed_dir, governance_ledger_path, write_json, append_jsonl\nwrite_json(active_seed_dir('x') / 'active-seed-record.json', {})\nappend_jsonl(governance_ledger_path(), {})\n"
+        self.assertEqual(scan_sensitive_writes(Path("active_seed_commit.py"), source), [])
+
+    def test_state_machine_guard_rejects_publish_research_run_seed_writer(self) -> None:
+        source = "from pathlib import Path\nPath('projects/research-agenda/idea_bank/seed/x').mkdir(parents=True)\n"
+        issues = scan_sensitive_writes(Path("publish_research_run.py"), source)
+        self.assertTrue(any("seed" in issue["targets"] for issue in issues))
 
     def test_scheduled_formal_active_impossible(self) -> None:
         self.assertIn("scheduled_forbidden_state:active_seed_committed", transition_errors("governance_review_requested", "active_seed_committed", mode="scheduled"))
@@ -95,6 +144,60 @@ class GovernanceV1Test(unittest.TestCase):
     def test_active_seed_requires_manual_prior_art_dossier(self) -> None:
         (prior_art_dir(CID) / "manual-prior-art-dossier.json").unlink()
         self.assertBlocks("missing_manual_prior_art_dossier")
+
+    def test_active_commit_requires_provider_review_hash(self) -> None:
+        review_path = governance_review_dir(CID) / "governance-review.json"
+        review = read_json(review_path)
+        novelty_path = novelty_screen_dir(CID) / "novelty-screen.json"
+        review["artifact_hashes"] = [{"path": str(novelty_path), "sha256": file_sha256(novelty_path)}]
+        write_json(review_path, review)
+        self.assertBlocks("missing_provider_review_packet_hash")
+
+    def test_active_commit_requires_novelty_screen_hash(self) -> None:
+        review_path = governance_review_dir(CID) / "governance-review.json"
+        review = read_json(review_path)
+        provider_path = provider_review_dir(CID) / "provider-review-packet.json"
+        review["artifact_hashes"] = [{"path": str(provider_path), "sha256": file_sha256(provider_path)}]
+        write_json(review_path, review)
+        self.assertBlocks("missing_novelty_screen_hash")
+
+    def test_active_commit_rejects_provider_review_hash_mismatch(self) -> None:
+        provider_path = provider_review_dir(CID) / "provider-review-packet.json"
+        provider = read_json(provider_path)
+        provider["reviews"].append({"provider": "codex", "status": "success", "note": "changed"})
+        write_json(provider_path, provider)
+        self.assertTrue(any("hash_mismatch" in error for error in active_commit_validation(CID).errors))
+
+    def test_active_commit_rejects_novelty_screen_hash_mismatch(self) -> None:
+        novelty_path = novelty_screen_dir(CID) / "novelty-screen.json"
+        novelty = read_json(novelty_path)
+        novelty["provider_errors"] = ["changed"]
+        write_json(novelty_path, novelty)
+        self.assertTrue(any("hash_mismatch" in error for error in active_commit_validation(CID).errors))
+
+    def test_active_commit_rejects_test_provider_review(self) -> None:
+        provider_path = provider_review_dir(CID) / "provider-review-packet.json"
+        provider = read_json(provider_path)
+        provider["test_provider_used"] = True
+        write_json(provider_path, provider)
+        self.refresh_governance_hashes()
+        self.assertBlocks("test_provider_review_blocks_active")
+
+    def test_active_commit_rejects_stale_novelty_screen(self) -> None:
+        novelty_path = novelty_screen_dir(CID) / "novelty-screen.json"
+        novelty = read_json(novelty_path)
+        novelty["stale"] = True
+        write_json(novelty_path, novelty)
+        self.refresh_governance_hashes()
+        self.assertBlocks("stale_novelty_screen_blocks_active")
+
+    def test_api_screening_cannot_replace_manual_prior_art_dossier(self) -> None:
+        novelty_path = novelty_screen_dir(CID) / "novelty-screen.json"
+        novelty = read_json(novelty_path)
+        novelty["replaces_manual_prior_art_dossier"] = True
+        write_json(novelty_path, novelty)
+        self.refresh_governance_hashes()
+        self.assertBlocks("api_screening_cannot_replace_manual_prior_art_dossier")
 
     def test_active_seed_requires_baseline_execution_readiness(self) -> None:
         write_json(baseline_readiness_dir(CID) / "baseline-execution-readiness.json", {"schema_version": "baseline_execution_readiness.v1", "candidate_id": CID, "readiness_status": "unknown"})
@@ -219,6 +322,17 @@ class GovernanceV1Test(unittest.TestCase):
             evidence_packet_dir(CID) / "evidence-packet.confirmed.json",
             {"schema_version": "evidence_packet.v1", "candidate_id": CID, "packet_status": "confirmed", "human_confirmed": True, "confirmed_by": "human", "confirmed_at": "x", "core_evidence": [item], "artifact_hashes": artifact_hashes or []},
         )
+
+    def refresh_governance_hashes(self) -> None:
+        provider_path = provider_review_dir(CID) / "provider-review-packet.json"
+        novelty_path = novelty_screen_dir(CID) / "novelty-screen.json"
+        review_path = governance_review_dir(CID) / "governance-review.json"
+        review = read_json(review_path)
+        review["artifact_hashes"] = [
+            {"path": str(provider_path), "sha256": file_sha256(provider_path)},
+            {"path": str(novelty_path), "sha256": file_sha256(novelty_path)},
+        ]
+        write_json(review_path, review)
 
 
 if __name__ == "__main__":
