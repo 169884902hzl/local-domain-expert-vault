@@ -33,7 +33,7 @@ PRIMITIVE_TO_CLAIM = {
 }
 CONFIDENCE_ORDER = {"unusable": 0, "low": 1, "medium": 2, "high": 3}
 STRICT_ANCHOR_TYPES = {"section", "snippet", "table", "figure", "appendix", "result_row"}
-WEAK_EVIDENCE_CLASSES = {"note_derived", "abstract_only", "not_evidenced"}
+WEAK_EVIDENCE_CLASSES = {"note_derived", "abstract_only", "not_evidenced", "figure_approximation"}
 EDGE_RELATIONS = {
     "supports",
     "contradicts",

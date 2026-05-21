@@ -57,26 +57,39 @@ Strict Evidence Ledger contract:
 - Required columns:
   `claim_id`, `claim_type`, `claim`, `evidence_class`, `anchor_type`, `anchor`, `page/section/table/figure/appendix`, `confidence`, `downstream_use`
 - Allowed `evidence_class`:
-  `pdf_verified`, `table_verified`, `figure_verified`, `appendix_verified`, `result_row_unconfirmed`, `note_derived`, `abstract_only`, `not_evidenced`
+  `pdf_verified`, `table_verified`, `figure_verified`, `appendix_verified`, `result_row_unconfirmed`, `figure_approximation`, `note_derived`, `abstract_only`, `not_evidenced`
 - Allowed `anchor_type`:
   `section`, `table`, `figure`, `appendix`, `result_row`, `snippet`, `abstract`, `note_only`
 - Required coverage:
   at least one row for `problem`, `contribution` or `method`, `experiment` or `result` (or explicit `not_evidenced`), `limitation`, and `baseline` (or explicit `not_evidenced`).
-- For `pdf_verified`, `table_verified`, `figure_verified`, `appendix_verified`, and `result_row_unconfirmed`, `anchor` must be non-empty and concrete.
-- For `note_derived`, `abstract_only`, and `not_evidenced`, `downstream_use` must be `screening_only` or `requires_human_check`; never treat these as strong evidence.
+- Exact paper numbers require page/section/table/figure/result_row anchors. Prefer table/result_row anchors for numeric result claims when the paper provides them.
+- If a value is visually estimated from a figure, use `evidence_class: figure_approximation`, `anchor_type: figure`, a concrete figure/page anchor, and `downstream_use: requires_human_check`; never present it as exact.
+- If a machine-extracted row is not manually confirmed, use `evidence_class: result_row_unconfirmed`, `anchor_type: result_row`, and `downstream_use: requires_human_check`.
+- For `pdf_verified`, `table_verified`, `figure_verified`, `appendix_verified`, `result_row_unconfirmed`, and `figure_approximation`, `anchor` must be non-empty and concrete.
+- For `note_derived`, `abstract_only`, `not_evidenced`, and `figure_approximation`, `downstream_use` must be `screening_only` or `requires_human_check`; never treat these as strong evidence.
 - `result_row_unconfirmed` must use `anchor_type: result_row` and `downstream_use: requires_human_check`.
+
+Strict Idea Fuel contract:
+- `Idea Fuel` is mandatory adversarial review pressure, not a loose inspiration list and not confirmed evidence.
+- Use packets `IF-1`, `IF-2`, and `IF-3` when the paper has enough material; at minimum `IF-1` must exist.
+- Each packet must include all fields:
+  Hypothesis / research opening; Evidence anchor; Evidence class; Engineering pathology; Hidden assumption; Fragile interface; Failure mode; Strongest baseline; Why this baseline is strongest; Paper win condition; Idea kill condition; DLO replacement baseline; Transfer distance to DLO; Why transfer may fail; Negative transfer risk; Minimum no-hardware micro-test; Downstream review target.
+- `Evidence anchor` must be existing Evidence Ledger `claim_id` values or exactly `not_evidenced`.
+- `Downstream review target` must state what DeepSeek should attack and what Codex should verify.
+- Treat all Idea Fuel packets as `screening_only=true` and `requires_human_check=true`; never use them as accepted paper evidence.
 
 No-hardware Micro-test hard rule:
 - Must explicitly state: no robot, no real scene, no new data collection.
 - Must not require robot arm, gripper, cabinet, rope/cable hardware, tactile sensor, depth camera, motion capture, physical reset, teleoperation, human data collection, new video capture, real-world deployment, real cabinet/rope/cloth evaluation, or any physical hardware.
 - Allowed tests only:
   paper tables/figures/results; public code/repo cited by paper; public dataset/simulator already used by paper; existing videos/images from paper/public dataset; synthetic toy arrays/graphs/trajectories; static metric calculation; pseudo-code or logic check.
-- Must include: test artifact, protocol, metric, pass condition, and fail/kill condition.
+- Must include: artifact, input, deterministic 3-6 step protocol, metric, threshold, pass condition, fail/kill condition, compute/data cap, and no-hardware confirmation.
 
 Cross-domain Transfer Risk audit:
 - Mandatory when source domain is not DLO/robot manipulation and any downstream relevance to DLO is claimed, or when Idea Fuel contains a Transfer Hook.
 - Required fields:
   source domain; target domain; transfer distance (`none | low | medium | high | extreme`); why transfer may fail; negative transfer risk; misleading direct-copy risk; DLO replacement baseline; DLO-specific kill condition; Evidence Ledger `claim_id`.
+- Explicitly state the direct-copy assumption that would be misleading, why transfer to bimanual DLO/control/Sim-to-Real may fail, and the DLO-specific baseline that would kill the idea.
 - For animation/video/generation to DLO manipulation, transfer distance must be at least `high` unless physical closed-loop manipulation, contact dynamics, or DLO control is directly evaluated.
 
 Section template to append after existing content:
@@ -105,13 +118,89 @@ Section template to append after existing content:
 | C1 | problem | ... | pdf_verified | section | Section 1 | Section 1 | medium | screening_only |
 
 ## Idea Fuel
-- Engineering Pathology:
-- Hidden Assumption:
-- Fragile Interface:
-- Strongest Baseline:
-- Failure-to-Opportunity:
-- Transfer Hook:
-- Evidence Ledger claim_ids:
+### IF-1
+- Hypothesis / research opening:
+- Evidence anchor: C-...
+- Evidence class:
+- Engineering pathology:
+- Hidden assumption:
+- Fragile interface:
+- Failure mode:
+- Strongest baseline:
+- Why this baseline is strongest:
+- Paper win condition:
+- Idea kill condition:
+- DLO replacement baseline:
+- Transfer distance to DLO:
+- Why transfer may fail:
+- Negative transfer risk:
+- Minimum no-hardware micro-test:
+  - Artifact:
+  - Input:
+  - Protocol: 1. ...; 2. ...; 3. ...
+  - Metric:
+  - Threshold:
+  - Pass condition:
+  - Fail/kill condition:
+  - Compute/data cap:
+  - No-hardware confirmation: no robot; no real scene; no new data collection.
+- Downstream review target: DeepSeek should attack ...; Codex should verify ...
+
+### IF-2
+- Hypothesis / research opening:
+- Evidence anchor: C-... or not_evidenced
+- Evidence class:
+- Engineering pathology:
+- Hidden assumption:
+- Fragile interface:
+- Failure mode:
+- Strongest baseline:
+- Why this baseline is strongest:
+- Paper win condition:
+- Idea kill condition:
+- DLO replacement baseline:
+- Transfer distance to DLO:
+- Why transfer may fail:
+- Negative transfer risk:
+- Minimum no-hardware micro-test:
+  - Artifact:
+  - Input:
+  - Protocol: 1. ...; 2. ...; 3. ...
+  - Metric:
+  - Threshold:
+  - Pass condition:
+  - Fail/kill condition:
+  - Compute/data cap:
+  - No-hardware confirmation: no robot; no real scene; no new data collection.
+- Downstream review target: DeepSeek should attack ...; Codex should verify ...
+
+### IF-3
+- Hypothesis / research opening:
+- Evidence anchor: C-... or not_evidenced
+- Evidence class:
+- Engineering pathology:
+- Hidden assumption:
+- Fragile interface:
+- Failure mode:
+- Strongest baseline:
+- Why this baseline is strongest:
+- Paper win condition:
+- Idea kill condition:
+- DLO replacement baseline:
+- Transfer distance to DLO:
+- Why transfer may fail:
+- Negative transfer risk:
+- Minimum no-hardware micro-test:
+  - Artifact:
+  - Input:
+  - Protocol: 1. ...; 2. ...; 3. ...
+  - Metric:
+  - Threshold:
+  - Pass condition:
+  - Fail/kill condition:
+  - Compute/data cap:
+  - No-hardware confirmation: no robot; no real scene; no new data collection.
+- Downstream review target: DeepSeek should attack ...; Codex should verify ...
 
 ## Baseline Pressure
 - Strongest Baseline:
@@ -132,16 +221,20 @@ Section template to append after existing content:
 - Misleading direct-copy risk:
 - DLO-specific missing variable:
 - DLO replacement baseline:
-- Kill condition:
+- DLO-specific kill condition:
 - Evidence anchor / claim_id:
 
 ## No-hardware Micro-test
 - Explicit exclusions: no robot; no real scene; no new data collection.
 - Test artifact:
-- Protocol:
+- Input:
+- Protocol: 1. ...; 2. ...; 3. ...
 - Metric:
+- Threshold:
 - Pass condition:
 - Fail/kill condition:
+- Compute/data cap:
+- No-hardware confirmation: no robot; no real scene; no new data collection.
 
 ## Evidence Gaps
 - Missing anchors:

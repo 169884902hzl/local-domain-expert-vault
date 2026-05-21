@@ -65,7 +65,7 @@ TRANSFER_DOMAINS = {
 TRANSFER_TOKENS = {"transfer", "sim-to-real", "generalization", "domain", "迁移", "泛化"}
 ANCHOR_TYPES = {"section", "figure", "table", "appendix", "result_row", "snippet", "abstract", "note_only"}
 STRICT_ANCHOR_TYPES = {"section", "figure", "table", "appendix", "result_row", "snippet"}
-WEAK_EVIDENCE_CLASSES = {"note_derived", "abstract_only", "not_evidenced"}
+WEAK_EVIDENCE_CLASSES = {"note_derived", "abstract_only", "not_evidenced", "figure_approximation"}
 REVIEW_PRESSURE_SECTIONS = {
     "Idea Fuel": "idea_fuel",
     "Baseline Pressure": "baseline_pressure",
@@ -216,6 +216,48 @@ def _parse_evidence_ledger(body: str) -> list[dict[str, str]]:
 
 def _claim_ids(text: str) -> list[str]:
     return list(dict.fromkeys(re.findall(r"\b[A-Za-z][A-Za-z0-9_-]{1,40}\b", text)))
+
+
+def _parse_key_values(section: str) -> dict[str, str]:
+    values: dict[str, str] = {}
+    current_key = ""
+    for line in section.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        candidate = stripped.lstrip("-").strip()
+        if ":" in candidate and not re.match(r"^(?:step\s*)?\d{1,2}[\).:]", candidate, flags=re.IGNORECASE):
+            key, value = candidate.split(":", 1)
+            current_key = _normalize_field_name(key.strip().strip("*").strip())
+            values[current_key] = value.strip()
+            continue
+        if current_key:
+            values[current_key] = f"{values[current_key]}\n{stripped}".strip()
+    return values
+
+
+def _first_value(values: dict[str, str], *aliases: str) -> str:
+    for alias in aliases:
+        value = values.get(_normalize_field_name(alias), "")
+        if value:
+            return value.strip()
+    return ""
+
+
+def _idea_fuel_packets(section: str) -> list[tuple[str, str]]:
+    pattern = re.compile(r"^(?:#{3,6}\s+|[-*]\s*)?(IF-\d+)\b[^\n]*$", flags=re.MULTILINE | re.IGNORECASE)
+    matches = list(pattern.finditer(section))
+    packets: list[tuple[str, str]] = []
+    for index, match in enumerate(matches):
+        label = match.group(1).upper()
+        start = match.end()
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(section)
+        title_tail = match.group(0)[match.group(0).upper().find(label) + len(label) :].strip(" :-")
+        body = section[start:end].strip()
+        if title_tail:
+            body = f"- Hypothesis / research opening: {title_tail}\n{body}".strip()
+        packets.append((label, body))
+    return packets
 
 
 def _strict_ledger_claim_ids(records: list[dict[str, Any]]) -> set[str]:
@@ -411,6 +453,8 @@ def _record_from_ledger(
     }
     if evidence_class == "result_row_unconfirmed":
         record["confirmation_status"] = "unconfirmed"
+    if evidence_class == "figure_approximation":
+        record["confirmation_status"] = "figure_approximation"
     for domain, key in TRANSFER_DOMAINS.items():
         record[key] = domain in domains
     return record
@@ -425,12 +469,16 @@ def _review_pressure_record(
     section_name: str,
     claim_type: str,
     section_text: str,
+    all_claim_ids: set[str],
     strict_claim_ids: set[str],
     run_date: str,
+    packet_id: str = "",
+    linked_claim_ids: list[str] | None = None,
+    evidence_class: str = "",
 ) -> dict[str, Any]:
     title = strip_quotes(fields.get("title", "")) or path.stem
     snippet = _short_snippet(section_text, limit=360)
-    ids = [claim_id for claim_id in _claim_ids(section_text) if claim_id in strict_claim_ids]
+    ids = linked_claim_ids if linked_claim_ids is not None else [claim_id for claim_id in _claim_ids(section_text) if claim_id in all_claim_ids]
     domains = detect_domains(f"{title} {snippet} {' '.join(structured.values())}", tags)
     record: dict[str, Any] = {
         "source_note": rel(path),
@@ -457,9 +505,15 @@ def _review_pressure_record(
         "screening_only": True,
         "requires_human_check": True,
         "linked_ledger_claim_ids": ids,
-        "linked_strict_anchor": bool(ids),
+        "linked_strict_anchor": any(claim_id in strict_claim_ids for claim_id in ids),
         "downstream_use": "screening_only",
     }
+    if packet_id:
+        record["packet_id"] = packet_id
+    if evidence_class:
+        record["evidence_class"] = evidence_class
+        if evidence_class in {"figure_approximation", "result_row_unconfirmed"}:
+            record["confirmation_status"] = evidence_class
     if claim_type == "no_hardware_micro_test":
         record["pilot_ready"] = False
     for domain, key in TRANSFER_DOMAINS.items():
@@ -525,10 +579,47 @@ def extract_from_note(path: Path, *, run_date: str, include_decorated_fields: bo
     ]
     records.extend(ledger_records)
     strict_ids = _strict_ledger_claim_ids(ledger_records)
+    all_ledger_claim_ids = {
+        str(record.get("ledger_claim_id") or record.get("claim_id") or "")
+        for record in ledger_records
+        if str(record.get("ledger_claim_id") or record.get("claim_id") or "")
+    }
     for section_name, claim_type in REVIEW_PRESSURE_SECTIONS.items():
         section = _section_text(body, section_name)
         if not section:
             continue
+        if section_name == "Idea Fuel":
+            packets = _idea_fuel_packets(section)
+            if packets:
+                for packet_id, packet_text in packets:
+                    packet_fields = _parse_key_values(packet_text)
+                    evidence_anchor = _first_value(
+                        packet_fields,
+                        "Evidence anchor",
+                        "Evidence anchor / claim_id",
+                        "claim_id",
+                        "Evidence Ledger claim_ids",
+                    )
+                    linked_ids = [claim_id for claim_id in _claim_ids(evidence_anchor or packet_text) if claim_id in all_ledger_claim_ids]
+                    evidence_class = _normalize_token(_first_value(packet_fields, "Evidence class"))
+                    records.append(
+                        _review_pressure_record(
+                            path=path,
+                            fields=fields,
+                            tags=tags,
+                            structured=structured,
+                            section_name=section_name,
+                            claim_type=claim_type,
+                            section_text=packet_text,
+                            all_claim_ids=all_ledger_claim_ids,
+                            strict_claim_ids=strict_ids,
+                            run_date=run_date,
+                            packet_id=packet_id,
+                            linked_claim_ids=linked_ids,
+                            evidence_class=evidence_class,
+                        )
+                    )
+                continue
         records.append(
             _review_pressure_record(
                 path=path,
@@ -538,6 +629,7 @@ def extract_from_note(path: Path, *, run_date: str, include_decorated_fields: bo
                 section_name=section_name,
                 claim_type=claim_type,
                 section_text=section,
+                all_claim_ids=all_ledger_claim_ids,
                 strict_claim_ids=strict_ids,
                 run_date=run_date,
             )

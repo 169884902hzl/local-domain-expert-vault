@@ -22,13 +22,14 @@ from kb_common import (
 TOPICS_DIR = vault_path("wiki", "topics")
 PLACEHOLDER_TEXT = "待精读补充"
 WAITING_TEXT = "待精读"
-WEAK_EVIDENCE_CLASSES = {"note_derived", "abstract_only", "not_evidenced"}
+WEAK_EVIDENCE_CLASSES = {"note_derived", "abstract_only", "not_evidenced", "figure_approximation"}
 ANCHOR_REQUIRED_EVIDENCE_CLASSES = {
     "pdf_verified",
     "table_verified",
     "figure_verified",
     "appendix_verified",
     "result_row_unconfirmed",
+    "figure_approximation",
 }
 ALLOWED_EVIDENCE_CLASSES = ANCHOR_REQUIRED_EVIDENCE_CLASSES | WEAK_EVIDENCE_CLASSES
 ALLOWED_ANCHOR_TYPES = {"section", "table", "figure", "appendix", "result_row", "snippet", "abstract", "note_only"}
@@ -48,6 +49,20 @@ DLO_TARGET_TERMS = {
     "绳",
     "绳索",
     "布料",
+    "bimanual",
+    "dual-arm",
+    "dual arm",
+    "closed-loop",
+    "closed loop",
+    "control",
+    "sim-to-real",
+    "sim to real",
+    "robot manipulation",
+    "双臂",
+    "双手",
+    "控制",
+    "闭环",
+    "迁移",
 }
 DEFORMABLE_SOURCE_TERMS = {
     "dlo",
@@ -79,6 +94,17 @@ GENERATION_SOURCE_TERMS = {
     "generative",
     "language-only",
     "pure perception",
+}
+TRANSFER_CONTEXT_TERMS = {
+    "transfer",
+    "sim-to-real",
+    "sim to real",
+    "generalization",
+    "direct-copy",
+    "direct copy",
+    "negative transfer",
+    "迁移",
+    "泛化",
 }
 PHYSICAL_EVAL_TERMS = {
     "physical closed-loop",
@@ -164,7 +190,7 @@ def extract_subsection(markdown: str, heading: str) -> str:
     if not match:
         return ""
     start = match.end()
-    next_heading = re.search(r"^###\s+", markdown[start:], flags=re.MULTILINE)
+    next_heading = re.search(r"^###\s+(?!IF-\d+\b)", markdown[start:], flags=re.MULTILINE | re.IGNORECASE)
     end = start + next_heading.start() if next_heading else len(markdown)
     return markdown[start:end].strip()
 
@@ -175,7 +201,7 @@ def remove_subsection(markdown: str, heading: str) -> str:
         return markdown
     start = match.start()
     after_heading = match.end()
-    next_heading = re.search(r"^###\s+", markdown[after_heading:], flags=re.MULTILINE)
+    next_heading = re.search(r"^###\s+(?!IF-\d+\b)", markdown[after_heading:], flags=re.MULTILINE | re.IGNORECASE)
     end = after_heading + next_heading.start() if next_heading else len(markdown)
     return (markdown[:start].rstrip() + "\n\n" + markdown[end:].lstrip()).strip()
 
@@ -308,6 +334,62 @@ def first_key_value(values: dict[str, str], *aliases: str) -> str:
     return ""
 
 
+IDEA_FUEL_FIELD_ALIASES = {
+    "Hypothesis / research opening": ("Hypothesis / research opening", "Hypothesis", "Research opening"),
+    "Evidence anchor": ("Evidence anchor", "Evidence anchor / claim_id", "claim_id", "Evidence Ledger claim_ids"),
+    "Evidence class": ("Evidence class",),
+    "Engineering pathology": ("Engineering pathology",),
+    "Hidden assumption": ("Hidden assumption",),
+    "Fragile interface": ("Fragile interface",),
+    "Failure mode": ("Failure mode",),
+    "Strongest baseline": ("Strongest baseline",),
+    "Why this baseline is strongest": ("Why this baseline is strongest", "Why strongest"),
+    "Paper win condition": ("Paper win condition",),
+    "Idea kill condition": ("Idea kill condition",),
+    "DLO replacement baseline": ("DLO replacement baseline",),
+    "Transfer distance to DLO": ("Transfer distance to DLO", "Transfer distance"),
+    "Why transfer may fail": ("Why transfer may fail",),
+    "Negative transfer risk": ("Negative transfer risk",),
+    "Minimum no-hardware micro-test": ("Minimum no-hardware micro-test", "No-hardware micro-test"),
+    "Downstream review target": ("Downstream review target",),
+}
+NO_HARDWARE_FIELD_ALIASES = {
+    "Artifact": ("Artifact", "Test artifact", "测试产物", "产物"),
+    "Input": ("Input", "Inputs", "输入"),
+    "Protocol": ("Protocol", "Procedure", "Steps", "步骤", "流程"),
+    "Metric": ("Metric", "指标"),
+    "Threshold": ("Threshold", "阈值"),
+    "Pass condition": ("Pass condition", "Pass", "通过条件"),
+    "Fail/kill condition": ("Fail/kill condition", "Fail condition", "Kill condition", "Fail", "Kill", "失败条件"),
+    "Compute/data cap": ("Compute/data cap", "Compute cap", "Data cap", "Budget cap", "计算上限", "数据上限"),
+}
+
+
+def parse_known_fields(section: str, aliases_by_label: dict[str, tuple[str, ...]]) -> dict[str, str]:
+    alias_to_label = {
+        normalize_field_name(alias): label
+        for label, aliases in aliases_by_label.items()
+        for alias in aliases
+    }
+    values: dict[str, list[str]] = {}
+    current_label: str | None = None
+    for line in section.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        candidate = stripped.lstrip("-").strip()
+        if ":" in candidate:
+            key, value = candidate.split(":", 1)
+            label = alias_to_label.get(normalize_field_name(key.strip().strip("*").strip()))
+            if label:
+                current_label = label
+                values.setdefault(label, []).append(value.strip())
+                continue
+        if current_label:
+            values.setdefault(current_label, []).append(stripped)
+    return {label: "\n".join(part for part in parts if part).strip() for label, parts in values.items()}
+
+
 def blank_or_placeholder(value: str) -> bool:
     normalized = normalize_token(value)
     return not normalized or normalized in {"not_evidenced", "todo", "tbd", "unknown", "n_a", "na", "none", "missing"}
@@ -365,15 +447,197 @@ def evidence_ledger_claim_ids(ledger: str) -> set[str]:
 
 
 def claim_id_references(value: str) -> list[str]:
-    ignored = {"table", "figure", "section", "appendix", "page", "row", "claim", "id", "evidence", "anchor"}
+    ignored = {
+        "table",
+        "figure",
+        "section",
+        "appendix",
+        "page",
+        "row",
+        "claim",
+        "id",
+        "evidence",
+        "anchor",
+        "no_hardware",
+        "dlo_specific",
+        "direct_copy",
+        "sim_to_real",
+    }
     refs: list[str] = []
     for token in re.findall(r"\b[A-Za-z][A-Za-z0-9_-]*\b", value):
         normalized = normalize_token(token)
         if normalized in ignored:
             continue
-        if "-" in token or "_" in token or any(char.isdigit() for char in token):
+        if normalized.startswith("if_"):
+            continue
+        if any(char.isdigit() for char in token) and ("-" in token or "_" in token or token[:1].upper() == "C"):
             refs.append(token)
     return refs
+
+
+def unknown_claim_id_refs(text: str, known_claim_ids: set[str]) -> list[str]:
+    return [ref for ref in claim_id_references(text) if ref not in known_claim_ids]
+
+
+def extract_idea_fuel_packets(section: str) -> dict[str, str]:
+    pattern = re.compile(r"^(?:#{3,6}\s+|[-*]\s*)?(IF-\d+)\b[^\n]*$", flags=re.MULTILINE | re.IGNORECASE)
+    matches = list(pattern.finditer(section))
+    packets: dict[str, str] = {}
+    for index, match in enumerate(matches):
+        label = match.group(1).upper()
+        start = match.end()
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(section)
+        title_tail = match.group(0)[match.group(0).upper().find(label) + len(label) :].strip(" :-")
+        body = section[start:end].strip()
+        if title_tail:
+            body = f"- Hypothesis / research opening: {title_tail}\n{body}".strip()
+        packets[label] = body
+    return packets
+
+
+def enough_material_for_three_idea_packets(evidence_ledger: str, idea_fuel: str) -> bool:
+    rows, _headers = parse_evidence_ledger(evidence_ledger)
+    evidenced_rows = [
+        row
+        for row in rows
+        if ledger_value(row, "claim")
+        and normalize_token(ledger_value(row, "evidence_class")) not in {"not_evidenced", "abstract_only"}
+    ]
+    return len(evidenced_rows) >= 3 or len(idea_fuel) >= 1200
+
+
+def protocol_step_count(protocol: str) -> int:
+    numbered = re.findall(r"(?:^|[;\n]\s*)(?:step\s*)?\d{1,2}[\).:]", protocol, flags=re.IGNORECASE)
+    if numbered:
+        return len(numbered)
+    semicolon_steps = [part for part in re.split(r";", protocol) if part.strip()]
+    return len(semicolon_steps) if len(semicolon_steps) >= 3 else 0
+
+
+def micro_test_executability_issues(section: str, *, prefix: str = "no_hardware_micro_test") -> list[str]:
+    issues: list[str] = []
+    fields = parse_known_fields(section, NO_HARDWARE_FIELD_ALIASES)
+    for label in NO_HARDWARE_FIELD_ALIASES:
+        if blank_or_placeholder(fields.get(label, "")):
+            issues.append(f"{prefix}_missing_{normalize_token(label)}")
+    protocol = fields.get("Protocol", "")
+    if protocol and not 3 <= protocol_step_count(protocol) <= 6:
+        issues.append(f"{prefix}_protocol_not_3_to_6_steps")
+    return issues
+
+
+def validate_idea_fuel(section: str, evidence_ledger: str) -> list[str]:
+    issues: list[str] = []
+    packets = extract_idea_fuel_packets(section)
+    if "IF-1" not in packets:
+        issues.append("idea_fuel_missing_if_packet:IF-1")
+    if enough_material_for_three_idea_packets(evidence_ledger, section):
+        for required_packet in ["IF-1", "IF-2", "IF-3"]:
+            if required_packet not in packets:
+                issues.append(f"idea_fuel_missing_if_packet:{required_packet}")
+
+    known_claim_ids = evidence_ledger_claim_ids(evidence_ledger)
+    for packet_id, packet_text in packets.items():
+        values = parse_known_fields(packet_text, IDEA_FUEL_FIELD_ALIASES)
+        for label in IDEA_FUEL_FIELD_ALIASES:
+            value = values.get(label, "")
+            if label in {"Evidence anchor", "Evidence class"} and normalize_token(value) == "not_evidenced":
+                continue
+            if blank_or_placeholder(value):
+                issues.append(f"idea_fuel_packet_missing:{packet_id}:{label}")
+
+        anchor = values.get("Evidence anchor", "")
+        if not blank_or_placeholder(anchor):
+            if normalize_token(anchor) == "not_evidenced":
+                pass
+            else:
+                refs = claim_id_references(anchor)
+                if not refs:
+                    issues.append(f"idea_fuel_packet_missing_claim_id_reference:{packet_id}")
+                for ref in refs:
+                    if ref not in known_claim_ids:
+                        issues.append(f"idea_fuel_packet_unknown_claim_id:{packet_id}:{ref}")
+
+        evidence_class = normalize_token(values.get("Evidence class", ""))
+        if evidence_class and evidence_class not in ALLOWED_EVIDENCE_CLASSES:
+            issues.append(f"idea_fuel_packet_bad_evidence_class:{packet_id}:{evidence_class}")
+
+        review_target = values.get("Downstream review target", "").lower()
+        if review_target:
+            if "deepseek" not in review_target:
+                issues.append(f"idea_fuel_packet_review_target_missing_deepseek:{packet_id}")
+            if "codex" not in review_target:
+                issues.append(f"idea_fuel_packet_review_target_missing_codex:{packet_id}")
+
+        micro_test = values.get("Minimum no-hardware micro-test", "")
+        if micro_test:
+            issues.extend(micro_test_executability_issues(micro_test, prefix=f"idea_fuel_packet_micro_test:{packet_id}"))
+            issues.extend(
+                issue.replace("no_hardware_micro_test_", f"idea_fuel_packet_micro_test:{packet_id}:")
+                for issue in validate_no_hardware_micro_test(micro_test)
+            )
+    return issues
+
+
+NUMERIC_RESULT_TERMS = {
+    "result",
+    "metric",
+    "score",
+    "success",
+    "rate",
+    "accuracy",
+    "error",
+    "improvement",
+    "outperform",
+    "baseline",
+    "ablation",
+    "reported",
+    "performance",
+    "结果",
+    "指标",
+    "成功率",
+    "误差",
+    "提升",
+    "基线",
+}
+
+
+def line_has_numeric_result_claim(line: str) -> bool:
+    stripped = line.strip()
+    if not stripped or stripped.startswith("|"):
+        return False
+    text_without_ids = re.sub(r"\b[A-Za-z]+-[A-Za-z0-9_-]*\b", "", stripped)
+    has_number = bool(re.search(r"\b\d+(?:\.\d+)?\s*(?:%|x|ms|s|m|cm|mm|points?|pts)?\b", text_without_ids))
+    if not has_number:
+        return False
+    lowered = stripped.lower()
+    return any(term in lowered for term in NUMERIC_RESULT_TERMS)
+
+
+def line_has_claim_id_or_anchor(line: str, known_claim_ids: set[str]) -> bool:
+    refs = claim_id_references(line)
+    if any(ref in known_claim_ids for ref in refs):
+        return True
+    return bool(
+        re.search(
+            r"\b(table|figure|fig\.?|result_row|section|appendix|page|p\.)\s*[a-z]?\d+\b",
+            line,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def validate_numeric_claims(sections: dict[str, str]) -> list[str]:
+    known_claim_ids = evidence_ledger_claim_ids(sections.get("## Evidence Ledger", ""))
+    issues: list[str] = []
+    for heading, body in sections.items():
+        if heading in {"## Evidence Ledger", "## Idea Fuel", "## No-hardware Micro-test", "__strict_issue__"}:
+            continue
+        for line in body.splitlines():
+            if line_has_numeric_result_claim(line) and not line_has_claim_id_or_anchor(line, known_claim_ids):
+                snippet = " ".join(line.strip().split())[:80]
+                issues.append(f"numeric_claim_missing_claim_id_or_anchor:{heading.removeprefix('## ')}:{snippet}")
+    return issues
 
 
 def validate_evidence_ledger(ledger: str) -> list[str]:
@@ -428,6 +692,11 @@ def validate_evidence_ledger(ledger: str) -> list[str]:
             issues.append(f"evidence_ledger_missing_anchor:{row_label}")
         if evidence_class in WEAK_EVIDENCE_CLASSES and not (split_tokens(downstream_use) & REVIEW_ONLY_DOWNSTREAM_USES):
             issues.append(f"evidence_ledger_weak_claim_not_screening_only:{row_label}")
+        if evidence_class == "figure_approximation":
+            if anchor_type != "figure":
+                issues.append(f"evidence_ledger_figure_approximation_wrong_anchor_type:{row_label}")
+            if "requires_human_check" not in split_tokens(downstream_use):
+                issues.append(f"evidence_ledger_figure_approximation_requires_human_check:{row_label}")
         if (
             claim_type in {"problem", "contribution", "method", "experiment", "result", "limitation", "baseline", "strongest_baseline"}
             and evidence_class not in WEAK_EVIDENCE_CLASSES
@@ -472,15 +741,17 @@ def validate_baseline_pressure(section: str, evidence_ledger: str = "") -> list[
     for label, aliases in required.items():
         if blank_or_placeholder(first_key_value(values, *aliases)):
             issues.append(f"baseline_pressure_missing:{label}")
+    known_claim_ids = evidence_ledger_claim_ids(evidence_ledger)
     anchor_claim = first_key_value(values, "Evidence anchor / claim_id", "Evidence anchor", "claim_id")
     if not blank_or_placeholder(anchor_claim):
-        known_claim_ids = evidence_ledger_claim_ids(evidence_ledger)
         refs = claim_id_references(anchor_claim)
         if not refs:
             issues.append("baseline_pressure_missing_claim_id_reference")
         for ref in refs:
             if ref not in known_claim_ids:
                 issues.append(f"baseline_pressure_unknown_claim_id:{ref}")
+    for ref in sorted(set(unknown_claim_id_refs(section, known_claim_ids))):
+        issues.append(f"baseline_pressure_unknown_claim_id:{ref}")
     return issues
 
 
@@ -543,15 +814,19 @@ def validate_no_hardware_micro_test(section: str) -> list[str]:
 
     required_fields = {
         "artifact": ["artifact", "test artifact", "测试产物", "产物"],
+        "input": ["input", "inputs", "输入"],
         "protocol": ["protocol", "procedure", "steps", "步骤", "流程"],
         "metric": ["metric", "指标"],
+        "threshold": ["threshold", "阈值"],
         "pass_condition": ["pass condition", "通过条件", "pass:"],
         "fail_or_kill_condition": ["fail condition", "kill condition", "失败条件", "kill:"],
+        "compute_data_cap": ["compute/data cap", "compute cap", "data cap", "计算上限", "数据上限"],
     }
     lowered = section.lower()
     for code, tokens in required_fields.items():
         if not any(token.lower() in lowered for token in tokens):
             issues.append(f"no_hardware_micro_test_missing_{code}")
+    issues.extend(micro_test_executability_issues(section))
     return issues
 
 
@@ -568,15 +843,20 @@ def validate_transfer_risk(section: str, idea_fuel: str) -> list[str]:
     generation_source = contains_any_term(source_lower, GENERATION_SOURCE_TERMS)
     deformable_source = contains_any_term(source_lower, DEFORMABLE_SOURCE_TERMS) and not generation_source
     deformable_transfer = deformable_target and not deformable_source
-    if deformable_transfer:
+    transfer_present = (
+        bool(source_domain or target_domain or first_key_value(values, "Transfer distance"))
+        or contains_any_term(combined, TRANSFER_CONTEXT_TERMS)
+    )
+    if deformable_transfer or (transfer_present and deformable_target):
         required = {
             "source_domain": ("Source domain",),
             "target_domain": ("Target domain",),
             "transfer_distance": ("Transfer distance",),
             "why_transfer_may_fail": ("Why transfer may fail",),
             "negative_transfer_risk": ("Negative transfer risk",),
+            "misleading_direct_copy_risk": ("Misleading direct-copy risk", "Direct-copy risk"),
             "dlo_replacement_baseline": ("DLO replacement baseline",),
-            "kill_condition": ("Kill condition", "DLO-specific kill condition"),
+            "dlo_specific_kill_condition": ("DLO-specific kill condition",),
         }
         for label, aliases in required.items():
             if blank_or_placeholder(first_key_value(values, *aliases)):
@@ -587,7 +867,7 @@ def validate_transfer_risk(section: str, idea_fuel: str) -> list[str]:
         allowed = {"none": 0, "low": 1, "medium": 2, "high": 3, "extreme": 4}
         if distance not in allowed:
             issues.append(f"transfer_risk_bad_distance:{distance}")
-        physical_eval = contains_any_term(lowered, PHYSICAL_EVAL_TERMS)
+        physical_eval = contains_any_term(section.lower(), PHYSICAL_EVAL_TERMS)
         if generation_source and deformable_target and distance in allowed and allowed[distance] < allowed["high"] and not physical_eval:
             issues.append("transfer_risk_generation_to_dlo_distance_too_low")
     return issues
@@ -602,12 +882,15 @@ def strict_contract_issues(sections: dict[str, str]) -> list[str]:
             issues.append(f"missing_strict_section:{heading.removeprefix('## ')}")
     if sections.get("## Evidence Ledger"):
         issues.extend(validate_evidence_ledger(sections["## Evidence Ledger"]))
+    if sections.get("## Idea Fuel"):
+        issues.extend(validate_idea_fuel(sections["## Idea Fuel"], sections.get("## Evidence Ledger", "")))
     if sections.get("## Baseline Pressure"):
         issues.extend(validate_baseline_pressure(sections["## Baseline Pressure"], sections.get("## Evidence Ledger", "")))
     if sections.get("## No-hardware Micro-test"):
         issues.extend(validate_no_hardware_micro_test(sections["## No-hardware Micro-test"]))
     if sections.get("## Transfer Risk"):
         issues.extend(validate_transfer_risk(sections["## Transfer Risk"], sections.get("## Idea Fuel", "")))
+    issues.extend(validate_numeric_claims(sections))
     return issues
 
 

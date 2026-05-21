@@ -80,6 +80,48 @@ GOOD_BASELINE = """- Strongest Baseline: Contact-aware planner [C-B1]
 - No-hardware proxy baseline: Recompute Table 2 ranking from reported values."""
 
 
+GOOD_IF_MICRO_TEST = """  - Artifact: synthetic toy arrays and static metric table from paper results.
+  - Input: reported Table 2 values and three fixed toy state arrays.
+  - Protocol: 1. Extract the reported rows; 2. Build toy arrays with fixed seeds; 3. Recompute ranking; 4. Compare ranking against the paper.
+  - Metric: ranking consistency and absolute metric error.
+  - Threshold: ranking must match exactly and error must stay below 1e-6.
+  - Pass condition: Recomputed ranking matches Table 2.
+  - Fail/kill condition: Ranking flips or requires unavailable data.
+  - Compute/data cap: CPU-only under 10 minutes; no files beyond paper tables and toy arrays.
+  - No-hardware confirmation: no robot; no real scene; no new data collection."""
+
+
+def good_if_packet(packet_id: int, claim_id: str, evidence_class: str = "pdf_verified") -> str:
+    return f"""### IF-{packet_id}
+- Hypothesis / research opening: Use contact-state drift as adversarial pressure for a DLO planning proxy.
+- Evidence anchor: {claim_id}
+- Evidence class: {evidence_class}
+- Engineering pathology: The idea fails when visual state hides contact mode transitions.
+- Hidden assumption: The reported benchmark ranking transfers to DLO contact planning.
+- Fragile interface: The metric interface ignores tension and contact switching.
+- Failure mode: A visually plausible trajectory can be dynamically invalid.
+- Strongest baseline: Contact-aware planner [C-B1]
+- Why this baseline is strongest: It is the closest reported comparator on the same metric.
+- Paper win condition: The paper must beat the baseline on the reported anchored result.
+- Idea kill condition: The idea dies if the DLO baseline matches the static ranking.
+- DLO replacement baseline: DLO-specific contact planner using the same observable inputs.
+- Transfer distance to DLO: high
+- Why transfer may fail: DLO control needs tension, friction, and closed-loop correction not measured by the source paper.
+- Negative transfer risk: Direct copying may optimize visual plausibility while damaging control robustness.
+- Minimum no-hardware micro-test:
+{GOOD_IF_MICRO_TEST}
+- Downstream review target: DeepSeek should attack the baseline and transfer assumption; Codex should verify claim_id anchors and no-hardware executability."""
+
+
+GOOD_IDEA = "\n\n".join(
+    [
+        good_if_packet(1, "C-L1"),
+        good_if_packet(2, "C-B1", "figure_approximation"),
+        good_if_packet(3, "not_evidenced", "not_evidenced"),
+    ]
+)
+
+
 GOOD_TRANSFER = """- Source domain: video generation
 - Target domain: DLO manipulation
 - Transfer distance: high
@@ -88,15 +130,20 @@ GOOD_TRANSFER = """- Source domain: video generation
 - Misleading direct-copy risk: A generated trajectory may look plausible but be dynamically invalid.
 - DLO-specific missing variable: tension, contact mode, and hidden friction.
 - DLO replacement baseline: DLO contact planner [C-B1]
-- Kill condition: Static metric fails to beat the DLO baseline on reported rows.
+- DLO-specific kill condition: The idea is killed if a DLO contact planner matches the static metric without new data.
 - Evidence anchor / claim_id: C-L1"""
 
 
-GOOD_MICRO_TEST = """- Artifact: synthetic toy arrays and static metric table from paper results.
-- Protocol: no robot; no real scene; no new data collection. Use toy arrays, pseudo-code, and static metric calculation only.
+GOOD_MICRO_TEST = """- Explicit exclusions: no robot; no real scene; no new data collection.
+- Artifact: synthetic toy arrays and static metric table from paper results.
+- Input: reported Table 2 rows and fixed toy state arrays.
+- Protocol: 1. Extract reported rows; 2. Build fixed toy arrays; 3. Recompute ranking; 4. Compare against Table 2.
 - Metric: ranking consistency and absolute metric error.
+- Threshold: exact ranking match and error below 1e-6.
 - Pass condition: Recomputed ranking matches Table 2.
-- Kill condition: Recomputed ranking contradicts Table 2 or depends on unavailable data."""
+- Fail/kill condition: Recomputed ranking contradicts Table 2 or depends on unavailable data.
+- Compute/data cap: CPU-only under 10 minutes; no external files beyond paper table values.
+- No-hardware confirmation: no robot; no real scene; no new data collection."""
 
 
 def strict_analysis(
@@ -104,7 +151,7 @@ def strict_analysis(
     ledger: str | None = GOOD_LEDGER,
     include_top_idea: bool = True,
     nested_idea: str = "",
-    top_idea: str = "- [C-L1] Treat this as adversarial pressure, not inspiration.",
+    top_idea: str = GOOD_IDEA,
     baseline: str = GOOD_BASELINE,
     transfer: str = GOOD_TRANSFER,
     micro_test: str = GOOD_MICRO_TEST,
@@ -179,11 +226,11 @@ class FinalizeStrictContractTest(unittest.TestCase):
     def test_nested_idea_fuel_is_promoted_when_top_level_absent(self) -> None:
         output = finalize_content(
             BASE_NOTE,
-            strict_analysis(include_top_idea=False, nested_idea="- [C-L1] Nested fallback pressure."),
+            strict_analysis(include_top_idea=False, nested_idea=GOOD_IDEA),
             load_schema(),
         )
         self.assertIn("## Idea Fuel", output)
-        self.assertIn("- [C-L1] Nested fallback pressure.", output)
+        self.assertIn("### IF-1", output)
 
     def test_conflicting_top_level_and_nested_idea_fuel_fails(self) -> None:
         with self.assertRaisesRegex(ValueError, "duplicate_idea_fuel_conflict"):
@@ -216,9 +263,9 @@ class FinalizeStrictContractTest(unittest.TestCase):
 
     def test_hardware_micro_tests_fail_and_synthetic_static_test_passes(self) -> None:
         bad_sections = [
-            GOOD_MICRO_TEST.replace("Use toy arrays", "Use a real robot arm"),
-            GOOD_MICRO_TEST.replace("Use toy arrays", "Evaluate on a real cabinet"),
-            GOOD_MICRO_TEST.replace("no new data collection. Use toy arrays", "run new data collection. Use toy arrays"),
+            GOOD_MICRO_TEST.replace("Build fixed toy arrays", "Use a real robot arm"),
+            GOOD_MICRO_TEST.replace("fixed toy state arrays", "a real cabinet"),
+            GOOD_MICRO_TEST.replace("no new data collection.", "run new data collection.", 1),
         ]
         for section in bad_sections:
             with self.subTest(section=section):
@@ -271,6 +318,50 @@ class FinalizeStrictContractTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "baseline_pressure_unknown_claim_id:C-Z9"):
             validate_analysis(extract_sections(strict_analysis(baseline=bad_baseline)), load_schema())
         validate_analysis(extract_sections(strict_analysis(baseline=GOOD_BASELINE)), load_schema())
+
+    def test_missing_if_packet_fails(self) -> None:
+        with self.assertRaisesRegex(ValueError, "idea_fuel_missing_if_packet:IF-1"):
+            validate_analysis(extract_sections(strict_analysis(top_idea="- [C-L1] loose idea list.")), load_schema())
+
+    def test_if_packet_missing_kill_condition_fails(self) -> None:
+        bad_idea = GOOD_IDEA.replace("- Idea kill condition:", "- Removed idea kill condition:", 1)
+        with self.assertRaisesRegex(ValueError, "idea_fuel_packet_missing:IF-1:Idea kill condition"):
+            validate_analysis(extract_sections(strict_analysis(top_idea=bad_idea)), load_schema())
+
+    def test_if_packet_unknown_claim_id_fails(self) -> None:
+        bad_idea = GOOD_IDEA.replace("- Evidence anchor: C-L1", "- Evidence anchor: C-Z9", 1)
+        with self.assertRaisesRegex(ValueError, "idea_fuel_packet_unknown_claim_id:IF-1:C-Z9"):
+            validate_analysis(extract_sections(strict_analysis(top_idea=bad_idea)), load_schema())
+
+    def test_valid_if_packets_pass(self) -> None:
+        validate_analysis(extract_sections(strict_analysis(top_idea=GOOD_IDEA)), load_schema())
+
+    def test_no_hardware_micro_test_missing_executable_fields_fails(self) -> None:
+        bad_sections = [
+            GOOD_MICRO_TEST.replace("- Metric:", "- Removed metric:", 1),
+            GOOD_MICRO_TEST.replace("- Threshold:", "- Removed threshold:", 1),
+            GOOD_MICRO_TEST.replace("- Fail/kill condition:", "- Removed fail condition:", 1),
+        ]
+        for section in bad_sections:
+            with self.subTest(section=section):
+                with self.assertRaisesRegex(ValueError, "no_hardware_micro_test_missing|no_hardware_micro_test_protocol"):
+                    validate_analysis(extract_sections(strict_analysis(micro_test=section)), load_schema())
+
+    def test_figure_approximation_is_allowed_only_as_weak_human_check_evidence(self) -> None:
+        ledger = GOOD_LEDGER + "\n| C-F1 | result | Figure-estimated success is approximately 62%. | figure_approximation | figure | Figure 3 | p6 Figure 3 | low | requires_human_check |"
+        validate_analysis(extract_sections(strict_analysis(ledger=ledger)), load_schema())
+        bad = ledger.replace("figure_approximation | figure | Figure 3", "figure_approximation | table | Table 3")
+        with self.assertRaisesRegex(ValueError, "evidence_ledger_figure_approximation_wrong_anchor_type"):
+            validate_analysis(extract_sections(strict_analysis(ledger=bad)), load_schema())
+
+    def test_transfer_risk_requires_direct_copy_and_dlo_kill_condition(self) -> None:
+        no_direct_copy = GOOD_TRANSFER.replace("- Misleading direct-copy risk: A generated trajectory may look plausible but be dynamically invalid.\n", "")
+        with self.assertRaisesRegex(ValueError, "transfer_risk_missing:misleading_direct_copy_risk"):
+            validate_analysis(extract_sections(strict_analysis(transfer=no_direct_copy)), load_schema())
+
+        no_dlo_kill = GOOD_TRANSFER.replace("- DLO-specific kill condition:", "- Kill condition:")
+        with self.assertRaisesRegex(ValueError, "transfer_risk_missing:dlo_specific_kill_condition"):
+            validate_analysis(extract_sections(strict_analysis(transfer=no_dlo_kill)), load_schema())
 
 
 class AuditTargetModeTest(unittest.TestCase):
@@ -399,9 +490,92 @@ Done note.
 | C-W3 | transfer_failure | Not evidenced transfer risk should stay screening-only. | not_evidenced | note_only |  | not evidenced | low | screening_only |
 | C-R1 | actual_baseline_result | Result row is unconfirmed until human checks the row. | result_row_unconfirmed | result_row | Table 2 row 1 | p5 Table 2 row 1 | medium | requires_human_check |
 | C-A1 | central_claim | Appendix derivation supports the anchored claim. | appendix_verified | appendix | Appendix A derivation | Appendix A p12 | high | candidate_ok |
+| C-F1 | actual_baseline_result | Figure-estimated metric is approximate only. | figure_approximation | figure | Figure 3 | p6 Figure 3 | low | requires_human_check |
 
 ## Idea Fuel
-Speculative transfer hook without a ledger claim reference.
+### IF-1
+- Hypothesis / research opening: Treat the appendix result as a DLO pressure test.
+- Evidence anchor: C-A1
+- Evidence class: pdf_verified
+- Engineering pathology: Contact state disappears behind the benchmark metric.
+- Hidden assumption: The appendix derivation transfers to DLO control.
+- Fragile interface: Static ranking has no contact-mode state.
+- Failure mode: A visually plausible output can break closed-loop control.
+- Strongest baseline: Contact planner [C-A1]
+- Why this baseline is strongest: It is the nearest DLO comparator in the note.
+- Paper win condition: The paper must beat the anchored appendix claim.
+- Idea kill condition: The idea dies if the DLO contact planner matches the static metric.
+- DLO replacement baseline: DLO contact planner with identical observables.
+- Transfer distance to DLO: high
+- Why transfer may fail: Contact, friction, and tension are hidden.
+- Negative transfer risk: Direct copying may reward appearance over control.
+- Minimum no-hardware micro-test:
+  - Artifact: static metric table.
+  - Input: appendix snippet and toy arrays.
+  - Protocol: 1. Extract snippet; 2. Build toy arrays; 3. Recompute ranking.
+  - Metric: ranking error.
+  - Threshold: zero ranking flips.
+  - Pass condition: ranking stable.
+  - Fail/kill condition: ranking flips.
+  - Compute/data cap: CPU-only under 10 minutes.
+  - No-hardware confirmation: no robot; no real scene; no new data collection.
+- Downstream review target: DeepSeek should attack the DLO transfer assumption; Codex should verify C-A1 and no-hardware fields.
+
+### IF-2
+- Hypothesis / research opening: Use figure approximation only as a screening hint.
+- Evidence anchor: C-F1
+- Evidence class: figure_approximation
+- Engineering pathology: Visual estimation can hallucinate precision.
+- Hidden assumption: A plotted value is close enough for baseline pressure.
+- Fragile interface: Figure reading has no row-level confirmation.
+- Failure mode: Approximate value reverses a baseline ranking.
+- Strongest baseline: Contact planner [C-A1]
+- Why this baseline is strongest: It is the only DLO-specific comparator.
+- Paper win condition: Figure trend survives human checking.
+- Idea kill condition: The idea dies if the approximate figure value is not confirmed.
+- DLO replacement baseline: DLO contact planner with static metric.
+- Transfer distance to DLO: high
+- Why transfer may fail: Approximate visual trends omit contact dynamics.
+- Negative transfer risk: Direct copying may optimize a noisy visual trend.
+- Minimum no-hardware micro-test:
+  - Artifact: figure crop metadata.
+  - Input: existing figure and toy arrays.
+  - Protocol: 1. Record approximate value; 2. Run fixed ranking script; 3. Compare sensitivity.
+  - Metric: rank sensitivity.
+  - Threshold: no rank change under approximation interval.
+  - Pass condition: rank stable.
+  - Fail/kill condition: rank changes.
+  - Compute/data cap: CPU-only under 10 minutes.
+  - No-hardware confirmation: no robot; no real scene; no new data collection.
+- Downstream review target: DeepSeek should attack figure precision; Codex should verify screening_only handling.
+
+### IF-3
+- Hypothesis / research opening: Keep unevidenced DLO transfer as a review target only.
+- Evidence anchor: not_evidenced
+- Evidence class: not_evidenced
+- Engineering pathology: Transfer hook can outrun evidence.
+- Hidden assumption: DLO relevance exists without direct evaluation.
+- Fragile interface: Claim boundary between note idea and paper evidence.
+- Failure mode: Review pressure is mistaken for accepted evidence.
+- Strongest baseline: Contact planner [C-A1]
+- Why this baseline is strongest: It would directly test the DLO assumption.
+- Paper win condition: none without evidence.
+- Idea kill condition: The idea dies if the DLO planner already covers it.
+- DLO replacement baseline: DLO contact planner.
+- Transfer distance to DLO: high
+- Why transfer may fail: No DLO evidence is present.
+- Negative transfer risk: Direct copying may create unsupported experiments.
+- Minimum no-hardware micro-test:
+  - Artifact: static checklist.
+  - Input: ledger rows only.
+  - Protocol: 1. List supported claims; 2. Mark gaps; 3. Compare to DLO baseline.
+  - Metric: unsupported-claim count.
+  - Threshold: zero promoted unsupported claims.
+  - Pass condition: all unsupported claims remain screening-only.
+  - Fail/kill condition: any unsupported claim is promoted.
+  - Compute/data cap: CPU-only under 5 minutes.
+  - No-hardware confirmation: no robot; no real scene; no new data collection.
+- Downstream review target: DeepSeek should attack unsupported transfer; Codex should verify not_evidenced remains screening-only.
 
 ## Baseline Pressure
 - Strongest Baseline: Contact planner [C-A1]
@@ -418,11 +592,21 @@ Speculative transfer hook without a ledger claim reference.
 - Transfer distance: high
 - Why transfer may fail: Contact and tension are hidden.
 - Negative transfer risk: Visual plausibility can mislead control.
+- Misleading direct-copy risk: A generated trajectory may look feasible while violating DLO contact dynamics.
 - DLO replacement baseline: Contact planner.
-- Kill condition: Static metric fails.
+- DLO-specific kill condition: Static metric fails against a DLO contact planner.
 
 ## No-hardware Micro-test
-No robot; no real scene; no new data collection. Artifact: toy arrays. Protocol: static metric calculation. Metric: ranking error. Pass condition: stable ranking. Kill condition: ranking flip.
+- Explicit exclusions: no robot; no real scene; no new data collection.
+- Artifact: toy arrays.
+- Input: reported table rows.
+- Protocol: 1. Extract rows; 2. Build toy arrays; 3. Compute ranking.
+- Metric: ranking error.
+- Threshold: zero ranking flips.
+- Pass condition: stable ranking.
+- Fail/kill condition: ranking flip.
+- Compute/data cap: CPU-only under 10 minutes.
+- No-hardware confirmation: no robot; no real scene; no new data collection.
 
 ## Evidence Gaps
 Missing physical DLO closed-loop evidence.
@@ -439,19 +623,26 @@ class ResearchAgendaExtractorStrictFieldsTest(unittest.TestCase):
 
     def test_new_sections_parse_as_review_pressure_not_evidence(self) -> None:
         records = self.extract_records()
-        idea = next(record for record in records if record.get("claim_type") == "idea_fuel")
+        idea_records = [record for record in records if record.get("claim_type") == "idea_fuel"]
+        self.assertEqual([record.get("packet_id") for record in idea_records], ["IF-1", "IF-2", "IF-3"])
+        idea = idea_records[0]
+        figure_idea = idea_records[1]
         micro = next(record for record in records if record.get("claim_type") == "no_hardware_micro_test")
         self.assertEqual(idea["record_role"], "review_pressure")
         self.assertFalse(idea["evidence_bearing"])
         self.assertTrue(idea["screening_only"])
-        self.assertFalse(idea["linked_strict_anchor"])
+        self.assertEqual(idea["linked_ledger_claim_ids"], ["C-A1"])
+        self.assertTrue(idea["linked_strict_anchor"])
+        self.assertEqual(figure_idea["evidence_class"], "figure_approximation")
+        self.assertFalse(figure_idea["evidence_bearing"])
+        self.assertTrue(figure_idea["requires_human_check"])
         self.assertFalse(micro["pilot_ready"])
         self.assertFalse(micro["evidence_bearing"])
 
     def test_weak_evidence_classes_stay_screening_only(self) -> None:
         records = self.extract_records()
-        weak = [record for record in records if record.get("evidence_class") in {"note_derived", "abstract_only", "not_evidenced"}]
-        self.assertEqual(len(weak), 3)
+        weak = [record for record in records if record.get("evidence_class") in {"note_derived", "abstract_only", "not_evidenced", "figure_approximation"} and record.get("record_role") == "evidence_ledger"]
+        self.assertEqual(len(weak), 4)
         for record in weak:
             self.assertEqual(record["extraction_confidence"], "low")
             self.assertTrue(record["screening_only"])
@@ -601,8 +792,12 @@ class ReadPaperPromptContractTest(unittest.TestCase):
         prompt = (SCRIPTS_DIR.parent / "commands" / "read-paper.md").read_text(encoding="utf-8")
         self.assertIn("## Evidence Ledger", prompt)
         self.assertIn("claim_id", prompt)
+        self.assertIn("figure_approximation", prompt)
+        self.assertIn("### IF-1", prompt)
+        self.assertIn("Downstream review target", prompt)
         self.assertIn("no robot", prompt)
         self.assertIn("no real scene", prompt)
         self.assertIn("no new data collection", prompt)
+        self.assertIn("Compute/data cap", prompt)
         self.assertIn("Transfer distance", prompt)
         self.assertIn("Negative transfer risk", prompt)
