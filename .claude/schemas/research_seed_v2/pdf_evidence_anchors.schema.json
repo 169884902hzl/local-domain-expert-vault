@@ -13,6 +13,7 @@
     "artifact_hashes": {"type": "object"},
     "boundary": {"type": "string"}
   },
+  "additionalProperties": false,
   "$defs": {
     "paper_anchor_record": {
       "type": "object",
@@ -26,9 +27,10 @@
         "anchors": {
           "type": "array",
           "items": {"$ref": "#/$defs/anchor"}
-        }
+        },
+        "extension_metadata": {"type": "object"}
       },
-      "additionalProperties": true
+      "additionalProperties": false
     },
     "anchor": {
       "type": "object",
@@ -69,6 +71,7 @@
         "validated_baseline": {"type": "string"},
         "validated_task": {"type": "string"},
         "confirmation_note": {"type": "string"},
+        "extension_metadata": {"type": "object"},
         "extraction_method": {
           "type": "string",
           "enum": ["note_section", "pdfplumber", "pdf_text", "pdf_table", "manual"]
@@ -87,7 +90,7 @@
           }
         }
       ],
-      "additionalProperties": true
+      "additionalProperties": false
     }
   }
 }

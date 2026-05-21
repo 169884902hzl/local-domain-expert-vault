@@ -62,6 +62,7 @@ TRANSFER_DOMAINS = {
     "VLA": "transfer_to_VLA",
     "sim-to-real": "transfer_to_sim_to_real",
 }
+TRANSFER_TOKENS = {"transfer", "sim-to-real", "generalization", "domain", "迁移", "泛化"}
 ANCHOR_TYPES = {"section", "figure", "table", "appendix", "result_row", "snippet", "abstract", "note_only"}
 STRICT_ANCHOR_TYPES = {"section", "figure", "table", "appendix", "result_row", "snippet"}
 WEAK_EVIDENCE_CLASSES = {"note_derived", "abstract_only", "not_evidenced"}
@@ -373,6 +374,11 @@ def _record_from_ledger(
     )
     screening_only = evidence_class in WEAK_EVIDENCE_CLASSES or "screening_only" in _normalize_token(downstream_use)
     confidence = "low" if screening_only else ("medium" if evidence_class == "result_row_unconfirmed" else "high")
+    evidence_bearing = (
+        not screening_only
+        and evidence_class != "result_row_unconfirmed"
+        and not requires_human_check
+    )
     record: dict[str, Any] = {
         "source_note": rel(path),
         "source_title": title,
@@ -401,8 +407,10 @@ def _record_from_ledger(
         "screening_only": screening_only,
         "requires_human_check": requires_human_check,
         "record_role": "evidence_ledger",
-        "evidence_bearing": not screening_only,
+        "evidence_bearing": evidence_bearing,
     }
+    if evidence_class == "result_row_unconfirmed":
+        record["confirmation_status"] = "unconfirmed"
     for domain, key in TRANSFER_DOMAINS.items():
         record[key] = domain in domains
     return record
@@ -839,9 +847,15 @@ def build_paper_primitives(records: list[dict[str, Any]]) -> list[dict[str, Any]
         )
         transfer_failure, transfer_record = _first_matching(
             items,
-            {"limitation", "open_question", "evidence_note"},
-            tokens={"transfer", "sim-to-real", "generalization", "domain", "迁移", "泛化"},
+            {"transfer_risk"},
+            tokens=TRANSFER_TOKENS,
         )
+        if not transfer_record:
+            transfer_failure, transfer_record = _first_matching(
+                items,
+                {"transfer_failure", "limitation", "open_question", "evidence_note"},
+                tokens=TRANSFER_TOKENS,
+            )
         reusable_primitive, primitive_record = _first_statement(items, {"method", "task", "sensor", "robot_setup"})
         contradiction, contradiction_record = _first_matching(
             items,

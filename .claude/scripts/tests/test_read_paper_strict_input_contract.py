@@ -13,6 +13,7 @@ import research_agenda_extract as extractor
 from finalize_reading import finalize_content, validate_analysis, extract_sections
 from kb_common import load_schema
 from research_claim_graph import build_nodes
+from research_seed_v2_common import schema_validator_available, validate_payload
 
 
 RUN_DATE = "2099-05-21"
@@ -233,6 +234,44 @@ class FinalizeStrictContractTest(unittest.TestCase):
             validate_analysis(extract_sections(strict_analysis(transfer=bad_transfer)), load_schema())
         validate_analysis(extract_sections(strict_analysis(transfer=GOOD_TRANSFER)), load_schema())
 
+    def test_cross_domain_deformable_terms_require_transfer_risk_fields(self) -> None:
+        targets = [
+            "rope manipulation",
+            "cable routing",
+            "cloth folding",
+            "deformable object manipulation",
+            "线缆整理",
+            "绳索操控",
+            "布料折叠",
+        ]
+        for target in targets:
+            with self.subTest(target=target):
+                bad_transfer = f"""- Source domain: video generation
+- Target domain: {target}
+- Transfer distance: high"""
+                with self.assertRaisesRegex(ValueError, "transfer_risk_missing:why_transfer_may_fail"):
+                    validate_analysis(extract_sections(strict_analysis(transfer=bad_transfer)), load_schema())
+        bad_source = """- Source domain: rope perception
+- Target domain: cable manipulation
+- Transfer distance: high"""
+        with self.assertRaisesRegex(ValueError, "transfer_risk_missing:why_transfer_may_fail"):
+            validate_analysis(extract_sections(strict_analysis(transfer=bad_source)), load_schema())
+
+    def test_generation_to_deformable_transfer_requires_high_distance(self) -> None:
+        for target in ["rope manipulation", "DLO manipulation"]:
+            for distance in ["low", "medium"]:
+                with self.subTest(target=target, distance=distance):
+                    transfer = GOOD_TRANSFER.replace("- Target domain: DLO manipulation", f"- Target domain: {target}")
+                    transfer = transfer.replace("- Transfer distance: high", f"- Transfer distance: {distance}")
+                    with self.assertRaisesRegex(ValueError, "generation_to_dlo_distance_too_low"):
+                        validate_analysis(extract_sections(strict_analysis(transfer=transfer)), load_schema())
+
+    def test_baseline_pressure_claim_id_must_exist_in_ledger(self) -> None:
+        bad_baseline = GOOD_BASELINE.replace("C-B1 / Table 2", "C-Z9 / Table 2")
+        with self.assertRaisesRegex(ValueError, "baseline_pressure_unknown_claim_id:C-Z9"):
+            validate_analysis(extract_sections(strict_analysis(baseline=bad_baseline)), load_schema())
+        validate_analysis(extract_sections(strict_analysis(baseline=GOOD_BASELINE)), load_schema())
+
 
 class AuditTargetModeTest(unittest.TestCase):
     def setUp(self) -> None:
@@ -424,6 +463,18 @@ class ResearchAgendaExtractorStrictFieldsTest(unittest.TestCase):
         row = next(record for record in records if record.get("evidence_class") == "result_row_unconfirmed")
         self.assertEqual(row["anchor_type"], "result_row")
         self.assertTrue(row["requires_human_check"])
+        self.assertEqual(row["confirmation_status"], "unconfirmed")
+        self.assertFalse(row["evidence_bearing"])
+
+    def test_transfer_risk_populates_transfer_failure_as_review_pressure(self) -> None:
+        records = [record for record in self.extract_records() if record.get("claim_type") != "transfer_failure"]
+        primitive = extractor.build_paper_primitives(records)[0]
+        self.assertIn("Transfer distance", primitive["primitives"]["transfer_failure"])
+        claim = next(claim for claim in primitive["claims"] if claim.get("claim_type") == "transfer_failure")
+        self.assertEqual(claim["record_role"], "review_pressure")
+        self.assertTrue(claim["screening_only"])
+        self.assertTrue(claim["requires_human_check"])
+        self.assertEqual(claim["confidence"], "low")
 
     def test_appendix_anchor_supported_and_schema_ready(self) -> None:
         records = self.extract_records()
@@ -455,6 +506,66 @@ class ResearchAgendaExtractorStrictFieldsTest(unittest.TestCase):
         )[0]
         self.assertEqual(node["confidence"], "high")
         self.assertEqual(node["anchor_type"], "appendix")
+
+    def test_pdf_evidence_anchor_schema_rejects_unknown_fields(self) -> None:
+        if not schema_validator_available():
+            self.skipTest("jsonschema is not available")
+        payload = {
+            "schema_version": "pdf_evidence_anchors.v1",
+            "run_date": RUN_DATE,
+            "records": [
+                {
+                    "schema_version": "pdf_evidence_anchors.v1",
+                    "run_date": RUN_DATE,
+                    "paper_id": "APP",
+                    "source_pdf": "attachments/app.pdf",
+                    "source_note": "wiki/topics/app.md",
+                    "extension_metadata": {"producer": "fixture"},
+                    "anchors": [
+                        {
+                            "anchor_id": "APP-A1",
+                            "anchor_type": "appendix",
+                            "anchor_source": "manual_pdf_locator",
+                            "section": "Appendix A",
+                            "page": 12,
+                            "snippet": "Appendix supports a strict claim.",
+                            "extraction_method": "manual",
+                            "confidence": "high",
+                            "requires_human_check": False,
+                            "extension_metadata": {"note": "allowed explicit extension block"},
+                        }
+                    ],
+                }
+            ],
+        }
+        self.assertEqual(validate_payload(payload, "pdf_evidence_anchors.v1"), [])
+
+        bad_anchor = {
+            **payload,
+            "records": [
+                {
+                    **payload["records"][0],
+                    "anchors": [
+                        {
+                            **payload["records"][0]["anchors"][0],
+                            "unexpected_field": "reject me",
+                        }
+                    ],
+                }
+            ],
+        }
+        self.assertTrue(any("Additional properties" in issue for issue in validate_payload(bad_anchor, "pdf_evidence_anchors.v1")))
+
+        bad_record = {
+            **payload,
+            "records": [
+                {
+                    **payload["records"][0],
+                    "unexpected_field": "reject me",
+                }
+            ],
+        }
+        self.assertTrue(any("Additional properties" in issue for issue in validate_payload(bad_record, "pdf_evidence_anchors.v1")))
 
     def test_weak_claims_cannot_become_strong_graph_evidence(self) -> None:
         node = build_nodes(

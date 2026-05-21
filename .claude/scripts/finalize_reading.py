@@ -33,6 +33,61 @@ ANCHOR_REQUIRED_EVIDENCE_CLASSES = {
 ALLOWED_EVIDENCE_CLASSES = ANCHOR_REQUIRED_EVIDENCE_CLASSES | WEAK_EVIDENCE_CLASSES
 ALLOWED_ANCHOR_TYPES = {"section", "table", "figure", "appendix", "result_row", "snippet", "abstract", "note_only"}
 REVIEW_ONLY_DOWNSTREAM_USES = {"screening_only", "requires_human_check"}
+DLO_TARGET_TERMS = {
+    "dlo",
+    "deformable linear object",
+    "deformable object",
+    "rope",
+    "cable",
+    "wire",
+    "cloth",
+    "tether",
+    "柔性线状物",
+    "柔性物体",
+    "线缆",
+    "绳",
+    "绳索",
+    "布料",
+}
+DEFORMABLE_SOURCE_TERMS = {
+    "dlo",
+    "dlo manipulation",
+    "dlo control",
+    "deformable manipulation",
+    "deformable object manipulation",
+    "deformable linear object manipulation",
+    "rope manipulation",
+    "rope control",
+    "cable manipulation",
+    "cable control",
+    "wire manipulation",
+    "wire control",
+    "cloth manipulation",
+    "cloth control",
+    "tether manipulation",
+    "tether control",
+    "柔性线状物操控",
+    "柔性物体操控",
+    "线缆操控",
+    "绳索操控",
+    "布料操控",
+}
+GENERATION_SOURCE_TERMS = {
+    "animation",
+    "video",
+    "generation",
+    "generative",
+    "language-only",
+    "pure perception",
+}
+PHYSICAL_EVAL_TERMS = {
+    "physical closed-loop",
+    "closed-loop manipulation",
+    "closed loop manipulation",
+    "contact dynamics",
+    "dlo control",
+    "physical control",
+}
 STRICT_SECTION_HEADINGS = [
     "## Evidence Ledger",
     "## Idea Fuel",
@@ -299,6 +354,28 @@ def non_negated_hits(text: str, tokens: list[str]) -> list[str]:
     return hits
 
 
+def contains_any_term(text: str, terms: set[str]) -> bool:
+    lowered = text.lower()
+    return any(term in lowered for term in terms)
+
+
+def evidence_ledger_claim_ids(ledger: str) -> set[str]:
+    rows, _headers = parse_evidence_ledger(ledger)
+    return {claim_id for row in rows if (claim_id := ledger_value(row, "claim_id"))}
+
+
+def claim_id_references(value: str) -> list[str]:
+    ignored = {"table", "figure", "section", "appendix", "page", "row", "claim", "id", "evidence", "anchor"}
+    refs: list[str] = []
+    for token in re.findall(r"\b[A-Za-z][A-Za-z0-9_-]*\b", value):
+        normalized = normalize_token(token)
+        if normalized in ignored:
+            continue
+        if "-" in token or "_" in token or any(char.isdigit() for char in token):
+            refs.append(token)
+    return refs
+
+
 def validate_evidence_ledger(ledger: str) -> list[str]:
     issues: list[str] = []
     rows, headers = parse_evidence_ledger(ledger)
@@ -380,7 +457,7 @@ def validate_evidence_ledger(ledger: str) -> list[str]:
     return issues
 
 
-def validate_baseline_pressure(section: str) -> list[str]:
+def validate_baseline_pressure(section: str, evidence_ledger: str = "") -> list[str]:
     values = parse_key_values(section)
     required = {
         "Strongest Baseline": ("Strongest Baseline",),
@@ -395,6 +472,15 @@ def validate_baseline_pressure(section: str) -> list[str]:
     for label, aliases in required.items():
         if blank_or_placeholder(first_key_value(values, *aliases)):
             issues.append(f"baseline_pressure_missing:{label}")
+    anchor_claim = first_key_value(values, "Evidence anchor / claim_id", "Evidence anchor", "claim_id")
+    if not blank_or_placeholder(anchor_claim):
+        known_claim_ids = evidence_ledger_claim_ids(evidence_ledger)
+        refs = claim_id_references(anchor_claim)
+        if not refs:
+            issues.append("baseline_pressure_missing_claim_id_reference")
+        for ref in refs:
+            if ref not in known_claim_ids:
+                issues.append(f"baseline_pressure_unknown_claim_id:{ref}")
     return issues
 
 
@@ -476,10 +562,13 @@ def validate_transfer_risk(section: str, idea_fuel: str) -> list[str]:
     combined = f"{section}\n{idea_fuel}"
     lowered = combined.lower()
     source_lower = source_domain.lower()
-    target_lower = target_domain.lower()
+    target_context = f"{target_domain}\n{combined}"
     issues: list[str] = []
-    dlo_transfer = "dlo" in lowered and "dlo" not in source_lower
-    if dlo_transfer:
+    deformable_target = contains_any_term(target_context, DLO_TARGET_TERMS)
+    generation_source = contains_any_term(source_lower, GENERATION_SOURCE_TERMS)
+    deformable_source = contains_any_term(source_lower, DEFORMABLE_SOURCE_TERMS) and not generation_source
+    deformable_transfer = deformable_target and not deformable_source
+    if deformable_transfer:
         required = {
             "source_domain": ("Source domain",),
             "target_domain": ("Target domain",),
@@ -498,9 +587,8 @@ def validate_transfer_risk(section: str, idea_fuel: str) -> list[str]:
         allowed = {"none": 0, "low": 1, "medium": 2, "high": 3, "extreme": 4}
         if distance not in allowed:
             issues.append(f"transfer_risk_bad_distance:{distance}")
-        generation_source = any(token in source_lower for token in ["animation", "video", "generation", "generative", "language-only", "pure perception"])
-        physical_eval = any(token in lowered for token in ["physical closed-loop", "closed-loop manipulation", "contact dynamics", "dlo control", "physical control"])
-        if generation_source and ("dlo" in target_lower or "dlo" in lowered) and distance in allowed and allowed[distance] < allowed["high"] and not physical_eval:
+        physical_eval = contains_any_term(lowered, PHYSICAL_EVAL_TERMS)
+        if generation_source and deformable_target and distance in allowed and allowed[distance] < allowed["high"] and not physical_eval:
             issues.append("transfer_risk_generation_to_dlo_distance_too_low")
     return issues
 
@@ -515,7 +603,7 @@ def strict_contract_issues(sections: dict[str, str]) -> list[str]:
     if sections.get("## Evidence Ledger"):
         issues.extend(validate_evidence_ledger(sections["## Evidence Ledger"]))
     if sections.get("## Baseline Pressure"):
-        issues.extend(validate_baseline_pressure(sections["## Baseline Pressure"]))
+        issues.extend(validate_baseline_pressure(sections["## Baseline Pressure"], sections.get("## Evidence Ledger", "")))
     if sections.get("## No-hardware Micro-test"):
         issues.extend(validate_no_hardware_micro_test(sections["## No-hardware Micro-test"]))
     if sections.get("## Transfer Risk"):
