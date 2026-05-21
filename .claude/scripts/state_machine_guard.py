@@ -44,6 +44,11 @@ POWERSHELL_MUTATION_RE = re.compile(
 )
 
 
+def _is_ignored_source_file(path: Path) -> bool:
+    parts = {part.lower() for part in path.parts}
+    return "backups" in parts or ".codex-backups" in parts
+
+
 def _source_files() -> list[Path]:
     roots = [
         vault_path(".claude", "scripts"),
@@ -52,8 +57,8 @@ def _source_files() -> list[Path]:
     files: list[Path] = []
     for root in roots:
         if root.exists():
-            files.extend(path for path in root.rglob("*.py") if path.is_file())
-            files.extend(path for path in root.rglob("*.ps1") if path.is_file())
+            files.extend(path for path in root.rglob("*.py") if path.is_file() and not _is_ignored_source_file(path))
+            files.extend(path for path in root.rglob("*.ps1") if path.is_file() and not _is_ignored_source_file(path))
     files.extend(path for path in vault_path().glob("*.py") if path.is_file())
     return sorted(set(files))
 

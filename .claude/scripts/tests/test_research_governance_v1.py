@@ -206,6 +206,16 @@ class GovernanceV1Test(unittest.TestCase):
             issues = audit_direct_governance_writers()
         self.assertTrue(any(issue["path"].endswith("bad_writer.py") for issue in issues))
 
+    def test_guard_ignores_non_live_script_backups(self) -> None:
+        root = Path(self.tmp.name) / "repo"
+        backup = root / ".claude" / "scripts" / "backups" / "old_writer.py"
+        backup.parent.mkdir(parents=True)
+        backup.write_text("from pathlib import Path\nPath('projects/research-agenda/idea_bank/seed/x').mkdir()\n", encoding="utf-8")
+        (root / "tools").mkdir(parents=True)
+        with patch.object(state_machine_guard, "vault_path", lambda *parts: root.joinpath(*parts)):
+            issues = audit_direct_governance_writers()
+        self.assertEqual([], issues)
+
     def test_state_machine_guard_detects_path_rename_to_seed(self) -> None:
         source = "from pathlib import Path\nPath('tmp').rename(Path('projects/research-agenda/idea_bank/seed/tmp'))\n"
         issues = scan_sensitive_writes(Path("bad_rename.py"), source)
