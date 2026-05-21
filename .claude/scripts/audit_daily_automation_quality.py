@@ -834,7 +834,18 @@ def audit_run(run_date: str) -> dict[str, Any]:
         issue_list.append(_issue("INFO", "quality_no_top_tier_seed_today", "No S/A raw candidate survived the local rubric; preserve greenhouse for review.", _rel(greenhouse_path)))
 
     mandatory_battle = _classify_mandatory_battle(run_date, agenda_delta_text)
-    battle_expected = bool(mandatory_battle["required"] and greenhouse_path.exists() and generator_status.startswith("gemini-divergent:success"))
+    v2_deepseek = _json_read(vault_path("projects", "research-agenda", "runs", run_date, "artifacts", "deepseek-review.json"))
+    v2_deepseek_ok = bool(
+        v2_deepseek.get("status") == "success"
+        and isinstance(v2_deepseek.get("provider_status"), dict)
+        and v2_deepseek["provider_status"].get("provider_backed") is True
+    )
+    battle_expected = bool(
+        mandatory_battle["required"]
+        and greenhouse_path.exists()
+        and generator_status.startswith("gemini-divergent:success")
+        and not (mandatory_battle["status"] == "moved_to_v2_state_machine" and v2_deepseek_ok)
+    )
     if battle_expected and mandatory_battle["status"] != "success":
         issue_list.append(_issue("FAIL", "mandatory_model_battle_not_success", f"Mandatory model battle status is `{mandatory_battle['status'] or 'missing'}`.", mandatory_battle["packet_path"] or _rel(_battle_packet_path(run_date))))
     if battle_expected and not mandatory_battle["packet_path"]:

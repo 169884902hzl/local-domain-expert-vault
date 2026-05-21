@@ -45,6 +45,8 @@ if ($DryRun) {
   Write-Host "WrapperPath: $DisplayWrapperPath"
   Write-Host "ActionExecute: powershell.exe"
   Write-Host "ActionArguments: $DisplayTaskArguments"
+  Write-Host "DeepSeekProvider: $DeepSeekProvider"
+  Write-Host "CodexExecutionProvider: $CodexExecutionProvider"
   Write-Host "LogDir: $DisplayLogDir"
   Write-Host "Tip: add -ShowLocalPaths to print real local paths for private debugging."
   exit 0
