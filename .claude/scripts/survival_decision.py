@@ -394,7 +394,7 @@ def decide(
 
         base_blocks = list(blocks)
         formal_rehearsal_allowed = bool(not base_blocks and manual_review and manual_review.get("decision") == "allow_active_seed" and baseline_table)
-        active_seed_allowed = bool(
+        legacy_active_gate_would_pass = bool(
             not base_blocks
             and active_seed_review_allowed(manual_review)
             and baseline_allows_active_seed(baseline_table)
@@ -402,9 +402,19 @@ def decide(
             and _pilot_plan_allows_active_seed(pilot_plan)
             and not (set(risks) & ACTIVE_SEED_BLOCKING_RISKS)
         )
-        pilot_ready_allowed = bool(active_seed_allowed and _pilot_plan_allows_pilot_ready(pilot_plan))
-        if target_policy == "formal" and not active_seed_allowed:
-            blocks.append("active_seed_not_allowed")
+        governance_review_possible = bool(legacy_active_gate_would_pass)
+        active_commit_forbidden_reasons = sorted(
+            set(
+                [
+                    "active_seed_commit_requires_active_seed_commit_py",
+                    "survival_decision_is_model_risk_classifier_only",
+                    *base_blocks,
+                    *[risk for risk in risks if risk in ACTIVE_SEED_BLOCKING_RISKS],
+                ]
+            )
+        )
+        active_seed_allowed = False
+        pilot_ready_allowed = False
 
         action = "accept_for_user_review" if not blocks else "killed"
         if blocks and any(block.startswith("codex_action_not_accept:park") or block == "duplicate_guard_block" for block in blocks):
@@ -426,12 +436,13 @@ def decide(
                 "human_override_used": bool(override),
                 "risks": risks,
                 "formal_rehearsal_allowed": formal_rehearsal_allowed,
+                "governance_review_possible": governance_review_possible,
+                "active_commit_forbidden_reasons": active_commit_forbidden_reasons,
+                "requires_human_governance": True,
                 "active_seed_allowed": active_seed_allowed,
                 "pilot_ready_allowed": pilot_ready_allowed,
                 "publish_target": (
-                    "seed"
-                    if target_policy == "formal" and active_seed_allowed
-                    else ("formal-rehearsal" if formal_rehearsal_allowed else "seed-candidates")
+                    "formal-rehearsal" if formal_rehearsal_allowed else "seed-candidates"
                 )
                 if action == "accept_for_user_review"
                 else action,

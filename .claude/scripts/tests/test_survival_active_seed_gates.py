@@ -15,7 +15,10 @@ class SurvivalActiveSeedGatesTest(V03TempAgendaTest):
     def test_candidate_without_result_row_is_not_blocked_by_result_confirmation(self) -> None:
         self._write_all_active_support()
         decision = decide(run_date=RUN_DATE, allow_human_override=False, target_policy="formal")["decisions"][0]
-        self.assertTrue(decision["active_seed_allowed"])
+        self.assertFalse(decision["active_seed_allowed"])
+        self.assertTrue(decision["governance_review_possible"])
+        self.assertTrue(decision["requires_human_governance"])
+        self.assertEqual(decision["publish_target"], "formal-rehearsal")
         self.assertNotIn("result_row_unconfirmed", decision["risks"])
 
     def test_unconfirmed_result_row_blocks_active_only_when_used_as_core_evidence(self) -> None:
@@ -36,7 +39,10 @@ class SurvivalActiveSeedGatesTest(V03TempAgendaTest):
         self.write_baseline_table()
         self.write_pilot_plan()
         decision = decide(run_date=RUN_DATE, allow_human_override=False, target_policy="formal")["decisions"][0]
-        self.assertTrue(decision["active_seed_allowed"])
+        self.assertFalse(decision["active_seed_allowed"])
+        self.assertTrue(decision["governance_review_possible"])
+        self.assertTrue(decision["requires_human_governance"])
+        self.assertEqual(decision["publish_target"], "formal-rehearsal")
         self.assertNotIn("result_row_unconfirmed", decision["risks"])
 
     def test_unconfirmed_cross_paper_edge_blocks_active_only_when_used_as_core_evidence(self) -> None:
@@ -72,7 +78,10 @@ class SurvivalActiveSeedGatesTest(V03TempAgendaTest):
         self.write_baseline_table()
         self.write_pilot_plan()
         decision = decide(run_date=RUN_DATE, allow_human_override=False, target_policy="formal")["decisions"][0]
-        self.assertTrue(decision["active_seed_allowed"])
+        self.assertFalse(decision["active_seed_allowed"])
+        self.assertTrue(decision["governance_review_possible"])
+        self.assertTrue(decision["requires_human_governance"])
+        self.assertEqual(decision["publish_target"], "formal-rehearsal")
         self.assertNotIn("cross_paper_edge_requires_human_check", decision["risks"])
 
     def test_baseline_execution_partial_allows_rehearsal_but_blocks_active(self) -> None:

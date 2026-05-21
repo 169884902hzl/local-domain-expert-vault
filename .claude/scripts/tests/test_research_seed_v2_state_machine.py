@@ -53,6 +53,7 @@ import codex_seed_review as codex_review
 
 
 RUN_DATE = "2099-01-02"
+LEGACY_FORMAL_DISABLED_STATUS = "legacy_formal_publish_disabled_use_formal_rehearsal_packet"
 
 
 class ResearchSeedV2StateMachineTest(unittest.TestCase):
@@ -68,6 +69,12 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
         else:
             os.environ["RESEARCH_SEED_V2_AGENDA_ROOT"] = self.old_root
         self.tmp.cleanup()
+
+    def assert_legacy_formal_publish_disabled(self, result: dict[str, object]) -> None:
+        self.assertEqual(result["status"], LEGACY_FORMAL_DISABLED_STATUS)
+        self.assertEqual(result["published"], [])
+        self.assertIn("v1_disables_legacy_formal_seed_writing", result["blocked"])
+        self.assertEqual(list((Path(self.tmp.name) / "idea_bank" / "seed").glob("*")), [])
 
     def candidate(self, candidate_id: str = "cand-alpha") -> dict[str, object]:
         return {
@@ -1239,8 +1246,7 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
         self.assertIn("formal_novelty_requires_openalex_or_semantic_scholar", survival["decisions"][0]["blocks"])
         write_run_artifact(RUN_DATE, "survival-decision.json", survival, state="survival_decided")
         result = publish(RUN_DATE, dry_run=False, target_policy="formal", allow_formal_seed_publish=True)
-        self.assertEqual(result["status"], "blocked_formal_novelty_scope")
-        self.assertTrue(any("formal_novelty_arxiv_only_scope" in item for item in result["blocked"]))
+        self.assert_legacy_formal_publish_disabled(result)
 
     def test_strict_publish_rejects_missing_external_broad_provider(self) -> None:
         self.write_review_artifacts(
@@ -1393,8 +1399,7 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
         survival = decide(run_date=RUN_DATE, allow_human_override=False, target_policy="formal")
         write_run_artifact(RUN_DATE, "survival-decision.json", survival, state="survival_decided")
         result = publish(RUN_DATE, dry_run=False, target_policy="formal", allow_formal_seed_publish=True)
-        self.assertEqual(result["status"], "blocked_formal_novelty_scope")
-        self.assertEqual(list((Path(self.tmp.name) / "idea_bank" / "seed").glob("*")), [])
+        self.assert_legacy_formal_publish_disabled(result)
 
     def test_openalex_partial_overlap_with_remaining_delta_can_pass_novelty_gate(self) -> None:
         local_hit = {"source": "local_notes_claim_graph", "score": 0.4, "title": "Contact failure benchmark", "locator": "claim-1", "evidence": "near overlap"}
@@ -1620,17 +1625,14 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
         survival = decide(run_date=RUN_DATE, allow_human_override=False)
         write_run_artifact(RUN_DATE, "survival-decision.json", survival, state="survival_decided")
         result = publish(RUN_DATE, dry_run=False, target_policy="formal")
-        self.assertEqual(result["status"], "blocked_formal_publish_not_allowed")
-        self.assertEqual(result["published"], [])
-        self.assertEqual(list((Path(self.tmp.name) / "idea_bank" / "seed").glob("*")), [])
+        self.assert_legacy_formal_publish_disabled(result)
 
     def test_formal_provider_json_blocks_by_default(self) -> None:
         self.write_review_artifacts(verification_scope="local_plus_s2_or_openalex")
         survival = decide(run_date=RUN_DATE, allow_human_override=False, target_policy="formal")
         write_run_artifact(RUN_DATE, "survival-decision.json", survival, state="survival_decided")
         result = publish(RUN_DATE, dry_run=False, target_policy="formal", allow_formal_seed_publish=True)
-        self.assertEqual(result["status"], "blocked_formal_provider_provenance")
-        self.assertTrue(any("formal_provider_mode_not_production" in item for item in result["blocked"]))
+        self.assert_legacy_formal_publish_disabled(result)
 
     def test_formal_provider_json_manual_override_records_risk(self) -> None:
         self.write_review_artifacts(verification_scope="local_plus_s2_or_openalex")
@@ -1644,10 +1646,7 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
             allow_formal_seed_publish=True,
             allow_test_provider_for_formal=True,
         )
-        self.assertEqual(result["status"], "success")
-        manifest = read_json(run_dir(RUN_DATE) / "manifest.json")
-        self.assertTrue(manifest["test_provider_used_for_formal"])
-        self.assertIn("test_provider_not_production_provenance", manifest["formal_publish_risk"])
+        self.assert_legacy_formal_publish_disabled(result)
 
     def test_formal_publish_with_allow_still_requires_existing_gates(self) -> None:
         self.write_review_artifacts(
@@ -1660,10 +1659,7 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
         survival = decide(run_date=RUN_DATE, allow_human_override=False, target_policy="formal")
         write_run_artifact(RUN_DATE, "survival-decision.json", survival, state="survival_decided")
         result = publish(RUN_DATE, dry_run=False, target_policy="formal", allow_formal_seed_publish=True)
-        self.assertEqual(result["status"], "success")
-        self.assertEqual(result["published"], [])
-        self.assertEqual(len(result["bucketed"]), 1)
-        self.assertEqual(list((Path(self.tmp.name) / "idea_bank" / "seed").glob("*")), [])
+        self.assert_legacy_formal_publish_disabled(result)
 
     def test_backfill_cannot_formal_publish(self) -> None:
         manifest = read_json(run_dir(RUN_DATE) / "manifest.json")
@@ -1673,8 +1669,7 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
         survival = decide(run_date=RUN_DATE, allow_human_override=False)
         write_run_artifact(RUN_DATE, "survival-decision.json", survival, state="survival_decided")
         result = publish(RUN_DATE, dry_run=False, target_policy="formal", allow_formal_seed_publish=True)
-        self.assertEqual(result["status"], "blocked_backfill_formal_publish")
-        self.assertEqual(result["published"], [])
+        self.assert_legacy_formal_publish_disabled(result)
 
     def test_publish_actual_staged_rename_writes_required_artifacts(self) -> None:
         self.write_review_artifacts(
@@ -1686,21 +1681,9 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
         survival = decide(run_date=RUN_DATE, allow_human_override=False, target_policy="formal")
         write_run_artifact(RUN_DATE, "survival-decision.json", survival, state="survival_decided")
         result = publish(RUN_DATE, dry_run=False, target_policy="formal", allow_formal_seed_publish=True)
-        self.assertEqual(result["status"], "success")
-        target = Path(result["published"][0]["target"])
-        for name in [
-            "idea.md",
-            "survival-decision.json",
-            "deepseek-review.json",
-            "novelty-scan.json",
-            "codex-execution-review.json",
-            "manual-prior-art-review.json",
-            "baseline-table.json",
-            "artifact-hashes.json",
-        ]:
-            self.assertTrue((target / name).exists(), name)
+        self.assert_legacy_formal_publish_disabled(result)
         manifest = json.loads((run_dir(RUN_DATE) / "manifest.json").read_text(encoding="utf-8"))
-        self.assertTrue(manifest["formal_seed_written"])
+        self.assertFalse(manifest.get("formal_seed_written", False))
 
     def test_publish_existing_target_blocks_duplicate_no_overwrite(self) -> None:
         self.write_review_artifacts(
@@ -1716,11 +1699,11 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
         marker = seed_dir / "idea.md"
         marker.write_text("existing", encoding="utf-8")
         result = publish(RUN_DATE, dry_run=False, target_policy="formal", allow_formal_seed_publish=True)
-        self.assertEqual(result["status"], "partial")
-        self.assertTrue(any(item.startswith("duplicate_guard_failed") for item in result["blocked"]))
+        self.assertEqual(result["status"], LEGACY_FORMAL_DISABLED_STATUS)
+        self.assertEqual(result["published"], [])
         self.assertEqual(marker.read_text(encoding="utf-8"), "existing")
         duplicate_reports = list((Path(self.tmp.name) / "seed-candidates" / "duplicate-review" / RUN_DATE).glob("*.json"))
-        self.assertEqual(len(duplicate_reports), 1)
+        self.assertEqual(len(duplicate_reports), 0)
 
     def test_concurrent_publish_lock_blocks_same_slug(self) -> None:
         self.write_review_artifacts(
@@ -1735,8 +1718,8 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
         lock.parent.mkdir(parents=True, exist_ok=True)
         lock.write_text("held", encoding="utf-8")
         result = publish(RUN_DATE, dry_run=False, target_policy="formal", allow_formal_seed_publish=True)
-        self.assertEqual(result["status"], "partial")
-        self.assertTrue(any(item.startswith("blocked_concurrent_publish_lock_exists") for item in result["blocked"]))
+        self.assertEqual(result["status"], LEGACY_FORMAL_DISABLED_STATUS)
+        self.assertEqual(result["published"], [])
         self.assertEqual(list((Path(self.tmp.name) / "idea_bank" / "seed").glob("anchored-contact-failure-benchmark")), [])
 
     def test_missing_required_file_after_publish_moves_to_quarantine(self) -> None:
@@ -1750,10 +1733,10 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
         write_run_artifact(RUN_DATE, "survival-decision.json", survival, state="survival_decided")
         with patch("publish_research_run.FORMAL_SEED_REQUIRED_FILES", ["idea.md", "missing-required.txt"]):
             result = publish(RUN_DATE, dry_run=False, target_policy="formal", allow_formal_seed_publish=True)
-        self.assertEqual(result["status"], "partial")
-        self.assertTrue(any(item.startswith("failed_publish_invariant") for item in result["blocked"]))
+        self.assertEqual(result["status"], LEGACY_FORMAL_DISABLED_STATUS)
+        self.assertEqual(result["published"], [])
         quarantine = Path(self.tmp.name) / "quarantine"
-        self.assertTrue(any(path.is_dir() for path in quarantine.glob("anchored-contact-failure-benchmark.*")))
+        self.assertFalse(any(path.is_dir() for path in quarantine.glob("anchored-contact-failure-benchmark.*")))
 
     def test_artifact_hash_mismatch_blocks_validation(self) -> None:
         self.write_review_artifacts()

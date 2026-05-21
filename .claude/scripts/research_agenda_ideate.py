@@ -1,4 +1,9 @@
-"""Generate high-quality research-agenda seed candidates from local evidence."""
+"""Generate legacy raw research-agenda candidates from local evidence.
+
+In v1 Research Governance Workbench this script is legacy-only for active paths.
+It may draft hypotheses and candidates, but it does not prove novelty, peer
+review, publishability, doctoral-level quality, or active seed commitment.
+"""
 from __future__ import annotations
 
 import argparse
@@ -31,6 +36,7 @@ from research_agenda_common import (
 from research_seed_v2_common import artifact_dir, artifact_hashes, candidate_id, ensure_v2_dirs, read_json, write_run_artifact
 
 
+LEGACY_ONLY_FOR_ACTIVE_PATH = True
 MIN_MECHANISM_SOURCES = 5
 MIN_STRONG_MECHANISM_SOURCES = 2
 PLACEHOLDER_TOKENS = ["todo", "tbd", "need_to_verify", "seed_pending_review", "cross-gap between"]
@@ -3718,8 +3724,9 @@ def _v2_raw_candidate_payload(report: dict[str, Any], run_date: str) -> dict[str
         "candidates": candidates,
         "raw_candidate_target": 24,
         "per_lane_target": 4,
+        "legacy_only_for_active_path": LEGACY_ONLY_FOR_ACTIVE_PATH,
         "artifact_hashes": artifact_hashes(run_date, ["tension-map.json", "claim-graph-snapshot.jsonl"]),
-        "boundary": "Raw candidates only; quality_tier, sharpness_score, evidence_execution_score, and ordinaryness_penalty are potential display fields, not promotion gates.",
+        "boundary": "Raw candidates only; not a doctoral-level idea generator, novelty proof, peer review, publishability proof, or active seed commitment.",
     }
 
 

@@ -776,6 +776,7 @@ def _v2_stage(
 
 
 def build_v2_review_stages(args: argparse.Namespace, run_date: str) -> list[tuple[str, list[str], int]]:
+    scheduled_policy = "seed-candidates-only" if resolve_v2_publish_policy(args) != "disabled" else "disabled"
     deepseek_cmd = [sys.executable, ".claude/scripts/deepseek_scientific_review.py", "--run-date", run_date]
     deepseek_provider = getattr(args, "deepseek_provider", "none")
     if deepseek_provider == "opencode":
@@ -805,7 +806,7 @@ def build_v2_review_stages(args: argparse.Namespace, run_date: str) -> list[tupl
         "--run-date",
         run_date,
         "--target-policy",
-        resolve_v2_publish_policy(args),
+        scheduled_policy,
         "--max-external-queries",
         str(getattr(args, "novelty_max_external_queries", 1)),
         "--external-timeout",
@@ -817,7 +818,7 @@ def build_v2_review_stages(args: argparse.Namespace, run_date: str) -> list[tupl
         "--run-date",
         run_date,
         "--target-policy",
-        resolve_v2_publish_policy(args),
+        scheduled_policy,
     ]
     review_stages: list[tuple[str, list[str], int]] = [
         ("portfolio_select", [sys.executable, ".claude/scripts/candidate_portfolio_select.py", "--run-date", run_date], 180),
@@ -835,7 +836,10 @@ def build_v2_review_stages(args: argparse.Namespace, run_date: str) -> list[tupl
 
 
 def resolve_v2_publish_policy(args: argparse.Namespace) -> str:
-    return str(getattr(args, "v2_publish_policy", DEFAULT_V2_PUBLISH_POLICY) or DEFAULT_V2_PUBLISH_POLICY)
+    policy = str(getattr(args, "v2_publish_policy", DEFAULT_V2_PUBLISH_POLICY) or DEFAULT_V2_PUBLISH_POLICY)
+    if policy == "formal":
+        return "seed-candidates-only"
+    return policy
 
 
 def run_research_seed_v2(
@@ -849,7 +853,7 @@ def run_research_seed_v2(
     """Run the transactional v2 state machine. Formal seed writes occur only in publish_research_run.py."""
     backfill_mode = args.backfill_mode
     v2_publish_policy = resolve_v2_publish_policy(args)
-    formal_seed_publish_allowed = bool(getattr(args, "allow_formal_seed_publish", False))
+    formal_seed_publish_allowed = False
     ingest_only = backfill_mode == "ingest-only" and not args.backfill_generate_ideas
     result: dict[str, Any] = {
         "schema_version": "daily_research_seed_v2_summary.v1",
@@ -862,6 +866,7 @@ def run_research_seed_v2(
         "v2_publish_policy": v2_publish_policy,
         "formal_seed_publish_allowed": formal_seed_publish_allowed,
         "scheduled_daily_switched": False,
+        "scheduled_candidate_only_cap": True,
         "focus_zotero_keys": focus_zotero_keys,
         "stages": [],
     }
@@ -2507,9 +2512,9 @@ def main() -> int:
     )
     parser.add_argument(
         "--v2-publish-policy",
-        choices=["disabled", "seed-candidates-only", "formal"],
+        choices=["disabled", "seed-candidates-only"],
         default=DEFAULT_V2_PUBLISH_POLICY,
-        help="V2 rollout publish policy. Formal production seed publish is not the default.",
+        help="V2 rollout publish policy for scheduled/daily runs. Formal production seed publish is disabled in v1.",
     )
     parser.add_argument(
         "--allow-formal-seed-publish",

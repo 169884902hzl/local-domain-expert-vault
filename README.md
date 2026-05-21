@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](#clone-后能直接做什么)
 
-> 把 Obsidian + Zotero 文献库变成一个每天自更新、可审计、会复盘的本地领域专家：论文进入 `wiki/` 证据层，Claudian 精读，Gemini 只生成 raw candidates，DeepSeek / novelty scan / Codex / survival decision 逐级拦截，最后由 human gate 决定是否进入正式研究 agenda。
+> 把 Obsidian + Zotero 文献库变成一个每天自更新、可审计、会复盘的本地领域专家，并在 v1.0 中把 research agenda 升级为 Research Governance Workbench：自动化只能生成候选、证据草稿、筛查和 dashboard；active seed 必须是人工治理下的研究承诺。
 
 [English README](README_EN.md)
 
@@ -17,9 +17,46 @@
 
 适合对象：需要长期追踪一个专业方向的研究生、PI / 实验室知识库维护者，以及希望把 LLM 变成“有本地文献记忆的领域专家”的研究者。
 
-当前公开版本：`v0.3.1`。`v0.1.0` 是首个可发行 local-first vault 版本，覆盖本地浏览、知识库审计、`kb_search.py` 检索、Zotero/Obsidian 配置说明、Paper Reading Workbench、arXiv mirror-first 自动化文档和 Windows 计划任务入口。`v0.2.0` 在此基础上加入 research-seed v2 状态机；`v0.2.1` 继续加固 scheduled formal publish 前的安全闸门；`v0.2.2` 把 external novelty scan 从 arXiv-only probe 升级为 OpenAlex / optional Semantic Scholar 的 multi-provider prior-art probe；`v0.2.3` 加固 anchored evidence graph；`v0.3.0` 加入 supervised research-validity hardening；`v0.3.1` 加固 active-seed QA，但仍不启用 scheduled formal publish。
+当前公开版本：`v1.0.0`。`v0.1.0` 是首个可发行 local-first vault 版本；`v0.2.x` 加入 research-seed v2 状态机和 external screening hardening；`v0.3.x` 加入 supervised research-validity hardening。`v1.0.0` 把 active seed 从 publish side effect 重构为人工治理的 Research Governance Workbench 承诺。
 
-`v0.2.0` 是一次 workflow architecture upgrade：从 Gemini greenhouse + 后置审查 scaffold，升级为 transactional research-seed state machine。它改进的是状态控制、审查顺序、审计性和 rollout safety，不是声明系统已经能稳定产生已验证创新点。
+## v1.0: Research Governance Workbench
+
+v1.0 的核心变化是 source-of-truth 从 legacy `idea_bank/seed/` 发布路径迁移到 `projects/research-agenda/` 的治理布局：
+
+```text
+runs/<run_id>/artifacts/
+candidates/<candidate_id>/candidate-record.json
+evidence-packets/<candidate_id>/
+prior-art-dossiers/<candidate_id>/
+baseline-readiness/<candidate_id>/
+formal-rehearsals/<candidate_id>/
+governance/active-seeds/<active_seed_id>/active-seed-record.json
+governance/ledger/governance-ledger.jsonl
+strategy/strategy-ledger.jsonl
+legacy-v03/migration-report.json
+```
+
+关键边界：
+
+- Scheduled automation may generate intake, candidate drafts, evidence drafts, novelty screening, provider-backed critiques, queues, and derived dashboards.
+- Scheduled automation must never create formal rehearsal packets, complete human confirmations, write active seeds, write governance ledger events, kill active seeds, or resurrect active seeds.
+- OpenAlex / Semantic Scholar / arXiv scans are screening only. They are not prior-art review, novelty proof, or publishability proof.
+- DeepSeek / Codex / provider review is model critique only. It is not peer review.
+- Dashboard is derived-only. It cannot be source of truth or input to state mutation.
+- `formal_rehearsal` is not an active seed and cannot write `idea_bank/seed/`.
+- Legacy v0.3.x seeds are archived legacy artifacts and must never auto-promote.
+
+术语：
+
+- `raw candidate`：自动或人工生成的研究想法草稿；只能进入候选层。
+- `seed candidate`：已有本地证据和筛查结果、可供人工审阅的候选。
+- `formal rehearsal`：用于人工演练的完整候选包；不是 active seed。
+- `active seed`：人工治理签署的研究承诺，要求 confirmed evidence packet、manual prior-art dossier、baseline execution readiness、pilot plan、owner/resource/timeline/kill criteria、artifact hashes 和 governance signature。
+- `pilot-ready`：active seed 具备可执行 pilot 的状态；不等于论文可发表。
+- `killed`：人工或治理流程终止的 active seed。
+- `resurrected`：经过 ledger 记录后重新进入候选复核的历史方向。
+
+本项目不是 doctoral-level idea generator，不是 peer review，不是 novelty proof，也不是 publishability proof。它提供的是本地证据优先、可审计、fail-closed 的研究治理工作台。
 
 ## 闭环设计
 

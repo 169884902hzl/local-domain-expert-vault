@@ -1,4 +1,9 @@
-"""Record pilot plans, outcomes, and non-gate strategy feedback for v0.3 seeds."""
+"""Record pilot plans, outcomes, and proposed strategy feedback for v0.3 seeds.
+
+In v1, pilot feedback cannot promote, kill, resurrect, or update strategy by
+itself. Applied strategy updates require strategy_ledger.py --apply
+--human-confirmed.
+"""
 from __future__ import annotations
 
 import argparse
@@ -120,11 +125,13 @@ def _feedback_from_result(result: dict[str, Any], args: argparse.Namespace) -> d
         "metric_outcome": result["metric_outcome"],
         "what_generator_predicted_wrong": result["what_generator_predicted_wrong"],
         "strategy_update": _sanitize_strategy_update(update),
+        "applied": False,
         "boundaries": {
             "raw_modified": False,
             "seed_deleted": False,
             "auto_promoted": False,
             "cannot_weaken_hard_gates": True,
+            "requires_strategy_ledger_apply": True,
         },
     }
 

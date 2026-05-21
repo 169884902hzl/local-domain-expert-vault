@@ -363,6 +363,15 @@ def publish(
     ensure_v2_dirs(run_date)
     if target_policy not in V2_PUBLISH_POLICIES:
         raise ValueError(f"invalid_v2_publish_policy:{target_policy}")
+    if target_policy == "formal":
+        return _result(
+            run_date=run_date,
+            status="legacy_formal_publish_disabled_use_formal_rehearsal_packet",
+            target_policy=target_policy,
+            allow_formal_seed_publish=allow_formal_seed_publish,
+            allow_test_provider_for_formal=allow_test_provider_for_formal,
+            blocked=["v1_disables_legacy_formal_seed_writing"],
+        )
     manifest = _manifest(run_date)
     _record_manifest_publish_policy(
         run_date,
@@ -440,8 +449,6 @@ def publish(
             allow_test_provider_for_formal=allow_test_provider_for_formal,
             blocked=[],
         )
-    if target_policy == "formal" and not dry_run:
-        (agenda_root() / "idea_bank" / "seed").mkdir(parents=True, exist_ok=True)
     survival = read_json(artifact_dir(run_date) / "survival-decision.json")
     candidates = _load_final_candidates(run_date)
     hashes = artifact_hashes(
@@ -498,83 +505,8 @@ def publish(
                 )
             )
             continue
-        if target_policy == "formal" and decision.get("active_seed_allowed") is not True:
-            blocked.append(f"active_seed_not_allowed:{decision.get('candidate_id')}")
-            continue
-        target = agenda_root() / "idea_bank" / "seed" / slug
-        _assert_under_root(target)
-        plan["items"].append({"candidate_id": decision["candidate_id"], "target": str(target)})
-        if target.exists():
-            duplicate_target = agenda_root() / "seed-candidates" / "duplicate-review" / run_date / f"{slug}.{decision['candidate_id']}.json"
-            _assert_under_root(duplicate_target)
-            duplicate_payload = {
-                "schema_version": "duplicate_review.v1",
-                "run_date": run_date,
-                "candidate_id": decision["candidate_id"],
-                "candidate": candidate,
-                "survival_decision": decision,
-                "existing_seed_target": str(target),
-                "duplicate_review_target": str(duplicate_target),
-                "artifact_hashes": hashes,
-                "boundary": "Existing formal seed was not overwritten; review this duplicate candidate outside idea_bank/seed.",
-            }
-            write_json(duplicate_target, duplicate_payload, dry_run=dry_run)
-            blocked.append(f"duplicate_guard_failed:{slug}:duplicate_review={duplicate_target}")
-            continue
-        lock_path = _acquire_publish_lock(slug, run_date=run_date, candidate_id_value=str(decision["candidate_id"]), dry_run=dry_run)
-        if lock_path is None:
-            blocked.append(f"blocked_concurrent_publish_lock_exists:{slug}")
-            continue
-        try:
-            if target.exists():
-                duplicate_target = agenda_root() / "seed-candidates" / "duplicate-review" / run_date / f"{slug}.{decision['candidate_id']}.json"
-                _assert_under_root(duplicate_target)
-                duplicate_payload = {
-                    "schema_version": "duplicate_review.v1",
-                    "run_date": run_date,
-                    "candidate_id": decision["candidate_id"],
-                    "candidate": candidate,
-                    "survival_decision": decision,
-                    "existing_seed_target": str(target),
-                    "duplicate_review_target": str(duplicate_target),
-                    "artifact_hashes": hashes,
-                    "boundary": "Existing formal seed was not overwritten; review this duplicate candidate outside idea_bank/seed.",
-                }
-                write_json(duplicate_target, duplicate_payload, dry_run=dry_run)
-                blocked.append(f"duplicate_guard_failed:{slug}:duplicate_review={duplicate_target}")
-                continue
-            staging = _write_seed_stage(run_date, slug, candidate, decision, hashes, dry_run=dry_run)
-            staging_missing = [name for name in FORMAL_SEED_REQUIRED_FILES if not (staging / name).exists()]
-            if staging_missing and not dry_run:
-                quarantine = agenda_root() / "quarantine" / f"{slug}.{decision['candidate_id']}"
-                _assert_under_root(quarantine)
-                if staging.exists():
-                    staging.rename(quarantine)
-                blocked.append(f"failed_publish_invariant:{slug}:missing={','.join(staging_missing)}")
-                continue
-            if dry_run:
-                published.append({"candidate_id": decision["candidate_id"], "target": str(target), "status": "dry_run"})
-                continue
-            if target.exists():
-                blocked.append(f"duplicate_guard_failed:{slug}:target_exists_before_rename")
-                continue
-            staging.rename(target)
-            missing = [name for name in FORMAL_SEED_REQUIRED_FILES if not (target / name).exists()]
-            if missing:
-                quarantine = agenda_root() / "quarantine" / f"{slug}.{decision['candidate_id']}"
-                _assert_under_root(quarantine)
-                target.rename(quarantine)
-                blocked.append(f"failed_publish_invariant:{slug}:missing={','.join(missing)}")
-            else:
-                published.append({"candidate_id": decision["candidate_id"], "target": str(target), "status": "seed_written"})
-        except Exception as exc:
-            quarantine = agenda_root() / "quarantine" / f"{slug}.{decision['candidate_id']}"
-            _assert_under_root(quarantine)
-            if staging.exists():
-                staging.rename(quarantine)
-            blocked.append(f"publish_exception:{slug}:{type(exc).__name__}:{exc}")
-        finally:
-            _release_publish_lock(lock_path, dry_run=dry_run)
+        blocked.append(f"legacy_formal_publish_disabled:{decision.get('candidate_id')}")
+        continue
     write_json(publish_dir(run_date) / "seed-write-plan.json", plan, dry_run=dry_run)
     status = "success" if (published or bucketed) and not blocked else ("nothing_to_publish" if not published and not bucketed and not blocked else "partial")
     if published and not dry_run:

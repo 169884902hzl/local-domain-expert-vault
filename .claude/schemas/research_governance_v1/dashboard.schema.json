@@ -1,0 +1,1 @@
+{"$schema":"https://json-schema.org/draft/2020-12/schema","title":"Research Governance v1 Dashboard","type":"object","required":["schema_version","source_of_truth","derived_only","rows"],"properties":{"schema_version":{"const":"dashboard.v1"},"source_of_truth":{"const":"derived_view_only"},"derived_only":{"const":true},"rows":{"type":"array"}}}

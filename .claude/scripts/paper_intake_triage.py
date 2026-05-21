@@ -9,6 +9,18 @@ from typing import Any
 from kb_common import safe_print, vault_path
 from research_seed_v2_common import ensure_v2_dirs, run_dir, write_run_artifact, write_text
 
+RESEARCH_VALUE_LANES = [
+    "frontier_anomaly",
+    "contradiction",
+    "tool_infrastructure_gap",
+    "benchmark_metric_gap",
+    "negative_result",
+    "outside_analogy",
+    "local_lab_fit",
+    "baseline_weakness",
+    "pilot_feasibility",
+]
+
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     if not path.exists():
@@ -45,6 +57,23 @@ def _title(item: dict[str, Any]) -> str:
 
 def _summary(item: dict[str, Any]) -> str:
     return str(item.get("summary") or item.get("abstract") or _paper(item).get("summary") or _paper(item).get("abstract") or "")
+
+
+def _research_value_lanes(item: dict[str, Any]) -> list[str]:
+    text = " ".join([_title(item), _summary(item)]).lower()
+    patterns = {
+        "frontier_anomaly": ["anomaly", "unexpected", "emergent", "surprising"],
+        "contradiction": ["contradict", "challenge", "against", "limitation"],
+        "tool_infrastructure_gap": ["tool", "infrastructure", "system", "pipeline"],
+        "benchmark_metric_gap": ["benchmark", "metric", "evaluation", "dataset", "protocol"],
+        "negative_result": ["negative result", "failure", "does not", "no improvement", "ablation"],
+        "outside_analogy": ["biology", "medical", "material", "graphics", "language model"],
+        "local_lab_fit": ["dlo", "cable", "rope", "bimanual", "tactile", "franka", "sim-to-real"],
+        "baseline_weakness": ["baseline", "strongest", "comparison", "outperform"],
+        "pilot_feasibility": ["pilot", "small-scale", "low-cost", "offline", "replay", "simulation"],
+    }
+    lanes = [lane for lane, tokens in patterns.items() if any(token in text for token in tokens)]
+    return lanes or ["quota_gap"]
 
 
 def _category(item: dict[str, Any]) -> str:
@@ -84,13 +113,15 @@ def build_triage(
     seen_categories: set[str] = set()
     for index, (original_index, item) in enumerate(ranked):
         category = _category(item)
+        lanes = _research_value_lanes(item)
         decision = "defer"
         reason = "below_daily_read_budget"
-        if selected < max_deep_read and (selected < target_deep_read or category not in seen_categories):
+        if selected < max_deep_read and (selected < target_deep_read or category not in seen_categories or not set(lanes) <= seen_categories):
             decision = "deep_read"
             reason = "target_or_diversity_slot"
             selected += 1
             seen_categories.add(category)
+            seen_categories.update(lanes)
         row = {
             "rank": index + 1,
             "original_index": original_index,
@@ -99,6 +130,7 @@ def build_triage(
             "title": _title(item),
             "score": _score(item),
             "category": category,
+            "research_value_lanes": lanes,
             "decision": decision,
             "reason": reason,
         }
@@ -112,9 +144,15 @@ def build_triage(
                     "title": row["title"],
                     "score": row["score"],
                     "category": category,
+                    "research_value_lanes": lanes,
                     "reason": reason,
                 }
             )
+    lane_counts = {lane: 0 for lane in RESEARCH_VALUE_LANES}
+    for row in decisions:
+        for lane in row.get("research_value_lanes", []):
+            if lane in lane_counts:
+                lane_counts[lane] += 1
     return {
         "schema_version": "intake_triage.v1",
         "run_date": run_date,
@@ -122,6 +160,9 @@ def build_triage(
         "max_deep_read": max_deep_read,
         "decisions": decisions,
         "selected_for_deep_read": selected_for_deep_read,
+        "research_value_policy": "quota_or_explicit_gap",
+        "research_value_quota_counts": lane_counts,
+        "research_value_quota_gaps": [lane for lane, count in lane_counts.items() if count == 0],
         "counts": {
             "input_candidates": len(items),
             "deep_read": sum(1 for item in decisions if item["decision"] == "deep_read"),

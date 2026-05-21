@@ -43,7 +43,8 @@ class ActiveSeedDashboardTest(V03TempAgendaTest):
             allow_formal_seed_publish=True,
             allow_test_provider_for_formal=True,
         )
-        self.assertNotEqual(result["status"], "success")
-        self.assertTrue(any("active_seed_dashboard_mismatch" in item for item in result["blocked"]))
+        self.assertEqual(result["status"], "legacy_formal_publish_disabled_use_formal_rehearsal_packet")
+        self.assertEqual(result["published"], [])
+        self.assertIn("v1_disables_legacy_formal_seed_writing", result["blocked"])
         survival_after = read_json(artifact_dir(RUN_DATE) / "survival-decision.json")
         self.assertFalse(survival_after["decisions"][0]["active_seed_allowed"])

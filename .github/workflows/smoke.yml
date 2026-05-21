@@ -40,6 +40,13 @@ jobs:
         shell: pwsh
         run: python -m unittest discover -s .claude/scripts/tests -p "test_*.py"
 
+      - name: Run v1 governance audits
+        shell: pwsh
+        run: |
+          python .claude/scripts/audit_governance_invariants.py --strict
+          python .claude/scripts/state_machine_guard.py --audit
+          python .claude/scripts/migrate_v03_to_v10.py --dry-run
+
       - name: Audit local knowledge base
         shell: pwsh
         run: |
@@ -90,4 +97,6 @@ jobs:
 
       - name: Check tracked artifacts and secrets
         shell: pwsh
-        run: python tools/scan_public_package.py
+        run: |
+          python tools/scan_public_package.py
+          python .claude/scripts/audit_public_package_v1.py

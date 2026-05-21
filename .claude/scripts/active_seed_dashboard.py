@@ -228,9 +228,8 @@ def render_markdown(payload: dict[str, Any]) -> str:
 def write_dashboard(run_date: str, *, latest: bool = True, dry_run: bool = False) -> dict[str, Any]:
     ensure_v2_dirs(run_date)
     payload = build_dashboard(run_date)
-    write_run_artifact(run_date, "active-seed-dashboard.json", payload, state="active_seed_dashboard_rendered", dry_run=dry_run)
-    md_path = artifact_dir(run_date) / "active-seed-dashboard.md"
-    write_text(md_path, render_markdown(payload), dry_run=dry_run)
+    write_json(artifact_dir(run_date) / "active-seed-dashboard.json", payload, dry_run=dry_run)
+    write_text(artifact_dir(run_date) / "active-seed-dashboard.md", render_markdown(payload), dry_run=dry_run)
     if latest:
         write_json(agenda_v2_path("dashboard", "active-seed-dashboard.json"), payload, dry_run=dry_run)
         write_text(agenda_v2_path("dashboard", "active-seed-dashboard.md"), render_markdown(payload), dry_run=dry_run)

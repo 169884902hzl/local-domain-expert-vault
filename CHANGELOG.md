@@ -1,5 +1,34 @@
 # Changelog
 
+## v1.0.0 - Research Governance Workbench
+
+### Added
+
+- New v1 governance source-of-truth layout under `projects/research-agenda/` for candidates, evidence packets, manual prior-art dossiers, baseline readiness, formal rehearsals, governance active seed records, governance ledger, strategy ledger, and non-destructive legacy migration reports.
+- `research_governance_common.py`, `state_machine_guard.py`, `active_seed_commit.py`, governance audit scripts, migration dry-run, public package v1 scan, evidence packet builders/confirmers, manual prior-art dossier tooling, nearest-work matrix, baseline readiness, formal rehearsal packet, pilot plan/result, and strategy ledger helpers.
+- `research_governance_v1` schemas for state transitions, candidate records, evidence packets, confirmations, prior-art dossiers, nearest-work matrices, baseline execution readiness, formal rehearsal packets, governance reviews, active seed records, pilot plans/results, strategy events, dashboards, and legacy migration.
+- Invariant tests covering direct seed writers, scheduled-mode boundaries, stale novelty cache, API timeout, manual prior-art dossier, baseline readiness, human-confirmed evidence, cross-paper edges, formal rehearsal separation, dashboard derived-only behavior, crash/concurrency guards, legacy migration, strategy feedback, public package safety, and owner/resource/kill-criteria requirements.
+
+### Changed
+
+- Legacy v0.3 constants are frozen in `research_seed_v2_common.py`; v1 state machine and governance validation live in `research_governance_common.py`.
+- `publish_research_run.py` no longer writes formal seeds. Any formal target returns `legacy_formal_publish_disabled_use_formal_rehearsal_packet`.
+- `survival_decision.py` is demoted to a candidate risk classifier. It may report `governance_review_possible`, but `active_seed_allowed` is never authoritative.
+- Scheduled daily automation is capped at candidate-only states and its PowerShell wrapper fails on formal/active/governance mutation flags.
+- `pilot_feedback.py` and `weekly_strategy_review.py` generate proposed strategy events only; applying strategy changes requires `strategy_ledger.py --apply --human-confirmed`.
+- `active_seed_dashboard.py` remains derived-only and cannot mutate state or serve as input to active seed commit.
+
+### Safety
+
+- Scheduled automation may generate intake, candidate drafts, evidence drafts, novelty screening, provider-backed critiques, queues, and derived dashboards only.
+- Scheduled automation must never create formal rehearsal packets, complete human confirmations, write active seeds, write governance ledger events, kill active seeds, or resurrect active seeds.
+- OpenAlex, Semantic Scholar, and arXiv are screening only; they are not manual prior-art review, novelty proof, or publishability proof.
+- DeepSeek, Codex, and other providers are model critique only; they are not peer review.
+- Active seed is a human-governed research commitment requiring confirmed evidence, manual prior-art dossier, baseline execution readiness, pilot plan, owner/resource/timeline/kill criteria, artifact hashes, and governance signature.
+- Formal rehearsal is not an active seed and cannot write `idea_bank/seed/`.
+- Legacy v0.3.x seeds are archived legacy artifacts and must never auto-promote.
+- This project is not a doctoral-level idea generator.
+
 ## v0.3.1 - Active-Seed QA Hardening
 
 ### Added

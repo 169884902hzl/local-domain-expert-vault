@@ -1,0 +1,1 @@
+{"$schema":"https://json-schema.org/draft/2020-12/schema","title":"Research Governance v1 Nearest Work Matrix","type":"object","required":["schema_version","candidate_id","works","boundary"],"properties":{"schema_version":{"const":"nearest_work_matrix.v1"},"candidate_id":{"type":"string"},"works":{"type":"array"},"boundary":{"type":"string"}}}

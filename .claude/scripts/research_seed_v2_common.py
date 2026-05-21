@@ -21,6 +21,12 @@ except Exception:  # pragma: no cover - exercised by fallback tests via monkeypa
 
 SCHEMA_ROOT = vault_path(".claude", "schemas", "research_seed_v2")
 STATE_MACHINE_VERSION = "research_seed_state_machine.v2"
+LEGACY_V03_STATE_MACHINE_VERSION = STATE_MACHINE_VERSION
+LEGACY_V03_FORMAL_SEED_ROOT = "projects/research-agenda/idea_bank/seed"
+LEGACY_V03_BOUNDARY = (
+    "v0.3.x research-seed helpers are retained for legacy candidate artifacts only. "
+    "v1 active seed governance lives in research_governance_common.py and active_seed_commit.py."
+)
 RUN_SCHEMA_VERSION = "research_run_manifest.v1"
 
 ARTIFACT_SCHEMAS: dict[str, str] = {

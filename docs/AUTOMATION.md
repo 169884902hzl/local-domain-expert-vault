@@ -2,6 +2,29 @@
 
 本页说明如何启动、配置和排查这个 vault 的自动化流程。所有 API key 都必须由使用者在自己的机器上配置；仓库不会包含任何真实 key。
 
+## v1.0 Research Governance Workbench 边界
+
+v1.0 把 research agenda 从 legacy formal publish 路径升级为 Research Governance Workbench。自动化可以生成 intake、candidate drafts、evidence drafts、novelty screening、provider-backed critiques、queues 和 derived dashboards，但这些都不是 active seed。
+
+禁止边界：
+
+- Scheduled automation must never create formal rehearsal packets, complete human confirmations, write active seeds, write governance ledger events, kill active seeds, or resurrect active seeds.
+- `publish_research_run.py --target-policy formal` 不再写 formal seed，而是返回 `legacy_formal_publish_disabled_use_formal_rehearsal_packet`。
+- `run_daily_arxiv_task.ps1` 会拒绝 formal/active/governance mutation flags，包括 `--v2-publish-policy formal`、`--allow-formal-seed-publish`、`--commit-active-seed`、`--human-confirmed` 和 `--governance-signature`。
+- Dashboard derived-only，不能作为 active seed commit 的输入，也不能作为状态变更 source of truth。
+- `pilot_feedback.py` 和 `weekly_strategy_review.py` 只生成 proposed strategy events；只有 `strategy_ledger.py --apply --human-confirmed` 可以写入已应用策略事件。
+
+术语边界：
+
+- `raw candidate` 是自动或人工生成的草稿。
+- `seed candidate` 是带证据和筛查记录、等待人工审阅的候选。
+- `formal rehearsal` 是人工演练包，不是 active seed。
+- `active seed` 是人工治理签署的研究承诺，要求 confirmed evidence packet、manual prior-art dossier、baseline execution readiness、pilot plan、owner/resource/timeline/kill criteria、artifact hashes 和 governance signature。
+- `pilot-ready` 是可执行 pilot 状态，不是 publishability proof。
+- `killed` 和 `resurrected` 必须通过 governance ledger 表达，不能由 scheduled automation 自动完成。
+
+OpenAlex / Semantic Scholar / arXiv 是 screening only，不是 prior-art review、novelty proof 或 publishability proof。DeepSeek / Codex / provider review 是 model critique only，不是 peer review。本项目不是 doctoral-level idea generator。
+
 ## 自动化分层
 
 | 层级 | 能力 | 必需条件 | 适合谁 |
@@ -10,7 +33,7 @@
 | Level 1 | arXiv metadata mirror smoke test | Python + 网络 | 想确认 OAI-PMH metadata 同步入口可用 |
 | Level 2 | mirror-first daily pipeline dry-run | Python + metadata mirror | 想看每日候选但不写库 |
 | Level 3 | optional Search API fallback troubleshooting | Python + 网络 | 只在 mirror 缺失、过旧或候选不足时排错 |
-| Level 4 | Zotero + Claudian + Gemini + DeepSeek + Codex full workflow | Zotero / Claudian / Gemini / OpenCode DeepSeek / Codex 逐步配置 | 想复现完整导入、精读、raw candidate 生成和 v0.2 pre-publish gates |
+| Level 4 | Zotero + Claudian + Gemini + DeepSeek + Codex candidate workflow | Zotero / Claudian / Gemini / OpenCode DeepSeek / Codex 逐步配置 | 想复现完整导入、精读、raw candidate 生成和 v1 candidate-only gates |
 | Level 5 | Windows 定时运行 | Windows Task Scheduler | 想每天自动跑 |
 
 建议按层级逐步启用。不要第一次使用就直接注册计划任务。
@@ -21,7 +44,7 @@
 
 | 默认时间 | 任务名 | 入口脚本 | 输出位置 | 边界 |
 | --- | --- | --- | --- | --- |
-| 每天 12:00 | `DailyArxivEmbodiedAIScout` | `.claude/scripts/run_daily_arxiv_task.ps1` | `projects/arxiv-daily/scheduled-task.log` | 负责 arXiv mirror sync、daily pipeline、Gemini raw candidates、multi-provider novelty/baseline scan、survival decision、默认 `seed-candidates-only` publish gate 和质量审计；默认 provider-free。DeepSeek/Codex provider-backed gates 只有显式 provider 参数后才完成；否则会 fail-closed / `partial`，不写 formal seed。Scheduled formal publish 仍未启用。 |
+| 每天 12:00 | `DailyArxivEmbodiedAIScout` | `.claude/scripts/run_daily_arxiv_task.ps1` | `projects/arxiv-daily/scheduled-task.log` | 负责 arXiv mirror sync、daily pipeline、Gemini raw candidates、multi-provider novelty/baseline screening、survival risk classification、candidate-only publish gate 和质量审计；默认 provider-free。DeepSeek/Codex provider-backed gates 只有显式 provider 参数后才完成；否则会 fail-closed / `partial`，不写 formal seed。Scheduled formal publish remains disabled. |
 | 每天 16:30 | `DailyCodexSeedReview` | `.claude/scripts/run_daily_codex_seed_review_task.ps1` | `projects/research-agenda/reviews/daily-codex-seed-review-task.log` 和 `YYYY-MM-DD-codex-seed-review.md` | 对当天或最近 7 天未审 seed packet 做 Codex execution review；不删除、不晋升、不声明 novelty，也不自动发布 formal seed。 |
 | 每周日 20:00 | `WeeklyResearchAgendaReview` | `.claude/scripts/run_weekly_agenda_review_task.ps1` | `projects/research-agenda/reviews/weekly-agenda-review-task.log`、`YYYY-MM-DD-weekly-agenda-review.md`、`YYYY-MM-DD-weekly-top-tier-review.md` | 汇总一周 agenda 状态、审计结果和 top-tier pressure test；不会自动移动 idea 文件夹。 |
 
@@ -35,6 +58,9 @@
 python --version
 python .claude/scripts/audit_kb.py
 python .claude/scripts/kb_search.py "VLM robot manipulation" --limit 5
+python .claude/scripts/state_machine_guard.py --audit
+python .claude/scripts/audit_governance_invariants.py --strict
+python .claude/scripts/audit_public_package_v1.py
 ```
 
 预期：

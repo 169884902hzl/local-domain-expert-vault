@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](#what-works-immediately-after-cloning)
 
-> A local-first research vault that turns an Obsidian + Zotero library into a domain expert with memory: papers become `wiki/` evidence, Claudian reads and compares them, Gemini proposes raw candidates, DeepSeek / novelty scan / Codex / survival decision gate them, and human approval decides whether anything becomes a formal research seed.
+> A local-first research vault that turns an Obsidian + Zotero library into a domain expert with memory, and in v1.0 upgrades the research agenda into a Research Governance Workbench: automation may draft candidates, evidence, screening, critiques, queues, and dashboards, but an active seed must be a human-governed research commitment.
 
 [中文 README](README.md)
 
@@ -19,9 +19,46 @@ The public vault uses robotic manipulation as its example domain, especially DLO
 
 It is built for graduate students, PI/lab knowledge-base maintainers, and researchers who need long-term literature memory rather than another one-off summarizer.
 
-Current public version: `v0.3.1`. `v0.1.0` was the first releasable local-first vault: local browsing, knowledge-base audits, `kb_search.py` retrieval, Zotero/Obsidian setup documentation, Paper Reading Workbench, arXiv mirror-first automation docs, and the Windows scheduled-task entry point. `v0.2.0` adds the research-seed v2 state machine on top of that base; `v0.2.1` hardens the gates needed before any future scheduled formal publish; `v0.2.2` upgrades the external novelty scan from an arXiv-only probe to OpenAlex plus optional Semantic Scholar prior-art probes; `v0.2.3` hardens the anchored evidence graph; `v0.3.0` adds supervised research-validity hardening; `v0.3.1` hardens active-seed QA while still not enabling scheduled formal publish.
+Current public version: `v1.0.0`. `v0.1.0` was the first releasable local-first vault; `v0.2.x` added the research-seed v2 state machine and external-screening hardening; `v0.3.x` added supervised research-validity hardening. `v1.0.0` redesigns the active seed path as a human-governed Research Governance Workbench commitment, not a publish side effect.
 
-`v0.2.0` is a major workflow architecture upgrade: the old Gemini greenhouse plus downstream-review scaffold is now a transactional research-seed state machine. It improves state control, review ordering, auditability, and rollout safety; it does not claim that generated ideas are automatically novel or publishable.
+## v1.0: Research Governance Workbench
+
+The v1.0 source of truth moves out of the legacy `idea_bank/seed/` publish path and into the governance layout under `projects/research-agenda/`:
+
+```text
+runs/<run_id>/artifacts/
+candidates/<candidate_id>/candidate-record.json
+evidence-packets/<candidate_id>/
+prior-art-dossiers/<candidate_id>/
+baseline-readiness/<candidate_id>/
+formal-rehearsals/<candidate_id>/
+governance/active-seeds/<active_seed_id>/active-seed-record.json
+governance/ledger/governance-ledger.jsonl
+strategy/strategy-ledger.jsonl
+legacy-v03/migration-report.json
+```
+
+Hard boundaries:
+
+- Scheduled automation may generate intake, candidate drafts, evidence drafts, novelty screening, provider-backed critiques, queues, and derived dashboards.
+- Scheduled automation must never create formal rehearsal packets, complete human confirmations, write active seeds, write governance ledger events, kill active seeds, or resurrect active seeds.
+- OpenAlex / Semantic Scholar / arXiv scans are screening only. They are not prior-art review, novelty proof, or publishability proof.
+- DeepSeek / Codex / provider review is model critique only. It is not peer review.
+- Dashboard is derived-only. It cannot be source of truth or input to state mutation.
+- `formal_rehearsal` is not an active seed and cannot write `idea_bank/seed/`.
+- Legacy v0.3.x seeds are archived legacy artifacts and must never auto-promote.
+
+Terms:
+
+- `raw candidate`: an automated or human idea draft; it can only enter the candidate layer.
+- `seed candidate`: a candidate with local evidence and screening results ready for human review.
+- `formal rehearsal`: a complete rehearsal packet for manual review; it is not an active seed.
+- `active seed`: a human-governed research commitment requiring a confirmed evidence packet, manual prior-art dossier, baseline execution readiness, pilot plan, owner/resource/timeline/kill criteria, artifact hashes, and governance signature.
+- `pilot-ready`: an active seed with an executable pilot path; it is not publishability proof.
+- `killed`: an active seed terminated by a human or governance workflow.
+- `resurrected`: a historical direction returned to candidate review through the ledger.
+
+This project is not a doctoral-level idea generator, not peer review, not novelty proof, and not publishability proof. It is a local-evidence-first, auditable, fail-closed research governance workbench.
 
 ## Why This Exists
 

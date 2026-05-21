@@ -24,6 +24,24 @@ function Write-TaskLog {
   $Message | Out-File -FilePath $LogPath -Append -Encoding utf8
 }
 
+function Assert-NoGovernanceMutationArgs {
+  param([string[]]$Arguments)
+  $Forbidden = @(
+    "--target-policy " + "formal",
+    "--v2-publish-policy " + "formal",
+    "--allow-formal" + "-seed-publish",
+    "--commit-active" + "-seed",
+    "--human" + "-confirmed",
+    "--governance" + "-signature"
+  )
+  $Joined = $Arguments -join " "
+  foreach ($Token in $Forbidden) {
+    if ($Joined.Contains($Token)) {
+      throw "scheduled_governance_forbidden_arg: $Token"
+    }
+  }
+}
+
 function Test-ExistingLockIsActive {
   param([string]$Path)
   if (-not (Test-Path -LiteralPath $Path)) {
@@ -162,6 +180,7 @@ try {
   if ($CodexExecutionProvider -ne "none") {
     $PipelineArgs += @("--codex-execution-provider", $CodexExecutionProvider)
   }
+  Assert-NoGovernanceMutationArgs -Arguments $PipelineArgs
   & $Python @PipelineArgs 2>&1 |
     ForEach-Object { $_ | Out-File -FilePath $LogPath -Append -Encoding utf8 }
   $ExitCode = $LASTEXITCODE

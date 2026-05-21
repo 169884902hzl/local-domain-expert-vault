@@ -1,4 +1,4 @@
-"""Write safe v2 strategy overrides without weakening hard gates."""
+"""Write proposed v2/v1 strategy review events without weakening hard gates."""
 from __future__ import annotations
 
 import argparse
@@ -147,10 +147,11 @@ def main() -> int:
     safe["run_date"] = args.run_date
     safe["week_id"] = _week_id(args.run_date)
     safe["validation_errors"] = errors
+    safe["applied"] = False
+    safe["requires_strategy_ledger_apply"] = True
     week_id = _week_id(args.run_date)
-    write_json(agenda_v2_path("strategy", "weekly-overrides", f"{week_id}-strategy-overrides.json"), safe, dry_run=args.dry_run)
+    write_json(agenda_v2_path("strategy", "weekly-overrides", f"{week_id}-strategy-overrides.proposed.json"), safe, dry_run=args.dry_run)
     write_json(agenda_v2_path("strategy", "resurrection-review", f"{week_id}.json"), review, dry_run=args.dry_run)
-    write_json(agenda_v2_path("strategy", "active-overrides.json"), safe, dry_run=args.dry_run)
     safe_print(f"WEEKLY_STRATEGY_REVIEW: errors={len(errors)} overrides={len(safe['overrides'])}")
     return 0 if not errors else 2
 

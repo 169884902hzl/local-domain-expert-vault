@@ -23,6 +23,7 @@ from research_seed_v2_common import (
     validate_json_file,
     v2_rel,
 )
+from research_governance_common import active_commit_validation
 
 
 BROAD_EXTERNAL_NOVELTY_PROVIDERS = {"openalex", "semantic_scholar"}
@@ -309,6 +310,19 @@ def validate_one(run_date: str, artifact_name: str) -> dict[str, Any]:
     }
 
 
+def validate_governance_commit(candidate_id: str) -> dict[str, Any]:
+    result = active_commit_validation(candidate_id)
+    return {
+        "schema_version": "governance_commit_validation.v1",
+        "candidate_id": candidate_id,
+        "status": "success" if result.ok else "failed",
+        "checked": ["research_governance_v1_active_commit_prerequisites"],
+        "errors": result.errors,
+        "warnings": result.warnings,
+        "boundary": "Validation only; active_seed_commit.py is the only active seed writer.",
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command")
@@ -331,6 +345,10 @@ def main() -> int:
     artifact_parser.add_argument("--artifact", required=True)
     artifact_parser.add_argument("--json", action="store_true")
 
+    governance_parser = sub.add_parser("governance-commit")
+    governance_parser.add_argument("--candidate-id", required=True)
+    governance_parser.add_argument("--json", action="store_true")
+
     args = parser.parse_args()
     if args.command == "init":
         payload = init_manifest_with_policy(
@@ -345,6 +363,8 @@ def main() -> int:
         return 0
     if args.command == "artifact":
         result = validate_one(args.run_date, args.artifact)
+    elif args.command == "governance-commit":
+        result = validate_governance_commit(args.candidate_id)
     else:
         result = validate_run(args.run_date, strict_publish=getattr(args, "strict_publish", False))
     if getattr(args, "json", False):
