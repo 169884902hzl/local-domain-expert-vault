@@ -100,7 +100,15 @@ def render_report(
     if not reads:
         lines.append("- none")
     for item in reads:
-        lines.append(f"- zotero_key={item.get('zotero_key')} ingest={item.get('ingest_status')} read={item.get('read_status')}")
+        lines.append(
+            f"- zotero_key={item.get('zotero_key')} ingest={item.get('ingest_status')} "
+            f"read={item.get('read_status')} target_note_audit={item.get('target_note_audit_status', 'not_run')} "
+            f"audit_json={item.get('audit_json_path', '-') or '-'}"
+        )
+        if item.get("target_note_issues"):
+            lines.append(f"  - target_note_issues: {item.get('target_note_issues')}")
+        if item.get("global_warning_counts"):
+            lines.append(f"  - global_warning_counts: {item.get('global_warning_counts')}")
     lines.extend(["", "## Existing Excluded Sample", ""])
     if not existing_candidates:
         lines.append("- none")
@@ -212,8 +220,13 @@ def run_backfill(args: argparse.Namespace) -> int:
         ingest_status, ingest_output = ingest_zotero_key(result.zotero_key)
         read_status = "skipped"
         read_output = ""
+        read_log_paths: dict[str, Any] = {}
         if not args.skip_read and ingest_status == "success":
-            read_status, read_output = read_zotero_key(result.zotero_key, timeout=args.read_timeout)
+            read_status, read_output, read_log_paths = read_zotero_key(
+                result.zotero_key,
+                timeout=args.read_timeout,
+                run_date=run_date,
+            )
         reads.append(
             {
                 "zotero_key": result.zotero_key,
@@ -221,6 +234,11 @@ def run_backfill(args: argparse.Namespace) -> int:
                 "ingest_output_tail": ingest_output[-1200:],
                 "read_status": read_status,
                 "read_output_tail": read_output[-1200:],
+                "target_note_audit_status": read_log_paths.get("target_note_audit_status", "not_run"),
+                "target_note_issues": read_log_paths.get("target_note_issues", []),
+                "global_warning_counts": read_log_paths.get("global_warning_counts", {}),
+                "global_warning_paths": read_log_paths.get("global_warning_paths", {}),
+                "audit_json_path": read_log_paths.get("audit_json_path", ""),
             }
         )
         if ingest_status != "success":

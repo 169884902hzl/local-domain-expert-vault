@@ -1220,6 +1220,159 @@ def _write_read_attempt_log(
     }
 
 
+def _empty_target_note_audit_fields() -> dict[str, Any]:
+    return {
+        "target_note_audit_status": "not_run",
+        "target_note_issues": [],
+        "global_warning_counts": {},
+        "global_warning_paths": {},
+        "audit_json_path": "",
+    }
+
+
+def _global_warning_counts(payload: dict[str, Any]) -> dict[str, int]:
+    warnings = payload.get("global_warnings", {})
+    if not isinstance(warnings, dict):
+        return {}
+    counts: dict[str, int] = {}
+    for key in ["topic_issues", "concept_issues", "entity_issues", "tags_missing_from_taxonomy"]:
+        value = warnings.get(key, [])
+        counts[key] = len(value) if isinstance(value, list) else 0
+    return counts
+
+
+def _global_warning_paths(payload: dict[str, Any]) -> dict[str, list[str]]:
+    warnings = payload.get("global_warnings", {})
+    if not isinstance(warnings, dict):
+        return {}
+    paths: dict[str, list[str]] = {}
+    for key in ["topic_issues", "concept_issues", "entity_issues"]:
+        value = warnings.get(key, [])
+        if not isinstance(value, list):
+            continue
+        seen: set[str] = set()
+        for item in value:
+            if not isinstance(item, dict):
+                continue
+            path = str(item.get("path", "")).strip()
+            if path and path not in seen:
+                seen.add(path)
+        paths[key] = sorted(seen)
+    return paths
+
+
+def _write_target_note_audit_json(
+    *,
+    run_date: str,
+    zotero_key: str,
+    attempt: int,
+    payload: dict[str, Any],
+) -> str:
+    log_dir = vault_path("projects", "arxiv-daily", "read-logs", run_date or today_iso())
+    log_dir.mkdir(parents=True, exist_ok=True)
+    safe_key = re.sub(r"[^A-Za-z0-9_.-]+", "_", zotero_key) or "unknown"
+    attempt_suffix = f"-attempt{attempt}" if attempt else ""
+    path = log_dir / f"{safe_key}{attempt_suffix}-target-note-audit.json"
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return str(path.relative_to(vault_path())).replace("\\", "/")
+
+
+def run_target_note_audit(zotero_key: str, *, run_date: str = "", attempt: int = 0) -> tuple[str, str, dict[str, Any]]:
+    command = [
+        sys.executable,
+        ".claude/scripts/audit_kb.py",
+        "--strict-reading",
+        "--zotero-key",
+        zotero_key,
+        "--json",
+    ]
+    try:
+        code, stdout, stderr = run_subprocess_capture(command, timeout=300)
+    except FileNotFoundError:
+        fields = _empty_target_note_audit_fields()
+        fields.update({"target_note_audit_status": "failed", "target_note_issues": ["python_or_audit_kb_not_found"]})
+        return "failed", "\nTARGET_NOTE_AUDIT: failed python_or_audit_kb_not_found", fields
+    except Exception as exc:
+        fields = _empty_target_note_audit_fields()
+        fields.update({"target_note_audit_status": "failed", "target_note_issues": [f"audit_exception:{type(exc).__name__}:{exc}"]})
+        return "failed", f"\nTARGET_NOTE_AUDIT: failed audit_exception:{type(exc).__name__}:{exc}", fields
+
+    try:
+        payload = json.loads(stdout)
+        if not isinstance(payload, dict):
+            raise ValueError("json_top_level_not_object")
+    except Exception as exc:
+        payload = {
+            "parse_error": f"{type(exc).__name__}:{exc}",
+            "raw_stdout": stdout,
+            "stderr": stderr,
+            "exit_code": code,
+        }
+    audit_json_path = _write_target_note_audit_json(
+        run_date=run_date,
+        zotero_key=zotero_key,
+        attempt=attempt,
+        payload=payload,
+    )
+
+    target_note = payload.get("target_note", {}) if isinstance(payload, dict) else {}
+    target_issues = target_note.get("issues", []) if isinstance(target_note, dict) else []
+    if not isinstance(target_issues, list):
+        target_issues = [str(target_issues)]
+    parse_error = str(payload.get("parse_error", "")) if isinstance(payload, dict) else "invalid_audit_payload"
+    if parse_error:
+        target_issues = [f"audit_json_parse_error:{parse_error}"]
+    strict_pass = bool(target_note.get("strict_reading_pass")) if isinstance(target_note, dict) else False
+    passed = code == 0 and strict_pass and not target_issues
+    fields = {
+        "target_note_audit_status": "passed" if passed else "failed",
+        "target_note_issues": [str(issue) for issue in target_issues],
+        "global_warning_counts": _global_warning_counts(payload),
+        "global_warning_paths": _global_warning_paths(payload),
+        "audit_json_path": audit_json_path,
+    }
+    summary = (
+        f"\nTARGET_NOTE_AUDIT: status={fields['target_note_audit_status']} "
+        f"audit_json={audit_json_path} target_issues={fields['target_note_issues']} "
+        f"global_warning_counts={fields['global_warning_counts']}"
+    )
+    if stderr:
+        summary += f"\nTARGET_NOTE_AUDIT_STDERR:\n{stderr}"
+    return str(fields["target_note_audit_status"]), summary, fields
+
+
+def latest_target_note_audit_fields(logs: list[dict[str, Any]]) -> dict[str, Any]:
+    for log in reversed(logs):
+        if log.get("target_note_audit_status"):
+            return {
+                "target_note_audit_status": log.get("target_note_audit_status", "not_run"),
+                "target_note_issues": log.get("target_note_issues", []),
+                "global_warning_counts": log.get("global_warning_counts", {}),
+                "global_warning_paths": log.get("global_warning_paths", {}),
+                "audit_json_path": log.get("audit_json_path", ""),
+            }
+    return _empty_target_note_audit_fields()
+
+
+def finalize_read_status_with_target_audit(
+    *,
+    zotero_key: str,
+    read_status: str,
+    read_output: str,
+    read_attempt_logs: list[dict[str, Any]],
+    run_date: str = "",
+) -> tuple[str, str, dict[str, Any]]:
+    fields = latest_target_note_audit_fields(read_attempt_logs)
+    if not read_status.startswith("success"):
+        return read_status, read_output, fields
+    if fields.get("target_note_audit_status") == "not_run":
+        _audit_status, audit_output, fields = run_target_note_audit(zotero_key, run_date=run_date, attempt=0)
+        read_output = f"{read_output}{audit_output}"
+    if fields.get("target_note_audit_status") != "passed" or fields.get("target_note_issues"):
+        return "failed:target_note_audit", read_output, fields
+    return read_status, read_output, fields
+
+
 def _write_read_heartbeat(
     *,
     run_date: str,
@@ -1279,7 +1432,7 @@ def read_zotero_key(
     run_date: str = "",
     attempt: int = 1,
     allow_dangerous_claude: bool = False,
-) -> tuple[str, str, dict[str, str]]:
+) -> tuple[str, str, dict[str, Any]]:
     prompt = read_paper_prompt(zotero_key)
     command = ["claude"]
     dangerous_claude = allow_dangerous_claude or os.environ.get(DANGEROUS_CLAUDE_ENV, "").lower() in {"1", "true", "yes", "on"}
@@ -1329,7 +1482,7 @@ def read_zotero_key(
             status=f"finished:exit_code={code}",
             timeout=timeout,
         )
-    log_paths: dict[str, str] = {}
+    log_paths: dict[str, Any] = {}
     if run_date:
         log_paths = _write_read_attempt_log(
             run_date=run_date,
@@ -1344,7 +1497,11 @@ def read_zotero_key(
     note_status, note_path = local_note_status(zotero_key)
     verification = f"\nREAD_VERIFY: note={note_path or '-'} status={note_status}"
     if note_status == "done":
-        return "success_done", output + verification, log_paths
+        audit_status, audit_output, audit_fields = run_target_note_audit(zotero_key, run_date=run_date, attempt=attempt)
+        log_paths.update(audit_fields)
+        if audit_status != "passed":
+            return "failed:target_note_audit", output + verification + audit_output, log_paths
+        return "success_done", output + verification + audit_output, log_paths
     if code == 0:
         reason = _read_failure_reason(output, note_status)
         if reason != f"not_finalized:{note_status}":
@@ -1362,10 +1519,10 @@ def read_zotero_key_timed(
     max_attempts: int = 1,
     retry_delay_sec: int = 60,
     allow_dangerous_claude: bool = False,
-) -> tuple[str, str, float, list[dict[str, str]]]:
+) -> tuple[str, str, float, list[dict[str, Any]]]:
     started = time.monotonic()
     outputs: list[str] = []
-    logs: list[dict[str, str]] = []
+    logs: list[dict[str, Any]] = []
     status = "failed:not_started"
     for attempt in range(1, max(1, max_attempts) + 1):
         status, output, log_paths = read_zotero_key(
@@ -1520,11 +1677,20 @@ def render_run_log(
     for item in reads:
         lines.append(
             f"- zotero_key={item.get('zotero_key')} ingest={item.get('ingest_status')} "
-            f"read={item.get('read_status')} read_elapsed_sec={item.get('read_elapsed_sec', '-')}"
+            f"read={item.get('read_status')} read_elapsed_sec={item.get('read_elapsed_sec', '-')} "
+            f"target_note_audit={item.get('target_note_audit_status', 'not_run')} "
+            f"audit_json={item.get('audit_json_path', '-') or '-'}"
         )
+        if item.get("target_note_issues"):
+            lines.append(f"  - target_note_issues: {item.get('target_note_issues')}")
+        if item.get("global_warning_counts"):
+            lines.append(f"  - global_warning_counts: {item.get('global_warning_counts')}")
+        if item.get("global_warning_paths"):
+            lines.append(f"  - global_warning_paths: {item.get('global_warning_paths')}")
         if item.get("read_attempt_logs"):
             logs = "; ".join(
-                f"attempt{log.get('attempt')}:out={log.get('stdout')},err={log.get('stderr')},heartbeat={log.get('heartbeat', '-')}"
+                f"attempt{log.get('attempt')}:out={log.get('stdout')},err={log.get('stderr')},"
+                f"heartbeat={log.get('heartbeat', '-')},audit={log.get('audit_json_path', '-')}"
                 for log in item.get("read_attempt_logs", [])
             )
             lines.append(f"  - read_attempt_logs: {logs}")
@@ -1638,11 +1804,20 @@ def render_resume_log(
     for item in reads:
         lines.append(
             f"- zotero_key={item.get('zotero_key')} ingest={item.get('ingest_status')} "
-            f"read={item.get('read_status')} read_elapsed_sec={item.get('read_elapsed_sec', '-')}"
+            f"read={item.get('read_status')} read_elapsed_sec={item.get('read_elapsed_sec', '-')} "
+            f"target_note_audit={item.get('target_note_audit_status', 'not_run')} "
+            f"audit_json={item.get('audit_json_path', '-') or '-'}"
         )
+        if item.get("target_note_issues"):
+            lines.append(f"  - target_note_issues: {item.get('target_note_issues')}")
+        if item.get("global_warning_counts"):
+            lines.append(f"  - global_warning_counts: {item.get('global_warning_counts')}")
+        if item.get("global_warning_paths"):
+            lines.append(f"  - global_warning_paths: {item.get('global_warning_paths')}")
         if item.get("read_attempt_logs"):
             logs = "; ".join(
-                f"attempt{log.get('attempt')}:out={log.get('stdout')},err={log.get('stderr')},heartbeat={log.get('heartbeat', '-')}"
+                f"attempt{log.get('attempt')}:out={log.get('stdout')},err={log.get('stderr')},"
+                f"heartbeat={log.get('heartbeat', '-')},audit={log.get('audit_json_path', '-')}"
                 for log in item.get("read_attempt_logs", [])
             )
             lines.append(f"  - read_attempt_logs: {logs}")
@@ -1683,7 +1858,7 @@ def merge_resume_backlog(
         if read and str(read.get("read_status", "")).startswith("success"):
             continue
         note_status, _ = local_note_status(key)
-        if note_status == "done":
+        if not read and note_status == "done":
             continue
         pending += 1
         read_status = str(read.get("read_status", record.get("read_status", "backlog"))) if read else record.get("read_status", "backlog")
@@ -1782,7 +1957,7 @@ def run_resume_backlog(args: argparse.Namespace) -> int:
         )
         read_status = "skipped"
         read_output = ""
-        read_attempt_logs: list[dict[str, str]] = []
+        read_attempt_logs: list[dict[str, Any]] = []
         read_elapsed_sec: float | str = "-"
         if note_status == "done":
             ingest_status = "success"
@@ -1820,6 +1995,13 @@ def run_resume_backlog(args: argparse.Namespace) -> int:
             read_status = "waiting_local_note"
         elif note_status != "done" and ingest_status == "success" and not args.skip_read:
             read_status = "backlog"
+        read_status, read_output, audit_fields = finalize_read_status_with_target_audit(
+            zotero_key=key,
+            read_status=read_status,
+            read_output=read_output,
+            read_attempt_logs=read_attempt_logs,
+            run_date=run_date,
+        )
         reads.append(
             {
                 "zotero_key": key,
@@ -1829,6 +2011,7 @@ def run_resume_backlog(args: argparse.Namespace) -> int:
                 "read_elapsed_sec": read_elapsed_sec,
                 "read_attempt_logs": read_attempt_logs,
                 "read_output_tail": read_output[-1200:],
+                **audit_fields,
             }
         )
         if ingest_status != "success":
@@ -2180,7 +2363,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
                     note_status, note_path = output_note_status, output_note_path
             read_status = "skipped"
             read_output = ""
-            read_attempt_logs: list[dict[str, str]] = []
+            read_attempt_logs: list[dict[str, Any]] = []
             read_elapsed_sec: float | str = "-"
             if not args.skip_read:
                 note_status, note_path = wait_for_local_note(result.zotero_key)
@@ -2208,6 +2391,13 @@ def run_pipeline(args: argparse.Namespace) -> int:
                     )
                 else:
                     read_status = "backlog"
+            read_status, read_output, audit_fields = finalize_read_status_with_target_audit(
+                zotero_key=result.zotero_key,
+                read_status=read_status,
+                read_output=read_output,
+                read_attempt_logs=read_attempt_logs,
+                run_date=run_date,
+            )
             reads.append(
                 {
                     "zotero_key": result.zotero_key,
@@ -2217,6 +2407,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
                     "read_elapsed_sec": read_elapsed_sec,
                     "read_attempt_logs": read_attempt_logs,
                     "read_output_tail": read_output[-1200:],
+                    **audit_fields,
                 }
             )
             if ingest_status != "success":
@@ -2251,7 +2442,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
             new_import_count += 1
             read_status = "skipped"
             read_output = ""
-            read_attempt_logs: list[dict[str, str]] = []
+            read_attempt_logs: list[dict[str, Any]] = []
             read_elapsed_sec: float | str = "-"
             if note_status == "done":
                 ingest_status = "success"
@@ -2280,7 +2471,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
                 read_status, read_output, read_elapsed_sec, read_attempt_logs = read_zotero_key_timed(
                     key,
                     timeout=args.read_timeout,
-                    run_date=args.run_date,
+                    run_date=run_date,
                     max_attempts=args.read_retries + 1,
                     retry_delay_sec=args.read_retry_delay,
                     allow_dangerous_claude=args.allow_dangerous_claude,
@@ -2289,6 +2480,13 @@ def run_pipeline(args: argparse.Namespace) -> int:
                 read_status = "waiting_local_note"
             elif note_status != "done" and ingest_status == "success" and not args.skip_read:
                 read_status = "backlog"
+            read_status, read_output, audit_fields = finalize_read_status_with_target_audit(
+                zotero_key=key,
+                read_status=read_status,
+                read_output=read_output,
+                read_attempt_logs=read_attempt_logs,
+                run_date=run_date,
+            )
             reads.append(
                 {
                     "zotero_key": key,
@@ -2298,6 +2496,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
                     "read_elapsed_sec": read_elapsed_sec,
                     "read_attempt_logs": read_attempt_logs,
                     "read_output_tail": read_output[-1200:],
+                    **audit_fields,
                 }
             )
             if ingest_status != "success":
