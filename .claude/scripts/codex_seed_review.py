@@ -54,6 +54,7 @@ CODEX_EXECUTION_ACTIONS = {
     "requires_human_decision",
 }
 CODEX_CONFIDENCE_VALUES = {"high", "medium", "low"}
+CODEX_EXECUTION_REQUIRED_REVIEW_FIELDS = ["candidate_id", "status", "action", *EXECUTION_REVIEW_FIELDS]
 WEEKLY_TOP_TIER_ACTIONS = [
     "push_to_user_review",
     "rewrite_for_mechanism",
@@ -2681,6 +2682,58 @@ def _run_codex_cli_provider(run_date: str, candidates: list[dict[str, Any]], *, 
     return payload
 
 
+def _has_substantive_execution_review_fields(review: dict[str, Any]) -> bool:
+    if review.get("action") not in CODEX_EXECUTION_ACTIONS:
+        return False
+    return all(str(review.get(field, "")).strip() for field in EXECUTION_REVIEW_FIELDS)
+
+
+def _hydrate_execution_provider_review_metadata(candidates: list[dict[str, Any]], payload: dict[str, Any]) -> dict[str, Any]:
+    reviews = [item for item in payload.get("reviews", []) if isinstance(item, dict)]
+    if not reviews:
+        return payload
+    by_id = {candidate_id(item): item for item in candidates}
+    hydrated_candidate_id = False
+    hydrated_status = False
+    if len(candidates) == 1 and len(reviews) == 1:
+        expected_id = candidate_id(candidates[0])
+        if str(reviews[0].get("candidate_id", "")).strip() != expected_id:
+            reviews[0]["candidate_id"] = expected_id
+            hydrated_candidate_id = True
+    for review in reviews:
+        cid = str(review.get("candidate_id", "")).strip()
+        candidate = by_id.get(cid)
+        if candidate and not str(review.get("candidate_title", "")).strip():
+            review["candidate_title"] = candidate.get("title", "")
+        if not str(review.get("status", "")).strip() and _has_substantive_execution_review_fields(review):
+            review["status"] = "success"
+            hydrated_status = True
+    payload["reviews"] = reviews
+    provider_status = dict(payload.get("provider_status", {}))
+    if hydrated_candidate_id:
+        provider_status["candidate_id_hydrated_from_single_candidate_batch"] = True
+    if hydrated_status:
+        provider_status["review_status_hydrated_from_execution_fields"] = True
+    if provider_status:
+        payload["provider_status"] = provider_status
+    return payload
+
+
+def _schema_safe_execution_reviews(reviews: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    safe_reviews: list[dict[str, Any]] = []
+    for review in reviews:
+        safe = dict(review)
+        if safe.get("status") not in {"success", "failed_fallback_only"}:
+            safe["status"] = "failed_fallback_only"
+        if safe.get("action") not in CODEX_EXECUTION_ACTIONS:
+            safe["action"] = "requires_human_decision"
+        for field in CODEX_EXECUTION_REQUIRED_REVIEW_FIELDS:
+            if not str(safe.get(field, "")).strip():
+                safe[field] = "not_provided"
+        safe_reviews.append(safe)
+    return safe_reviews
+
+
 def _validate_execution_provider_reviews(candidates: list[dict[str, Any]], payload: dict[str, Any]) -> list[str]:
     errors: list[str] = []
     provider = payload.get("provider_status", {})
@@ -2754,8 +2807,9 @@ def execution_review(run_date: str, *, dry_run: bool, provider_review_json: str 
     else:
         provider_payload = {}
     if provider_payload and not provider_payload.get("_provider_error"):
+        provider_payload = _hydrate_execution_provider_review_metadata(candidates, provider_payload)
         provider_errors = _validate_execution_provider_reviews(candidates, provider_payload)
-        reviews = provider_payload.get("reviews", [])
+        reviews = _schema_safe_execution_reviews([item for item in provider_payload.get("reviews", []) if isinstance(item, dict)])
         status = "success" if not provider_errors and candidates else "partial_provider_invalid"
         provider_status = {**dict(provider_payload.get("provider_status", {})), "validation_errors": provider_errors}
         if status != "success":

@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -121,6 +122,7 @@ def _extract_json_object(text: str) -> dict[str, Any]:
             lines = lines[:-1]
         stripped = "\n".join(lines).strip()
     decoder = json.JSONDecoder()
+    first_payload: dict[str, Any] | None = None
     for index, char in enumerate(stripped):
         if char != "{":
             continue
@@ -129,8 +131,80 @@ def _extract_json_object(text: str) -> dict[str, Any]:
         except json.JSONDecodeError:
             continue
         if isinstance(payload, dict):
-            return payload
+            if first_payload is None:
+                first_payload = payload
+            if _looks_like_review_payload(payload):
+                return payload
+    for candidate in _balanced_json_like_objects(stripped):
+        try:
+            payload = json.loads(_repair_js_object_literal(candidate))
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            if first_payload is None:
+                first_payload = payload
+            if _looks_like_review_payload(payload):
+                return payload
+    if first_payload is not None and not _looks_like_opencode_event(first_payload):
+        return first_payload
     raise ValueError("provider_output_json_object_not_found")
+
+
+def _balanced_json_like_objects(text: str) -> list[str]:
+    objects: list[str] = []
+    start: int | None = None
+    depth = 0
+    in_string = False
+    quote = ""
+    escaped = False
+    for index, char in enumerate(text):
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                in_string = False
+            continue
+        if char in {'"', "'"}:
+            in_string = True
+            quote = char
+            continue
+        if char == "{":
+            if depth == 0:
+                start = index
+            depth += 1
+            continue
+        if char == "}" and depth:
+            depth -= 1
+            if depth == 0 and start is not None:
+                objects.append(text[start : index + 1])
+                start = None
+    return objects
+
+
+def _repair_js_object_literal(text: str) -> str:
+    repaired = re.sub(r"(?<=[{,])\s*([A-Za-z_][A-Za-z0-9_]*)\s*:", r'"\1":', text)
+    return re.sub(r",\s*([}\]])", r"\1", repaired)
+
+
+def _looks_like_review_payload(payload: dict[str, Any]) -> bool:
+    if isinstance(payload.get("reviews"), list):
+        return True
+    if isinstance(payload.get("reviews"), dict):
+        return True
+    if isinstance(payload.get("review"), dict):
+        return True
+    if any(field in payload for field in REQUIRED_REVIEW_FIELDS):
+        return True
+    return False
+
+
+def _looks_like_opencode_event(payload: dict[str, Any]) -> bool:
+    event_type = payload.get("type")
+    if isinstance(event_type, str) and event_type in {"step_start", "step-start", "tool_use", "tool", "message"}:
+        return True
+    return bool({"sessionID", "timestamp", "part"} & set(payload)) and not _looks_like_review_payload(payload)
 
 
 def _trim_provider_value(value: Any, *, limit: int = 1200) -> Any:
@@ -207,6 +281,7 @@ def _render_opencode_prompt(
     run_date: str,
     retry_reason: str = "",
     previous_output: str = "",
+    retry_details: list[str] | None = None,
     retry_compact: bool = False,
 ) -> str:
     candidates = [
@@ -214,17 +289,44 @@ def _render_opencode_prompt(
         for item in selected
     ]
     if retry_compact:
+        review_template = [
+            {
+                "candidate_id": str(item.get("candidate_id") or ""),
+                "candidate_title": str(item.get("title") or item.get("candidate_title") or item.get("candidate_id") or ""),
+                "status": "success",
+                "novelty_attack": "string",
+                "baseline_attack": "string",
+                "mechanism_attack": "string",
+                "evaluation_attack": "string",
+                "scope_attack": "string",
+                "a_plus_b_risk": "none|low|medium|high|fatal",
+                "fatal_flaw": "",
+                "rescue_mutation": "",
+                "survivability_label": "survives|survives_if_mutated|park_for_unknown|reject_with_rescue|reject_fatal",
+                "allowed_next_stage": "novelty_scan|gemini_mutation|parked|rescue|stop",
+            }
+            for item in candidates
+        ]
         return json.dumps(
             {
                 "task": (
-                    "Return one raw JSON object only. No tools, no markdown. "
-                    "Write one status=success review for each selected candidate_id."
+                    "Return one RFC 8259 JSON object only. No tools, no markdown. "
+                    "All object keys and string values must use double quotes. "
+                    "Write one status=success review for every exact candidate_id in exact_candidate_ids."
                 ),
                 "schema_version": "deepseek_review.v1",
                 "run_date": run_date,
                 "retry_reason": retry_reason,
-                "previous_invalid_output": previous_output[:300],
-                "input_mode": "compact_retry",
+                "previous_invalid_output_kind": _classify_invalid_provider_output(previous_output),
+                "previous_failure_details": list(retry_details or [])[:8],
+                "input_mode": "compact_retry" if retry_reason else "compact_provider_review",
+                "exact_candidate_ids": [str(item.get("candidate_id") or "") for item in candidates],
+                "required_output_shape": {
+                    "schema_version": "deepseek_review.v1",
+                    "run_date": run_date,
+                    "status": "success",
+                    "reviews": review_template,
+                },
                 "required_review_fields": REQUIRED_REVIEW_FIELDS,
                 "allowed_enums": {
                     "a_plus_b_risk": sorted(A_PLUS_B_RISK),
@@ -240,7 +342,8 @@ def _render_opencode_prompt(
     task = (
         "This is not a coding or implementation task; it is a research-candidate review serialization task. "
         "Do not run tools, inspect files, modify files, or start/cancel background tasks. "
-        "Return strict JSON only. Do not use markdown fences or explanatory prose."
+        "Return RFC 8259 JSON only. All object keys and string values must use double quotes. "
+        "Do not use JavaScript object literal syntax, markdown fences, or explanatory prose."
     )
     if retry_reason == "opencode_invalid_review_payload":
         task = (
@@ -248,6 +351,7 @@ def _render_opencode_prompt(
             "This is not a coding or implementation task; it is a research-candidate review serialization task. "
             "Do not run tools, inspect files, modify files, or start/cancel background tasks. "
             "Return exactly one raw JSON object with a reviews array containing one status=success review per selected candidate. "
+            "All object keys and string values must use double quotes. "
             "Do not include markdown, commentary, analysis text, or code fences."
         )
     elif retry_reason:
@@ -256,6 +360,7 @@ def _render_opencode_prompt(
             "This is not a coding or implementation task; it is a research-candidate review serialization task. "
             "Do not run tools, inspect files, modify files, or start/cancel background tasks. "
             "Return exactly one raw JSON object starting with { and ending with }. "
+            "All object keys and string values must use double quotes. "
             "Do not include markdown, commentary, analysis text, or code fences."
         )
     return json.dumps(
@@ -264,7 +369,8 @@ def _render_opencode_prompt(
             "schema_version": "deepseek_review.v1",
             "run_date": run_date,
             "retry_reason": retry_reason,
-            "previous_invalid_output": previous_output[:12000],
+            "previous_invalid_output_kind": _classify_invalid_provider_output(previous_output),
+            "previous_failure_details": list(retry_details or [])[:8],
             "input_mode": "compact_retry" if retry_compact else "standard",
             "required_output_shape": {
                 "schema_version": "deepseek_review.v1",
@@ -308,6 +414,20 @@ def _render_opencode_prompt(
         indent=2,
         sort_keys=True,
     )
+
+
+def _classify_invalid_provider_output(text: str) -> str:
+    sample = (text or "").strip()
+    if not sample:
+        return "empty_output"
+    first_line = sample.splitlines()[0].strip()
+    try:
+        payload = json.loads(first_line)
+    except json.JSONDecodeError:
+        return "invalid_json"
+    if _looks_like_opencode_event(payload):
+        return f"opencode_event:{payload.get('type') or 'unknown'}"
+    return "json_not_matching_review_schema"
 
 
 def _provider_error_payload(error: str, *, status: str, provider_status: dict[str, Any]) -> dict[str, Any]:
@@ -360,7 +480,16 @@ def _write_opencode_batch_cache(payload: dict[str, Any], *, run_date: str, batch
 
 def _hydrate_provider_review_metadata(selected: list[dict[str, Any]], payload: dict[str, Any]) -> None:
     titles = {candidate_id(item): str(item.get("title") or item.get("candidate_title") or candidate_id(item)) for item in selected}
-    for review in payload.get("reviews", []):
+    reviews = [item for item in payload.get("reviews", []) if isinstance(item, dict)]
+    if len(selected) == 1 and len(reviews) == 1:
+        expected_id = candidate_id(selected[0])
+        if str(reviews[0].get("candidate_id") or "") != expected_id:
+            reviews[0]["candidate_id"] = expected_id
+            payload.setdefault("provider_status", {})["candidate_id_hydrated_from_single_candidate_batch"] = True
+        if not str(reviews[0].get("status") or "").strip() and any(field in reviews[0] for field in REQUIRED_REVIEW_FIELDS):
+            reviews[0]["status"] = "success"
+            payload.setdefault("provider_status", {})["review_status_hydrated_from_single_candidate_batch"] = True
+    for review in reviews:
         if not isinstance(review, dict):
             continue
         cid = str(review.get("candidate_id") or "")
@@ -369,8 +498,18 @@ def _hydrate_provider_review_metadata(selected: list[dict[str, Any]], payload: d
 
 
 def _normalize_provider_payload_shape(payload: dict[str, Any]) -> dict[str, Any]:
-    if "reviews" not in payload and payload.get("candidate_id"):
-        return {"reviews": [payload]}
+    if isinstance(payload.get("reviews"), dict):
+        payload = dict(payload)
+        payload["reviews"] = [payload["reviews"]]
+        return payload
+    if "reviews" not in payload:
+        for key in ("review", "provider_review", "deepseek_review", "candidate_review"):
+            if isinstance(payload.get(key), dict):
+                payload = dict(payload)
+                payload["reviews"] = [payload[key]]
+                return payload
+        if any(field in payload for field in REQUIRED_REVIEW_FIELDS):
+            return {"reviews": [payload]}
     return payload
 
 
@@ -388,6 +527,7 @@ def _opencode_provider_batch(
     last_error_payload: dict[str, Any] | None = None
     retry_reason = ""
     previous_output = ""
+    retry_details: list[str] = []
     for attempt in range(1, attempt_count + 1):
         result = run_opencode_cli(
             _render_opencode_prompt(
@@ -395,7 +535,8 @@ def _opencode_provider_batch(
                 run_date=run_date,
                 retry_reason=retry_reason,
                 previous_output=previous_output,
-                retry_compact=attempt > 1,
+                retry_details=retry_details,
+                retry_compact=True,
             ),
             model=model,
             timeout_sec=timeout_sec,
@@ -419,11 +560,13 @@ def _opencode_provider_batch(
             status["attempt_statuses"] = attempt_statuses
             last_error_payload = _provider_error_payload(f"opencode_timeout:{timeout_sec}s", status="partial_provider_unavailable", provider_status=status)
             retry_reason = "opencode_timeout"
+            retry_details = [f"timeout:{timeout_sec}s"]
             continue
         if result.get("exit_code") != 0:
             status["attempt_statuses"] = attempt_statuses
             last_error_payload = _provider_error_payload(str(result.get("error") or f"opencode_nonzero_exit:{result.get('exit_code')}"), status="partial_provider_unavailable", provider_status=status)
             retry_reason = "opencode_nonzero_exit"
+            retry_details = [str(result.get("error") or f"exit_code:{result.get('exit_code')}")]
             continue
         try:
             payload = _extract_json_object(str(result.get("clean_output") or ""))
@@ -431,8 +574,11 @@ def _opencode_provider_batch(
             previous_output = str(result.get("clean_output") or "")
             status["attempt_statuses"] = attempt_statuses
             status["clean_output_excerpt"] = previous_output[:500]
+            status["raw_stdout_excerpt"] = str(result.get("raw_stdout") or "")[:2000]
+            status["raw_stderr_excerpt"] = str(result.get("raw_stderr") or "")[:1000]
             last_error_payload = _provider_error_payload(f"opencode_invalid_json:{type(exc).__name__}:{exc}", status="partial_provider_invalid", provider_status=status)
             retry_reason = "opencode_invalid_json"
+            retry_details = [f"{type(exc).__name__}:{exc}"]
             continue
         payload = _normalize_provider_payload_shape(payload)
         payload["schema_version"] = "deepseek_review.v1"
@@ -452,12 +598,15 @@ def _opencode_provider_batch(
             status["attempt_statuses"] = attempt_statuses
             status["validation_errors"] = validation_errors
             status["clean_output_excerpt"] = previous_output[:500]
+            status["raw_stdout_excerpt"] = str(result.get("raw_stdout") or "")[:2000]
+            status["raw_stderr_excerpt"] = str(result.get("raw_stderr") or "")[:1000]
             last_error_payload = _provider_error_payload(
                 f"opencode_invalid_review_payload:{';'.join(validation_errors)}",
                 status="partial_provider_invalid",
                 provider_status=status,
             )
             retry_reason = "opencode_invalid_review_payload"
+            retry_details = validation_errors
             continue
         return payload
     return last_error_payload or _provider_error_payload(
@@ -578,6 +727,8 @@ def _opencode_provider_payload(
         if not payload.get("_provider_error"):
             _write_opencode_batch_cache(payload, run_date=run_date, batch_index=index)
         payloads.append(payload)
+        if payload.get("_provider_error"):
+            break
     if len(payloads) == 1:
         payloads[0].setdefault("provider_status", {})
         payloads[0]["provider_status"].setdefault("batch_count", 1)
@@ -622,17 +773,47 @@ def _validate_provider_reviews(selected: list[dict[str, Any]], payload: dict[str
         for field in REQUIRED_REVIEW_FIELDS:
             if field not in review:
                 errors.append(f"provider_review_missing_field:{cid}:{field}")
-            elif field not in OPTIONAL_EMPTY_REVIEW_FIELDS and not str(review.get(field, "")).strip():
+                continue
+            value = review.get(field)
+            if field != "fatal_flaw" and not isinstance(value, str):
+                errors.append(f"provider_review_invalid_field_type:{cid}:{field}:{type(value).__name__}")
+            if field not in OPTIONAL_EMPTY_REVIEW_FIELDS and not str(value or "").strip():
                 errors.append(f"provider_review_empty_field:{cid}:{field}")
         if not str(review.get("candidate_title", "")).strip():
             errors.append(f"provider_review_empty_field:{cid}:candidate_title")
-        if review.get("a_plus_b_risk") not in A_PLUS_B_RISK:
-            errors.append(f"provider_review_invalid_a_plus_b_risk:{cid}:{review.get('a_plus_b_risk')}")
-        if review.get("survivability_label") not in SURVIVABILITY_LABELS:
-            errors.append(f"provider_review_invalid_survivability_label:{cid}:{review.get('survivability_label')}")
-        if review.get("allowed_next_stage") not in ALLOWED_NEXT_STAGES:
-            errors.append(f"provider_review_invalid_allowed_next_stage:{cid}:{review.get('allowed_next_stage')}")
+        a_plus_b_risk = review.get("a_plus_b_risk")
+        if not isinstance(a_plus_b_risk, str) or a_plus_b_risk not in A_PLUS_B_RISK:
+            errors.append(f"provider_review_invalid_a_plus_b_risk:{cid}:{a_plus_b_risk}")
+        survivability_label = review.get("survivability_label")
+        if not isinstance(survivability_label, str) or survivability_label not in SURVIVABILITY_LABELS:
+            errors.append(f"provider_review_invalid_survivability_label:{cid}:{survivability_label}")
+        allowed_next_stage = review.get("allowed_next_stage")
+        if not isinstance(allowed_next_stage, str) or allowed_next_stage not in ALLOWED_NEXT_STAGES:
+            errors.append(f"provider_review_invalid_allowed_next_stage:{cid}:{allowed_next_stage}")
     return errors
+
+
+def _schema_safe_deepseek_reviews(reviews: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    safe_reviews: list[dict[str, Any]] = []
+    for review in reviews:
+        safe = dict(review)
+        if safe.get("status") not in {"success", "failed_fallback_only"}:
+            safe["status"] = "failed_fallback_only"
+        if not isinstance(safe.get("a_plus_b_risk"), str) or safe.get("a_plus_b_risk") not in A_PLUS_B_RISK:
+            safe["a_plus_b_risk"] = "fatal"
+        if not isinstance(safe.get("survivability_label"), str) or safe.get("survivability_label") not in SURVIVABILITY_LABELS:
+            safe["survivability_label"] = "reject_fatal"
+        if not isinstance(safe.get("allowed_next_stage"), str) or safe.get("allowed_next_stage") not in ALLOWED_NEXT_STAGES:
+            safe["allowed_next_stage"] = "stop"
+        for field in REQUIRED_REVIEW_FIELDS:
+            if field == "fatal_flaw":
+                if not isinstance(safe.get(field), (str, bool)):
+                    safe[field] = True
+                continue
+            if not isinstance(safe.get(field), str) or not str(safe.get(field, "")).strip():
+                safe[field] = "not_provided"
+        safe_reviews.append(safe)
+    return safe_reviews
 
 
 def build_payload(selected: list[dict[str, Any]], *, run_date: str, provider_payload: dict[str, Any] | None = None) -> tuple[dict[str, Any], int]:
@@ -647,7 +828,9 @@ def build_payload(selected: list[dict[str, Any]], *, run_date: str, provider_pay
             "schema_version": "deepseek_review.v1",
             "run_date": run_date,
             "status": status,
-            "reviews": provider_payload.get("reviews", []),
+            "reviews": _schema_safe_deepseek_reviews([item for item in provider_payload.get("reviews", []) if isinstance(item, dict)])
+            if status != "success"
+            else provider_payload.get("reviews", []),
             "provider_status": provider_status,
             "artifact_hashes": artifact_hashes(run_date, ["selected-candidates.json"]),
         }

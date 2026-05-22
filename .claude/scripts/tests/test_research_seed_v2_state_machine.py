@@ -1109,11 +1109,134 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
         self.assertEqual(payload["status"], "success")
         self.assertEqual(payload["reviews"][0]["candidate_title"], self.candidate()["title"])
 
+    def test_deepseek_single_candidate_batch_hydrates_wrong_candidate_id(self) -> None:
+        output = dict(self.provider_deepseek_payload()["reviews"][0])
+        output["candidate_id"] = "wrong-short-id"
+        with patch.object(
+            deepseek_review,
+            "run_opencode_cli",
+            return_value={
+                "exit_code": 0,
+                "timed_out": False,
+                "clean_output": json.dumps({"schema_version": "deepseek_review.v1", "run_date": RUN_DATE, "status": "success", "reviews": [output]}),
+                "effective_model": "deepseek/deepseek-v4-pro",
+                "event_count": 1,
+            },
+        ):
+            provider_payload = deepseek_review._opencode_provider_payload([self.candidate()], run_date=RUN_DATE, model="deepseek/deepseek-v4-pro", timeout_sec=5)
+        payload, exit_code = build_deepseek_payload([self.candidate()], run_date=RUN_DATE, provider_payload=provider_payload)
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["reviews"][0]["candidate_id"], "cand-alpha")
+        self.assertTrue(payload["provider_status"]["candidate_id_hydrated_from_single_candidate_batch"])
+
+    def test_deepseek_single_candidate_batch_hydrates_review_without_candidate_id(self) -> None:
+        output = dict(self.provider_deepseek_payload()["reviews"][0])
+        output.pop("candidate_id", None)
+        with patch.object(
+            deepseek_review,
+            "run_opencode_cli",
+            return_value={
+                "exit_code": 0,
+                "timed_out": False,
+                "clean_output": json.dumps(output),
+                "effective_model": "deepseek/deepseek-v4-pro",
+                "event_count": 1,
+            },
+        ):
+            provider_payload = deepseek_review._opencode_provider_payload([self.candidate()], run_date=RUN_DATE, model="deepseek/deepseek-v4-pro", timeout_sec=5)
+        payload, exit_code = build_deepseek_payload([self.candidate()], run_date=RUN_DATE, provider_payload=provider_payload)
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["reviews"][0]["candidate_id"], "cand-alpha")
+        self.assertTrue(payload["provider_status"]["candidate_id_hydrated_from_single_candidate_batch"])
+
+    def test_deepseek_single_candidate_batch_normalizes_review_dict(self) -> None:
+        output = dict(self.provider_deepseek_payload()["reviews"][0])
+        output.pop("candidate_id", None)
+        with patch.object(
+            deepseek_review,
+            "run_opencode_cli",
+            return_value={
+                "exit_code": 0,
+                "timed_out": False,
+                "clean_output": json.dumps({"review": output}),
+                "effective_model": "deepseek/deepseek-v4-pro",
+                "event_count": 1,
+            },
+        ):
+            provider_payload = deepseek_review._opencode_provider_payload([self.candidate()], run_date=RUN_DATE, model="deepseek/deepseek-v4-pro", timeout_sec=5)
+        payload, exit_code = build_deepseek_payload([self.candidate()], run_date=RUN_DATE, provider_payload=provider_payload)
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["reviews"][0]["candidate_id"], "cand-alpha")
+
+    def test_deepseek_single_candidate_batch_hydrates_missing_review_status(self) -> None:
+        output = dict(self.provider_deepseek_payload()["reviews"][0])
+        output.pop("status", None)
+        with patch.object(
+            deepseek_review,
+            "run_opencode_cli",
+            return_value={
+                "exit_code": 0,
+                "timed_out": False,
+                "clean_output": json.dumps({"reviews": [output]}),
+                "effective_model": "deepseek/deepseek-v4-pro",
+                "event_count": 1,
+            },
+        ):
+            provider_payload = deepseek_review._opencode_provider_payload([self.candidate()], run_date=RUN_DATE, model="deepseek/deepseek-v4-pro", timeout_sec=5)
+        payload, exit_code = build_deepseek_payload([self.candidate()], run_date=RUN_DATE, provider_payload=provider_payload)
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["reviews"][0]["status"], "success")
+        self.assertTrue(payload["provider_status"]["review_status_hydrated_from_single_candidate_batch"])
+
+    def test_deepseek_provider_list_enum_field_fails_closed_without_type_error(self) -> None:
+        provider = self.provider_deepseek_payload()
+        provider["reviews"][0]["a_plus_b_risk"] = ["medium"]  # type: ignore[index]
+
+        payload, exit_code = build_deepseek_payload([self.candidate()], run_date=RUN_DATE, provider_payload=provider)
+
+        self.assertEqual(exit_code, 2)
+        self.assertEqual(payload["status"], "partial_provider_invalid")
+        self.assertFalse(payload["provider_status"]["provider_backed"])
+        self.assertEqual(payload["reviews"][0]["a_plus_b_risk"], "fatal")
+        self.assertIn(
+            "provider_review_invalid_field_type:cand-alpha:a_plus_b_risk:list",
+            payload["provider_status"]["validation_errors"],
+        )
+
     def test_opencode_redaction_does_not_mangle_task_candidate_id(self) -> None:
         candidate_id_value = "cand-observation-prior-sparsification-task-aligne-bbef39186e"
         fake_secret = "sk-" + "abcdefghijklmnopqrstuvwxyz123456"
         self.assertEqual(opencode_cli_adapter._redact(candidate_id_value), candidate_id_value)
         self.assertEqual(opencode_cli_adapter._redact(fake_secret), "[REDACTED]")
+
+    def test_opencode_resolver_prefers_bundled_exe_over_cmd_shim(self) -> None:
+        def fake_which(name: str) -> str | None:
+            if name == "opencode":
+                return r"C:\nvm4w\nodejs\opencode.CMD"
+            if name == "opencode.exe":
+                return None
+            return None
+
+        with patch.object(opencode_cli_adapter.shutil, "which", side_effect=fake_which), patch.object(
+            opencode_cli_adapter.os.path,
+            "exists",
+            side_effect=lambda path: str(path).endswith(r"node_modules\opencode-ai\bin\opencode.exe"),
+        ):
+            self.assertEqual(
+                opencode_cli_adapter._resolve_opencode_path(),
+                r"C:\nvm4w\nodejs\node_modules\opencode-ai\bin\opencode.exe",
+            )
+
+    def test_opencode_writes_json_review_agent_config(self) -> None:
+        workspace = Path(self.tmp.name) / "opencode-work"
+        workspace.mkdir()
+        config_path = opencode_cli_adapter._write_json_review_agent_config(str(workspace), "deepseek/deepseek-v4-pro")
+        config = json.loads(Path(config_path).read_text(encoding="utf-8"))
+        self.assertEqual(config["default_agent"], opencode_cli_adapter.JSON_REVIEW_AGENT_NAME)
+        agent = config["agent"][opencode_cli_adapter.JSON_REVIEW_AGENT_NAME]
+        self.assertIn("RFC 8259 JSON only", agent["prompt"])
+        self.assertTrue(agent["tools"])
+        self.assertTrue(all(value is False for value in agent["tools"].values()))
 
     def test_opencode_extracts_nested_assistant_message_text(self) -> None:
         stdout = json.dumps(
@@ -1157,6 +1280,88 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
         self.assertNotIn("selected_candidates", text)
         self.assertIn('"candidate_id": "cand-alpha"', text)
 
+    def test_opencode_extract_text_ignores_step_only_events(self) -> None:
+        stdout = "\n".join(
+            [
+                json.dumps({"type": "step_start", "part": {"type": "step-start"}}),
+                json.dumps({"type": "tool_use", "part": {"type": "tool", "tool": "read"}}),
+            ]
+        )
+        text, event_count = opencode_cli_adapter._extract_text_events(stdout)
+        self.assertEqual(event_count, 2)
+        self.assertEqual(text, "")
+
+    def test_opencode_inline_limit_routes_single_candidate_review_to_file_mode(self) -> None:
+        prompt = deepseek_review._render_opencode_prompt([self.candidate()], run_date=RUN_DATE)
+        self.assertGreater(len(prompt), opencode_cli_adapter.INLINE_PROMPT_CHAR_LIMIT)
+
+    def test_deepseek_extract_json_repairs_unquoted_keys(self) -> None:
+        payload = deepseek_review._extract_json_object(
+            '{status: "success", reviews: [{candidate_id: "cand-alpha", status: "success"}]}'
+        )
+        self.assertEqual(payload["status"], "success")
+        self.assertEqual(payload["reviews"][0]["candidate_id"], "cand-alpha")
+
+    def test_deepseek_first_opencode_prompt_uses_compact_view_when_requested(self) -> None:
+        prompt = deepseek_review._render_opencode_prompt([self.candidate()], run_date=RUN_DATE, retry_compact=True)
+        request = json.loads(prompt)
+        self.assertEqual(request["input_mode"], "compact_provider_review")
+        self.assertNotIn("evidence_excerpt", request["selected_candidates"][0])
+        self.assertEqual(request["exact_candidate_ids"], ["cand-alpha"])
+        self.assertEqual(request["required_output_shape"]["reviews"][0]["candidate_id"], "cand-alpha")
+        self.assertEqual(request["required_output_shape"]["reviews"][0]["status"], "success")
+
+    def test_deepseek_retry_prompt_uses_error_kind_not_event_payload(self) -> None:
+        event = json.dumps({"type": "tool_use", "part": {"type": "tool", "tool": "read"}})
+        prompt = deepseek_review._render_opencode_prompt(
+            [self.candidate()],
+            run_date=RUN_DATE,
+            retry_reason="opencode_invalid_json",
+            previous_output=event,
+            retry_details=["provider_output_json_object_not_found"],
+            retry_compact=True,
+        )
+        request = json.loads(prompt)
+        self.assertEqual(request["previous_invalid_output_kind"], "opencode_event:tool_use")
+        self.assertEqual(request["previous_failure_details"], ["provider_output_json_object_not_found"])
+        self.assertNotIn("previous_invalid_output", request)
+
+    def test_deepseek_extract_json_skips_opencode_event_objects(self) -> None:
+        event = json.dumps(
+            {
+                "type": "step_start",
+                "timestamp": 1779451492067,
+                "sessionID": "ses-test",
+                "part": {"type": "step-start"},
+            }
+        )
+        review = json.dumps(
+            {
+                "schema_version": "deepseek_review.v1",
+                "run_date": RUN_DATE,
+                "status": "success",
+                "reviews": [{"candidate_id": "cand-alpha", "status": "success"}],
+            }
+        )
+        payload = deepseek_review._extract_json_object(event + "\n" + review)
+        self.assertEqual(payload["reviews"][0]["candidate_id"], "cand-alpha")
+
+    def test_deepseek_extract_json_rejects_tool_event_only_output(self) -> None:
+        event = json.dumps(
+            {
+                "type": "tool_use",
+                "timestamp": 1779451499377,
+                "sessionID": "ses-test",
+                "part": {
+                    "type": "tool",
+                    "tool": "read",
+                    "state": {"status": "error", "input": {"filePath": "C:/Temp/request.json"}},
+                },
+            }
+        )
+        with self.assertRaises(ValueError):
+            deepseek_review._extract_json_object(event)
+
     def test_opencode_reads_tool_written_json_output(self) -> None:
         output_dir = Path(self.tmp.name) / "opencode-work" / ".sisyphus"
         output_dir.mkdir(parents=True)
@@ -1167,6 +1372,16 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
         )
         text = opencode_cli_adapter._read_tool_json_output(str(output_dir.parent))
         self.assertIn('"candidate_id": "cand-alpha"', text)
+
+    def test_opencode_tool_output_reader_ignores_agent_config(self) -> None:
+        workspace = Path(self.tmp.name) / "opencode-work"
+        workspace.mkdir()
+        (workspace / "opencode.json").write_text(
+            json.dumps({"agent": {"research-json-review": {"prompt": "not a review"}}}),
+            encoding="utf-8",
+        )
+        text = opencode_cli_adapter._read_tool_json_output(str(workspace))
+        self.assertEqual(text, "")
 
     def test_deepseek_opencode_batches_multi_candidate_with_mocked_cli(self) -> None:
         candidates = [self.candidate("cand-alpha"), self.candidate("cand-beta")]
@@ -1339,6 +1554,34 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
         self.assertFalse(payload["provider_status"]["provider_backed"])
         self.assertIn("opencode_batch_failed", payload["provider_status"]["provider_error"])
 
+    def test_deepseek_opencode_batch_failure_fails_fast(self) -> None:
+        candidates = [self.candidate("cand-alpha"), self.candidate("cand-beta")]
+        calls = 0
+
+        def fake_opencode(_prompt: str, **_kwargs: object) -> dict[str, object]:
+            nonlocal calls
+            calls += 1
+            return {
+                "exit_code": 1,
+                "timed_out": False,
+                "clean_output": "",
+                "effective_model": "deepseek/deepseek-v4-pro",
+                "event_count": 1,
+                "error": "nonzero_exit:1",
+            }
+
+        with patch.object(deepseek_review, "run_opencode_cli", side_effect=fake_opencode):
+            provider_payload = deepseek_review._opencode_provider_payload(
+                candidates,
+                run_date=RUN_DATE,
+                model="deepseek/deepseek-v4-pro",
+                timeout_sec=5,
+                batch_size=1,
+                retries=0,
+            )
+        self.assertEqual(calls, 1)
+        self.assertTrue(provider_payload.get("_provider_error"))
+
     def test_deepseek_opencode_invalid_json_retries_and_succeeds(self) -> None:
         calls = 0
         item = self.candidate()
@@ -1352,7 +1595,8 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
             selected = request["selected_candidates"]
             self.assertEqual(request["retry_reason"], "opencode_invalid_json")
             self.assertEqual(request["input_mode"], "compact_retry")
-            self.assertEqual(request["previous_invalid_output"], "plain prose without json")
+            self.assertEqual(request["previous_invalid_output_kind"], "invalid_json")
+            self.assertNotIn("previous_invalid_output", request)
             self.assertNotIn("evidence_excerpt", selected[0])
             review = {
                 "candidate_id": selected[0]["candidate_id"],
@@ -1412,7 +1656,8 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
             selected = request["selected_candidates"]
             self.assertEqual(request["retry_reason"], "opencode_invalid_review_payload")
             self.assertEqual(request["input_mode"], "compact_retry")
-            self.assertIn('"reviews": []', request["previous_invalid_output"])
+            self.assertEqual(request["previous_invalid_output_kind"], "json_not_matching_review_schema")
+            self.assertNotIn("previous_invalid_output", request)
             self.assertNotIn("evidence_excerpt", selected[0])
             review = {
                 "candidate_id": selected[0]["candidate_id"],
@@ -1538,6 +1783,40 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
         self.assertEqual(result["status"], "success")
         payload = read_json(artifact_dir(RUN_DATE) / "codex-execution-review.json")
         self.assertTrue(payload["provider_status"]["provider_backed"])
+
+    def test_codex_execution_review_hydrates_missing_status_from_substantive_provider_review(self) -> None:
+        self.write_review_artifacts()
+        provider = self.provider_codex_payload()
+        del provider["reviews"][0]["status"]  # type: ignore[index]
+        provider_path = Path(self.tmp.name) / "provider-codex-missing-status.json"
+        self.write_bom_json(provider_path, provider)
+
+        result = execution_review(RUN_DATE, dry_run=False, provider_review_json=str(provider_path))
+
+        self.assertEqual(result["status"], "success")
+        payload = read_json(artifact_dir(RUN_DATE) / "codex-execution-review.json")
+        self.assertEqual(payload["reviews"][0]["status"], "success")
+        self.assertTrue(payload["provider_status"]["review_status_hydrated_from_execution_fields"])
+
+    def test_codex_execution_review_invalid_provider_review_writes_partial_artifact(self) -> None:
+        self.write_review_artifacts()
+        provider = {
+            "provider_status": {"provider": "codex", "provider_backed": True, "mode": "codex-cli"},
+            "reviews": [{"candidate_id": "cand-alpha"}],
+        }
+        provider_path = Path(self.tmp.name) / "provider-codex-invalid-review.json"
+        self.write_bom_json(provider_path, provider)
+
+        result = execution_review(RUN_DATE, dry_run=False, provider_review_json=str(provider_path))
+
+        self.assertEqual(result["status"], "partial_provider_invalid")
+        payload = read_json(artifact_dir(RUN_DATE) / "codex-execution-review.json")
+        self.assertFalse(payload["provider_status"]["provider_backed"])
+        self.assertEqual(payload["reviews"][0]["status"], "failed_fallback_only")
+        self.assertIn(
+            "execution_review_missing_field:cand-alpha:no_hardware_pilot_feasibility",
+            payload["provider_status"]["validation_errors"],
+        )
 
     def test_codex_cli_invalid_json_fails_closed(self) -> None:
         self.write_review_artifacts()

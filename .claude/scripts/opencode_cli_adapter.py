@@ -13,6 +13,19 @@ from typing import Any
 
 DEFAULT_OPENCODE_MODEL = "deepseek/deepseek-v4-pro(max)"
 DEFAULT_OPENCODE_TIMEOUT_SEC = 1200
+INLINE_PROMPT_CHAR_LIMIT = 2000
+JSON_REVIEW_AGENT_NAME = "research-json-review"
+_DISABLED_OPENCODE_TOOLS = {
+    "bash": False,
+    "edit": False,
+    "write": False,
+    "read": False,
+    "grep": False,
+    "glob": False,
+    "list": False,
+    "patch": False,
+    "todo": False,
+}
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]|\x1b\].*?(?:\x07|\x1b\\)")
 _SECRET_RE = re.compile(
     r"((?<![A-Za-z0-9])sk-[A-Za-z0-9_\-]{8,}|Bearer\s+\S+|api[_-]?key[=:]\s*\S+)",
@@ -40,14 +53,15 @@ def run_opencode_cli(
         "event_count": 0,
         "error": "",
     }
-    opencode_path = shutil.which("opencode")
+    opencode_path = _resolve_opencode_path()
     if not opencode_path:
         result["error"] = "opencode_cli_not_found"
         return result
     prompt_path = None
     workspace = tempfile.TemporaryDirectory(prefix="opencode-review-")
     workspace_path = workspace.name
-    if len(prompt) > 3000:
+    _write_json_review_agent_config(workspace_path, model)
+    if len(prompt) > INLINE_PROMPT_CHAR_LIMIT:
         prompt_file = tempfile.NamedTemporaryFile("w+", encoding="utf-8", suffix=".json", delete=False)
         prompt_file.write(prompt)
         prompt_file.flush()
@@ -69,6 +83,8 @@ def run_opencode_cli(
         "--pure",
         "--format",
         "json",
+        "--agent",
+        JSON_REVIEW_AGENT_NAME,
         "--title",
         title,
         "--dir",
@@ -127,11 +143,58 @@ def run_opencode_cli(
     return result
 
 
+def _resolve_opencode_path() -> str | None:
+    direct_exe = shutil.which("opencode.exe")
+    if direct_exe:
+        return direct_exe
+    path = shutil.which("opencode")
+    if not path:
+        return None
+    lower = path.lower()
+    if lower.endswith((".cmd", ".ps1")):
+        bundled_exe = os.path.join(os.path.dirname(path), "node_modules", "opencode-ai", "bin", "opencode.exe")
+        if os.path.exists(bundled_exe):
+            return bundled_exe
+    return path
+
+
+def _write_json_review_agent_config(workspace_path: str, model: str) -> str:
+    path = os.path.join(workspace_path, "opencode.json")
+    agent_prompt = (
+        "You are a strict JSON-only scientific reviewer. Never use tools. "
+        "Output RFC 8259 JSON only: every key and string value must use double quotes. "
+        "Do not output JavaScript object literal syntax, markdown, prose, or code fences."
+    )
+    config = {
+        "$schema": "https://opencode.ai/config.json",
+        "agent": {
+            JSON_REVIEW_AGENT_NAME: {
+                "description": "Return strict DeepSeek review JSON only; no tools.",
+                "mode": "primary",
+                "model": model.split("/", 1)[-1],
+                "tools": dict(_DISABLED_OPENCODE_TOOLS),
+                "temperature": 0.0,
+                "prompt": agent_prompt,
+            }
+        },
+        "default_agent": JSON_REVIEW_AGENT_NAME,
+        "formatter": False,
+        "lsp": False,
+        "mcp": {},
+        "tools": dict(_DISABLED_OPENCODE_TOOLS),
+    }
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(config, handle, ensure_ascii=False, indent=2, sort_keys=True)
+    return path
+
+
 def _read_tool_json_output(workspace_path: str) -> str:
     json_files: list[tuple[float, str]] = []
     for root, _dirs, files in os.walk(workspace_path):
         for filename in files:
             if not filename.lower().endswith(".json"):
+                continue
+            if not _is_allowed_tool_json_output(workspace_path, root, filename):
                 continue
             path = os.path.join(root, filename)
             try:
@@ -149,6 +212,16 @@ def _read_tool_json_output(workspace_path: str) -> str:
             continue
         return _redact(text)[:240000]
     return ""
+
+
+def _is_allowed_tool_json_output(workspace_path: str, root: str, filename: str) -> bool:
+    if filename.lower() != "review-output.json":
+        return False
+    try:
+        rel_parts = os.path.relpath(root, workspace_path).split(os.sep)
+    except ValueError:
+        return False
+    return ".sisyphus" in rel_parts
 
 
 def _extract_text_events(stdout: str) -> tuple[str, int]:
@@ -175,8 +248,6 @@ def _extract_text_events(stdout: str) -> tuple[str, int]:
         part = event.get("part", {}) if isinstance(event, dict) else {}
         if isinstance(part, dict) and part.get("type") == "text":
             texts.append(str(part.get("text", "")))
-        else:
-            fallback_lines.append(line)
     if texts:
         return "\n".join(item for item in texts if item.strip()), events
     return "\n".join(fallback_lines), events
