@@ -15,7 +15,7 @@ DEFAULT_OPENCODE_MODEL = "deepseek/deepseek-v4-pro(max)"
 DEFAULT_OPENCODE_TIMEOUT_SEC = 1200
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]|\x1b\].*?(?:\x07|\x1b\\)")
 _SECRET_RE = re.compile(
-    r"(sk-[A-Za-z0-9_\-]{8,}|Bearer\s+\S+|api[_-]?key[=:]\s*\S+)",
+    r"((?<![A-Za-z0-9])sk-[A-Za-z0-9_\-]{8,}|Bearer\s+\S+|api[_-]?key[=:]\s*\S+)",
     re.IGNORECASE,
 )
 
@@ -45,13 +45,18 @@ def run_opencode_cli(
         result["error"] = "opencode_cli_not_found"
         return result
     prompt_path = None
+    workspace = tempfile.TemporaryDirectory(prefix="opencode-review-")
+    workspace_path = workspace.name
     if len(prompt) > 3000:
         prompt_file = tempfile.NamedTemporaryFile("w+", encoding="utf-8", suffix=".json", delete=False)
         prompt_file.write(prompt)
         prompt_file.flush()
         prompt_path = prompt_file.name
         prompt_file.close()
-        command_message = "Read the attached prompt file and return the requested JSON only."
+        command_message = (
+            "Read the attached JSON request. Do not run tools, inspect files, modify files, or start/cancel background tasks. "
+            "Return only the requested raw JSON object as the final answer."
+        )
         file_args = ["--file", prompt_path]
     else:
         command_message = prompt
@@ -61,10 +66,13 @@ def run_opencode_cli(
         "run",
         "-m",
         model,
+        "--pure",
         "--format",
         "json",
         "--title",
         title,
+        "--dir",
+        workspace_path,
         command_message,
         *file_args,
     ]
@@ -78,6 +86,7 @@ def run_opencode_cli(
             encoding="utf-8",
             errors="replace",
             env=env,
+            cwd=workspace_path,
         )
         stdout, stderr = proc.communicate(timeout=timeout_sec)
         result["exit_code"] = proc.returncode
@@ -85,6 +94,7 @@ def run_opencode_cli(
         result["raw_stderr"] = _redact(stderr or "")[:4000]
     except FileNotFoundError:
         result["error"] = "opencode_cli_not_found"
+        workspace.cleanup()
         return result
     except subprocess.TimeoutExpired:
         _kill_process_tree(proc.pid)
@@ -96,6 +106,7 @@ def run_opencode_cli(
         result["error"] = f"timeout:{timeout_sec}s"
         result["raw_stdout"] = _redact(stdout or "")[:16000]
         result["raw_stderr"] = _redact(stderr or "")[:4000]
+        workspace.cleanup()
         return result
     finally:
         if prompt_path is not None:
@@ -105,13 +116,39 @@ def run_opencode_cli(
                 pass
 
     text, event_count = _extract_text_events(stdout or "")
+    file_output = _read_tool_json_output(workspace_path)
+    workspace.cleanup()
     result["event_count"] = event_count
-    result["clean_output"] = text[:240000]
+    result["clean_output"] = ((file_output + "\n") if file_output else "") + text[:240000]
     if result["exit_code"] != 0:
         result["error"] = f"nonzero_exit:{result['exit_code']}"
     elif not result["clean_output"].strip():
         result["error"] = "empty_output"
     return result
+
+
+def _read_tool_json_output(workspace_path: str) -> str:
+    json_files: list[tuple[float, str]] = []
+    for root, _dirs, files in os.walk(workspace_path):
+        for filename in files:
+            if not filename.lower().endswith(".json"):
+                continue
+            path = os.path.join(root, filename)
+            try:
+                if os.path.getsize(path) > 1_000_000:
+                    continue
+                json_files.append((os.path.getmtime(path), path))
+            except OSError:
+                continue
+    for _mtime, path in sorted(json_files, reverse=True):
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                text = handle.read()
+            json.loads(text)
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        return _redact(text)[:240000]
+    return ""
 
 
 def _extract_text_events(stdout: str) -> tuple[str, int]:
@@ -131,12 +168,45 @@ def _extract_text_events(stdout: str) -> tuple[str, int]:
             fallback_lines.append(line)
             continue
         events += 1
+        event_texts = _extract_event_texts(event)
+        if event_texts:
+            texts.extend(event_texts)
+            continue
         part = event.get("part", {}) if isinstance(event, dict) else {}
         if isinstance(part, dict) and part.get("type") == "text":
             texts.append(str(part.get("text", "")))
+        else:
+            fallback_lines.append(line)
     if texts:
         return "\n".join(item for item in texts if item.strip()), events
     return "\n".join(fallback_lines), events
+
+
+def _extract_event_texts(value: Any) -> list[str]:
+    if isinstance(value, str):
+        return [value] if value.strip() else []
+    if isinstance(value, list):
+        texts: list[str] = []
+        for item in value:
+            texts.extend(_extract_event_texts(item))
+        return texts
+    if not isinstance(value, dict):
+        return []
+
+    role = value.get("role")
+    if isinstance(role, str) and role.lower() not in {"assistant", "model"}:
+        return []
+
+    texts: list[str] = []
+    text_value = value.get("text")
+    if isinstance(text_value, str) and text_value.strip():
+        texts.append(text_value)
+
+    for key in ("content", "message", "delta", "result", "output", "response"):
+        nested = value.get(key)
+        if nested is not None:
+            texts.extend(_extract_event_texts(nested))
+    return texts
 
 
 def _redact(text: str) -> str:

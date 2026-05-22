@@ -51,6 +51,7 @@ import novelty_baseline_scan as novelty_scan
 import candidate_portfolio_select as portfolio_select
 import deepseek_scientific_review as deepseek_review
 import codex_seed_review as codex_review
+import opencode_cli_adapter
 
 
 RUN_DATE = "2099-01-02"
@@ -1094,13 +1095,371 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
         self.assertEqual(payload["status"], "success")
         self.assertTrue(payload["provider_status"]["provider_backed"])
 
+    def test_deepseek_opencode_single_review_object_is_wrapped(self) -> None:
+        output = dict(self.provider_deepseek_payload()["reviews"][0])
+        output.pop("candidate_title", None)
+        with patch.object(
+            deepseek_review,
+            "run_opencode_cli",
+            return_value={"exit_code": 0, "timed_out": False, "clean_output": json.dumps(output), "effective_model": "deepseek/deepseek-v4-pro", "event_count": 1},
+        ):
+            provider_payload = deepseek_review._opencode_provider_payload([self.candidate()], run_date=RUN_DATE, model="deepseek/deepseek-v4-pro", timeout_sec=5)
+        payload, exit_code = build_deepseek_payload([self.candidate()], run_date=RUN_DATE, provider_payload=provider_payload)
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["status"], "success")
+        self.assertEqual(payload["reviews"][0]["candidate_title"], self.candidate()["title"])
+
+    def test_opencode_redaction_does_not_mangle_task_candidate_id(self) -> None:
+        candidate_id_value = "cand-observation-prior-sparsification-task-aligne-bbef39186e"
+        fake_secret = "sk-" + "abcdefghijklmnopqrstuvwxyz123456"
+        self.assertEqual(opencode_cli_adapter._redact(candidate_id_value), candidate_id_value)
+        self.assertEqual(opencode_cli_adapter._redact(fake_secret), "[REDACTED]")
+
+    def test_opencode_extracts_nested_assistant_message_text(self) -> None:
+        stdout = json.dumps(
+            {
+                "type": "message",
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": '{"reviews": [{"candidate_id": "cand-alpha"}]}'}],
+                },
+            }
+        )
+        text, event_count = opencode_cli_adapter._extract_text_events(stdout)
+        self.assertEqual(event_count, 1)
+        self.assertIn('"candidate_id": "cand-alpha"', text)
+
+    def test_opencode_extract_ignores_nested_user_message_text(self) -> None:
+        stdout = "\n".join(
+            [
+                json.dumps(
+                    {
+                        "type": "message",
+                        "message": {
+                            "role": "user",
+                            "content": [{"type": "text", "text": '{"selected_candidates": ["prompt"]}'}],
+                        },
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "message",
+                        "message": {
+                            "role": "assistant",
+                            "content": [{"type": "text", "text": '{"reviews": [{"candidate_id": "cand-alpha"}]}'}],
+                        },
+                    }
+                ),
+            ]
+        )
+        text, event_count = opencode_cli_adapter._extract_text_events(stdout)
+        self.assertEqual(event_count, 2)
+        self.assertNotIn("selected_candidates", text)
+        self.assertIn('"candidate_id": "cand-alpha"', text)
+
+    def test_opencode_reads_tool_written_json_output(self) -> None:
+        output_dir = Path(self.tmp.name) / "opencode-work" / ".sisyphus"
+        output_dir.mkdir(parents=True)
+        output_path = output_dir / "review-output.json"
+        output_path.write_text(
+            json.dumps({"reviews": [{"candidate_id": "cand-alpha", "status": "success"}]}),
+            encoding="utf-8",
+        )
+        text = opencode_cli_adapter._read_tool_json_output(str(output_dir.parent))
+        self.assertIn('"candidate_id": "cand-alpha"', text)
+
+    def test_deepseek_opencode_batches_multi_candidate_with_mocked_cli(self) -> None:
+        candidates = [self.candidate("cand-alpha"), self.candidate("cand-beta")]
+        call_sizes: list[int] = []
+
+        def fake_opencode(prompt: str, **_kwargs: object) -> dict[str, object]:
+            request = json.loads(prompt)
+            selected = request["selected_candidates"]
+            call_sizes.append(len(selected))
+            reviews = []
+            for item in selected:
+                reviews.append(
+                    {
+                        "candidate_id": item["candidate_id"],
+                        "candidate_title": item["title"],
+                        "status": "success",
+                        "novelty_attack": "nearest work reviewed",
+                        "baseline_attack": "baseline checked",
+                        "mechanism_attack": "mechanism checked",
+                        "evaluation_attack": "evaluation checked",
+                        "scope_attack": "scope checked",
+                        "a_plus_b_risk": "low",
+                        "fatal_flaw": "",
+                        "rescue_mutation": "",
+                        "survivability_label": "survives",
+                        "allowed_next_stage": "novelty_scan",
+                    }
+                )
+            return {
+                "exit_code": 0,
+                "timed_out": False,
+                "clean_output": json.dumps({"schema_version": "deepseek_review.v1", "run_date": RUN_DATE, "status": "success", "reviews": reviews}),
+                "effective_model": "deepseek/deepseek-v4-pro",
+                "event_count": 1,
+            }
+
+        with patch.object(deepseek_review, "run_opencode_cli", side_effect=fake_opencode):
+            provider_payload = deepseek_review._opencode_provider_payload(
+                candidates,
+                run_date=RUN_DATE,
+                model="deepseek/deepseek-v4-pro",
+                timeout_sec=5,
+                batch_size=1,
+            )
+        payload, exit_code = build_deepseek_payload(candidates, run_date=RUN_DATE, provider_payload=provider_payload)
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["status"], "success")
+        self.assertTrue(payload["provider_status"]["provider_backed"])
+        self.assertEqual(payload["provider_status"]["batch_count"], 2)
+        self.assertEqual(call_sizes, [1, 1])
+        self.assertEqual({review["candidate_id"] for review in payload["reviews"]}, {"cand-alpha", "cand-beta"})
+
+    def test_deepseek_opencode_reuses_cached_successful_batch(self) -> None:
+        candidates = [self.candidate("cand-alpha"), self.candidate("cand-beta")]
+        cached_review = {
+            "candidate_id": "cand-alpha",
+            "candidate_title": "Anchored Contact Failure Benchmark",
+            "status": "success",
+            "novelty_attack": "nearest work reviewed",
+            "baseline_attack": "baseline checked",
+            "mechanism_attack": "mechanism checked",
+            "evaluation_attack": "evaluation checked",
+            "scope_attack": "scope checked",
+            "a_plus_b_risk": "low",
+            "fatal_flaw": "",
+            "rescue_mutation": "",
+            "survivability_label": "survives",
+            "allowed_next_stage": "novelty_scan",
+        }
+        deepseek_review._write_opencode_batch_cache(
+            {
+                "schema_version": "deepseek_review.v1",
+                "run_date": RUN_DATE,
+                "status": "success",
+                "provider_status": {
+                    "provider": "deepseek",
+                    "provider_backed": True,
+                    "mode": "opencode",
+                    "batch_index": 1,
+                    "batch_size": 1,
+                    "batch_candidate_ids": ["cand-alpha"],
+                },
+                "reviews": [cached_review],
+            },
+            run_date=RUN_DATE,
+            batch_index=1,
+        )
+        calls = 0
+
+        def fake_opencode(prompt: str, **_kwargs: object) -> dict[str, object]:
+            nonlocal calls
+            calls += 1
+            request = json.loads(prompt)
+            selected = request["selected_candidates"]
+            self.assertEqual([item["candidate_id"] for item in selected], ["cand-beta"])
+            review = {
+                **cached_review,
+                "candidate_id": "cand-beta",
+            }
+            return {
+                "exit_code": 0,
+                "timed_out": False,
+                "clean_output": json.dumps({"schema_version": "deepseek_review.v1", "run_date": RUN_DATE, "status": "success", "reviews": [review]}),
+                "effective_model": "deepseek/deepseek-v4-pro",
+                "event_count": 1,
+            }
+
+        with patch.object(deepseek_review, "run_opencode_cli", side_effect=fake_opencode):
+            provider_payload = deepseek_review._opencode_provider_payload(
+                candidates,
+                run_date=RUN_DATE,
+                model="deepseek/deepseek-v4-pro",
+                timeout_sec=5,
+                batch_size=1,
+            )
+        payload, exit_code = build_deepseek_payload(candidates, run_date=RUN_DATE, provider_payload=provider_payload)
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(calls, 1)
+        self.assertEqual(payload["status"], "success")
+        self.assertTrue(payload["provider_status"]["batch_statuses"][0]["cache_hit"])
+        self.assertEqual({review["candidate_id"] for review in payload["reviews"]}, {"cand-alpha", "cand-beta"})
+
+    def test_deepseek_opencode_batch_failure_fails_closed(self) -> None:
+        candidates = [self.candidate("cand-alpha"), self.candidate("cand-beta")]
+        calls = 0
+
+        def fake_opencode(prompt: str, **_kwargs: object) -> dict[str, object]:
+            nonlocal calls
+            calls += 1
+            request = json.loads(prompt)
+            selected = request["selected_candidates"]
+            if calls == 2:
+                return {"exit_code": 1, "timed_out": False, "clean_output": "", "effective_model": "deepseek/deepseek-v4-pro", "event_count": 1, "error": "nonzero_exit:1"}
+            item = selected[0]
+            review = {
+                "candidate_id": item["candidate_id"],
+                "candidate_title": item["title"],
+                "status": "success",
+                "novelty_attack": "nearest work reviewed",
+                "baseline_attack": "baseline checked",
+                "mechanism_attack": "mechanism checked",
+                "evaluation_attack": "evaluation checked",
+                "scope_attack": "scope checked",
+                "a_plus_b_risk": "low",
+                "fatal_flaw": "",
+                "rescue_mutation": "",
+                "survivability_label": "survives",
+                "allowed_next_stage": "novelty_scan",
+            }
+            return {
+                "exit_code": 0,
+                "timed_out": False,
+                "clean_output": json.dumps({"schema_version": "deepseek_review.v1", "run_date": RUN_DATE, "status": "success", "reviews": [review]}),
+                "effective_model": "deepseek/deepseek-v4-pro",
+                "event_count": 1,
+            }
+
+        with patch.object(deepseek_review, "run_opencode_cli", side_effect=fake_opencode):
+            provider_payload = deepseek_review._opencode_provider_payload(
+                candidates,
+                run_date=RUN_DATE,
+                model="deepseek/deepseek-v4-pro",
+                timeout_sec=5,
+                batch_size=1,
+                retries=0,
+            )
+        payload, exit_code = build_deepseek_payload(candidates, run_date=RUN_DATE, provider_payload=provider_payload)
+        self.assertEqual(exit_code, 2)
+        self.assertEqual(payload["status"], "partial_provider_unavailable")
+        self.assertFalse(payload["provider_status"]["provider_backed"])
+        self.assertIn("opencode_batch_failed", payload["provider_status"]["provider_error"])
+
+    def test_deepseek_opencode_invalid_json_retries_and_succeeds(self) -> None:
+        calls = 0
+        item = self.candidate()
+
+        def fake_opencode(prompt: str, **_kwargs: object) -> dict[str, object]:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return {"exit_code": 0, "timed_out": False, "clean_output": "plain prose without json", "effective_model": "deepseek/deepseek-v4-pro", "event_count": 1}
+            request = json.loads(prompt)
+            selected = request["selected_candidates"]
+            self.assertEqual(request["retry_reason"], "opencode_invalid_json")
+            self.assertEqual(request["input_mode"], "compact_retry")
+            self.assertEqual(request["previous_invalid_output"], "plain prose without json")
+            self.assertNotIn("evidence_excerpt", selected[0])
+            review = {
+                "candidate_id": selected[0]["candidate_id"],
+                "status": "success",
+                "novelty_attack": "nearest work reviewed",
+                "baseline_attack": "baseline checked",
+                "mechanism_attack": "mechanism checked",
+                "evaluation_attack": "evaluation checked",
+                "scope_attack": "scope checked",
+                "a_plus_b_risk": "low",
+                "fatal_flaw": "",
+                "rescue_mutation": "",
+                "survivability_label": "survives",
+                "allowed_next_stage": "novelty_scan",
+            }
+            return {
+                "exit_code": 0,
+                "timed_out": False,
+                "clean_output": json.dumps({"schema_version": "deepseek_review.v1", "run_date": RUN_DATE, "status": "success", "reviews": [review]}),
+                "effective_model": "deepseek/deepseek-v4-pro",
+                "event_count": 1,
+            }
+
+        with patch.object(deepseek_review, "run_opencode_cli", side_effect=fake_opencode):
+            provider_payload = deepseek_review._opencode_provider_payload(
+                [item],
+                run_date=RUN_DATE,
+                model="deepseek/deepseek-v4-pro",
+                timeout_sec=5,
+                batch_size=1,
+                retries=1,
+            )
+        payload, exit_code = build_deepseek_payload([item], run_date=RUN_DATE, provider_payload=provider_payload)
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(calls, 2)
+        self.assertEqual(payload["status"], "success")
+        self.assertEqual(payload["reviews"][0]["candidate_title"], item["title"])
+        self.assertTrue(payload["provider_status"]["provider_backed"])
+        self.assertEqual(len(payload["provider_status"]["attempt_statuses"]), 2)
+
+    def test_deepseek_opencode_invalid_review_payload_retries_and_succeeds(self) -> None:
+        calls = 0
+        item = self.candidate()
+
+        def fake_opencode(prompt: str, **_kwargs: object) -> dict[str, object]:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return {
+                    "exit_code": 0,
+                    "timed_out": False,
+                    "clean_output": json.dumps({"schema_version": "deepseek_review.v1", "run_date": RUN_DATE, "status": "success", "reviews": []}),
+                    "effective_model": "deepseek/deepseek-v4-pro",
+                    "event_count": 1,
+                }
+            request = json.loads(prompt)
+            selected = request["selected_candidates"]
+            self.assertEqual(request["retry_reason"], "opencode_invalid_review_payload")
+            self.assertEqual(request["input_mode"], "compact_retry")
+            self.assertIn('"reviews": []', request["previous_invalid_output"])
+            self.assertNotIn("evidence_excerpt", selected[0])
+            review = {
+                "candidate_id": selected[0]["candidate_id"],
+                "candidate_title": selected[0]["title"],
+                "status": "success",
+                "novelty_attack": "nearest work reviewed",
+                "baseline_attack": "baseline checked",
+                "mechanism_attack": "mechanism checked",
+                "evaluation_attack": "evaluation checked",
+                "scope_attack": "scope checked",
+                "a_plus_b_risk": "low",
+                "fatal_flaw": "",
+                "rescue_mutation": "",
+                "survivability_label": "survives",
+                "allowed_next_stage": "novelty_scan",
+            }
+            return {
+                "exit_code": 0,
+                "timed_out": False,
+                "clean_output": json.dumps({"schema_version": "deepseek_review.v1", "run_date": RUN_DATE, "status": "success", "reviews": [review]}),
+                "effective_model": "deepseek/deepseek-v4-pro",
+                "event_count": 1,
+            }
+
+        with patch.object(deepseek_review, "run_opencode_cli", side_effect=fake_opencode):
+            provider_payload = deepseek_review._opencode_provider_payload(
+                [item],
+                run_date=RUN_DATE,
+                model="deepseek/deepseek-v4-pro",
+                timeout_sec=5,
+                batch_size=1,
+                retries=1,
+            )
+        payload, exit_code = build_deepseek_payload([item], run_date=RUN_DATE, provider_payload=provider_payload)
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(calls, 2)
+        self.assertEqual(payload["status"], "success")
+        self.assertTrue(payload["provider_status"]["provider_backed"])
+        self.assertEqual(len(payload["provider_status"]["attempt_statuses"]), 2)
+
     def test_deepseek_opencode_invalid_json_fails_closed(self) -> None:
         with patch.object(
             deepseek_review,
             "run_opencode_cli",
             return_value={"exit_code": 0, "timed_out": False, "clean_output": "not json", "effective_model": "deepseek/deepseek-v4-pro", "event_count": 1},
         ):
-            provider_payload = deepseek_review._opencode_provider_payload([self.candidate()], run_date=RUN_DATE, model="deepseek/deepseek-v4-pro", timeout_sec=5)
+            provider_payload = deepseek_review._opencode_provider_payload([self.candidate()], run_date=RUN_DATE, model="deepseek/deepseek-v4-pro", timeout_sec=5, retries=0)
         payload, exit_code = build_deepseek_payload([self.candidate()], run_date=RUN_DATE, provider_payload=provider_payload)
         self.assertEqual(exit_code, 2)
         self.assertEqual(payload["status"], "partial_provider_invalid")
