@@ -79,6 +79,33 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
             os.environ["RESEARCH_SEED_V2_AGENDA_ROOT"] = self.old_root
         self.tmp.cleanup()
 
+    def test_opencode_text_events_preserve_streamed_json_chunks(self) -> None:
+        chunks = ['{"reviews":[{"candidate_id":"', "cand-alpha", '","status":"success"}]}']
+        stdout = "\n".join(
+            json.dumps({"type": "text", "part": {"type": "text", "text": chunk}})
+            for chunk in chunks
+        )
+
+        text, event_count = opencode_cli_adapter._extract_text_events(stdout)
+        payload = deepseek_review._extract_json_object(text)
+
+        self.assertEqual(event_count, 3)
+        self.assertEqual(text, "".join(chunks))
+        self.assertEqual(payload["reviews"][0]["candidate_id"], "cand-alpha")
+
+    def test_opencode_json_review_agent_disables_todowrite(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = opencode_cli_adapter._write_json_review_agent_config(tmp, "deepseek/deepseek-v4-pro")
+            config = json.loads(Path(config_path).read_text(encoding="utf-8"))
+
+        tools = config["agent"]["research-json-review"]["tools"]
+        self.assertIs(tools["todowrite"], False)
+        self.assertIs(tools["todo_write"], False)
+        self.assertIs(tools["webfetch"], False)
+        self.assertIs(tools["web_search"], False)
+        self.assertIn("todowrite", config["agent"]["research-json-review"]["prompt"])
+        self.assertIn("webfetch", config["agent"]["research-json-review"]["prompt"])
+
     def assert_legacy_formal_publish_disabled(self, result: dict[str, object]) -> None:
         self.assertEqual(result["status"], LEGACY_FORMAL_DISABLED_STATUS)
         self.assertEqual(result["published"], [])

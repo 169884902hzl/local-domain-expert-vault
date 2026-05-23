@@ -18,13 +18,22 @@ JSON_REVIEW_AGENT_NAME = "research-json-review"
 _DISABLED_OPENCODE_TOOLS = {
     "bash": False,
     "edit": False,
-    "write": False,
-    "read": False,
+    "fetch": False,
     "grep": False,
     "glob": False,
     "list": False,
     "patch": False,
+    "read": False,
+    "task": False,
     "todo": False,
+    "todo_write": False,
+    "todowrite": False,
+    "web": False,
+    "web_fetch": False,
+    "web_search": False,
+    "webfetch": False,
+    "websearch": False,
+    "write": False,
 }
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]|\x1b\].*?(?:\x07|\x1b\\)")
 _SECRET_RE = re.compile(
@@ -75,23 +84,34 @@ def run_opencode_cli(
     else:
         command_message = prompt
         file_args = []
-    command = [
-        opencode_path,
-        "run",
-        "-m",
-        model,
-        "--pure",
-        "--format",
-        "json",
-        "--agent",
-        JSON_REVIEW_AGENT_NAME,
-        "--title",
-        title,
-        "--dir",
-        workspace_path,
-        command_message,
-        *file_args,
-    ]
+    def command_for(output_format: str) -> list[str]:
+        return [
+            opencode_path,
+            "run",
+            "-m",
+            model,
+            "--pure",
+            "--format",
+            output_format,
+            "--agent",
+            JSON_REVIEW_AGENT_NAME,
+            "--title",
+            title,
+            "--dir",
+            workspace_path,
+            command_message,
+            *file_args,
+        ]
+
+    def cleanup_prompt_file() -> None:
+        if prompt_path is None:
+            return
+        try:
+            os.unlink(prompt_path)
+        except OSError:
+            pass
+
+    command = command_for("json")
     env = {**os.environ}
     try:
         proc = subprocess.Popen(
@@ -110,6 +130,7 @@ def run_opencode_cli(
         result["raw_stderr"] = _redact(stderr or "")[:4000]
     except FileNotFoundError:
         result["error"] = "opencode_cli_not_found"
+        cleanup_prompt_file()
         workspace.cleanup()
         return result
     except subprocess.TimeoutExpired:
@@ -122,24 +143,80 @@ def run_opencode_cli(
         result["error"] = f"timeout:{timeout_sec}s"
         result["raw_stdout"] = _redact(stdout or "")[:16000]
         result["raw_stderr"] = _redact(stderr or "")[:4000]
+        cleanup_prompt_file()
         workspace.cleanup()
         return result
-    finally:
-        if prompt_path is not None:
-            try:
-                os.unlink(prompt_path)
-            except OSError:
-                pass
 
     text, event_count = _extract_text_events(stdout or "")
     file_output = _read_tool_json_output(workspace_path)
-    workspace.cleanup()
     result["event_count"] = event_count
     result["clean_output"] = ((file_output + "\n") if file_output else "") + text[:240000]
+
+    if result["exit_code"] == 0 and event_count and not result["clean_output"].strip():
+        fallback = _run_default_format_fallback(command_for("default"), env=env, cwd=workspace_path, timeout_sec=timeout_sec)
+        result["default_format_fallback"] = True
+        result["default_format_exit_code"] = fallback["exit_code"]
+        result["raw_stdout"] = (result["raw_stdout"] + "\n--- default-format fallback ---\n" + fallback["raw_stdout"])[:16000]
+        result["raw_stderr"] = (result["raw_stderr"] + "\n--- default-format fallback ---\n" + fallback["raw_stderr"])[:4000]
+        if fallback["timed_out"]:
+            result["error"] = fallback["error"]
+        elif fallback["exit_code"] == 0 and fallback["clean_output"].strip():
+            result["clean_output"] = fallback["clean_output"][:240000]
+            result["error"] = ""
+        elif fallback["exit_code"] not in (None, 0):
+            result["error"] = fallback["error"]
+
+    file_output = _read_tool_json_output(workspace_path)
+    if file_output:
+        result["clean_output"] = ((file_output + "\n") + result["clean_output"])[:240000]
+    cleanup_prompt_file()
+    workspace.cleanup()
     if result["exit_code"] != 0:
         result["error"] = f"nonzero_exit:{result['exit_code']}"
-    elif not result["clean_output"].strip():
+    elif not result["clean_output"].strip() and not result.get("error"):
         result["error"] = "empty_output"
+    return result
+
+
+def _run_default_format_fallback(command: list[str], *, env: dict[str, str], cwd: str, timeout_sec: int) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "exit_code": None,
+        "timed_out": False,
+        "raw_stdout": "",
+        "raw_stderr": "",
+        "clean_output": "",
+        "error": "",
+    }
+    try:
+        proc = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=env,
+            cwd=cwd,
+        )
+        stdout, stderr = proc.communicate(timeout=timeout_sec)
+        result["exit_code"] = proc.returncode
+        result["raw_stdout"] = _redact(stdout or "")[:16000]
+        result["raw_stderr"] = _redact(stderr or "")[:4000]
+        result["clean_output"] = _strip_ansi(_redact(stdout or "")).strip()
+        if proc.returncode != 0:
+            result["error"] = f"default_format_nonzero_exit:{proc.returncode}"
+    except FileNotFoundError:
+        result["error"] = "opencode_cli_not_found"
+    except subprocess.TimeoutExpired:
+        _kill_process_tree(proc.pid)
+        try:
+            stdout, stderr = proc.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            stdout, stderr = "", ""
+        result["timed_out"] = True
+        result["error"] = f"default_format_timeout:{timeout_sec}s"
+        result["raw_stdout"] = _redact(stdout or "")[:16000]
+        result["raw_stderr"] = _redact(stderr or "")[:4000]
     return result
 
 
@@ -161,7 +238,7 @@ def _resolve_opencode_path() -> str | None:
 def _write_json_review_agent_config(workspace_path: str, model: str) -> str:
     path = os.path.join(workspace_path, "opencode.json")
     agent_prompt = (
-        "You are a strict JSON-only scientific reviewer. Never use tools. "
+        "You are a strict JSON-only scientific reviewer. Never use tools, including todowrite or webfetch. "
         "Output RFC 8259 JSON only: every key and string value must use double quotes. "
         "Do not output JavaScript object literal syntax, markdown, prose, or code fences."
     )
@@ -249,7 +326,7 @@ def _extract_text_events(stdout: str) -> tuple[str, int]:
         if isinstance(part, dict) and part.get("type") == "text":
             texts.append(str(part.get("text", "")))
     if texts:
-        return "\n".join(item for item in texts if item.strip()), events
+        return "".join(item for item in texts if item.strip()), events
     return "\n".join(fallback_lines), events
 
 

@@ -330,6 +330,7 @@ def _render_opencode_prompt(
             {
                 "task": (
                     "Return one RFC 8259 JSON object only. No tools, no markdown. "
+                    "Do not call todowrite, webfetch, web search, or any other tool. "
                     "All object keys and string values must use double quotes. "
                     "Write one status=success review for every exact candidate_id in exact_candidate_ids."
                 ),
@@ -360,7 +361,7 @@ def _render_opencode_prompt(
         )
     task = (
         "This is not a coding or implementation task; it is a research-candidate review serialization task. "
-        "Do not run tools, inspect files, modify files, or start/cancel background tasks. "
+        "Do not run tools, call todowrite, call webfetch, inspect files, search the web, modify files, or start/cancel background tasks. "
         "Return RFC 8259 JSON only. All object keys and string values must use double quotes. "
         "Do not use JavaScript object literal syntax, markdown fences, or explanatory prose."
     )
@@ -368,7 +369,7 @@ def _render_opencode_prompt(
         task = (
             "Retry because the previous JSON did not contain exactly one valid review for every selected candidate_id. "
             "This is not a coding or implementation task; it is a research-candidate review serialization task. "
-            "Do not run tools, inspect files, modify files, or start/cancel background tasks. "
+            "Do not run tools, call todowrite, call webfetch, inspect files, search the web, modify files, or start/cancel background tasks. "
             "Return exactly one raw JSON object with a reviews array containing one status=success review per selected candidate. "
             "All object keys and string values must use double quotes. "
             "Do not include markdown, commentary, analysis text, or code fences."
@@ -377,7 +378,7 @@ def _render_opencode_prompt(
         task = (
             "Retry because the previous provider output was not valid JSON. "
             "This is not a coding or implementation task; it is a research-candidate review serialization task. "
-            "Do not run tools, inspect files, modify files, or start/cancel background tasks. "
+            "Do not run tools, call todowrite, call webfetch, inspect files, search the web, modify files, or start/cancel background tasks. "
             "Return exactly one raw JSON object starting with { and ending with }. "
             "All object keys and string values must use double quotes. "
             "Do not include markdown, commentary, analysis text, or code fences."
