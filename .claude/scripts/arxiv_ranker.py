@@ -19,7 +19,9 @@ DEFAULT_QUERIES = [
     'all:"embodied AI" OR all:"embodied artificial intelligence" OR all:"robot learning"',
     'all:"robotic manipulation" OR all:"robot manipulation"',
     'all:"vision-language-action" OR all:"vision language action" OR all:"VLA"',
+    'all:"RL token" OR all:"action interface" OR all:"action head" OR all:"VLA anchoring"',
     'all:"sim-to-real" OR all:"sim2real" OR all:"real-to-sim"',
+    'all:"failure recovery" OR all:"out-of-distribution" OR all:"robot robustness"',
     'all:"tactile" AND all:"robot"',
     'all:"bimanual" AND all:"manipulation"',
     'all:"deformable linear object" OR all:"DLO" OR all:"deformable object manipulation"',
@@ -37,8 +39,10 @@ DOMAIN_TERMS = {
     "robot_learning": ["robot learning", "policy learning", "imitation learning", "reinforcement learning"],
     "manipulation": ["robotic manipulation", "robot manipulation", "manipulation", "grasp", "dexterous"],
     "vla_vlm": ["vision-language-action", "vision language action", "vla", "vision-language", "vlm"],
+    "action_interface": ["rl token", "action interface", "action head", "decoder boundary", "token interface", "vla anchoring"],
     "sim_to_real": ["sim-to-real", "sim2real", "real-to-sim", "domain randomization"],
-    "tactile": ["tactile", "touch", "force", "contact-rich", "visuotactile"],
+    "robustness_recovery": ["robustness", "failure recovery", "out-of-distribution", "ood", "recovery", "safety recovery"],
+    "tactile": ["tactile", "touch", "force", "force-torque", "haptic", "contact-rich", "contact rich", "visuotactile"],
     "bimanual": ["bimanual", "dual-arm", "dual arm", "two-arm"],
     "dlo": ["deformable linear object", "dlo", "rope", "cable", "thread", "deformable object"],
     "diffusion": ["diffusion policy", "diffusion model", "diffusion"],
@@ -71,6 +75,10 @@ RESEARCH_VALUE_TERMS = [
     "baseline",
     "real robot",
     "contact-rich",
+    "failure recovery",
+    "out-of-distribution",
+    "action interface",
+    "rl token",
     "sim-to-real",
     "generalization",
     "long-horizon",
@@ -79,6 +87,10 @@ RESEARCH_VALUE_TERMS = [
 DIVERSITY_FEATURE_TERMS = {
     "infrastructure_or_benchmark": ["benchmark", "dataset", "evaluation", "metric", "protocol"],
     "interface_or_control_boundary": ["interface", "control", "closed-loop", "controller", "policy"],
+    "vla_action_interface": ["vla", "rl token", "action interface", "action head", "decoder boundary"],
+    "physical_feedback_contact": ["tactile", "force", "force-torque", "haptic", "contact-rich"],
+    "sim_to_real_robustness": ["sim-to-real", "real-to-sim", "domain randomization", "failure recovery", "ood"],
+    "dlo_bimanual_manipulation": ["dlo", "rope", "cable", "bimanual", "dual-arm"],
     "outside_analogy": ["biology", "cognitive", "human", "physics", "mechanics"],
     "failure_or_negative_result": ["failure", "limitation", "negative result", "blind spot"],
 }
@@ -142,6 +154,11 @@ ROBOTICS_ANCHOR_TERMS = [
     "vision-language-action",
     "vision language action",
     "vla",
+    "rl token",
+    "action interface",
+    "action head",
+    "failure recovery",
+    "contact-rich",
     "visuomotor",
     "policy learning",
     "imitation learning",
@@ -165,6 +182,9 @@ STRONG_ROBOTICS_ANCHOR_TERMS = [
     "vision-language-action",
     "vision language action",
     "vla",
+    "rl token",
+    "failure recovery",
+    "contact-rich",
     "visuomotor",
 ]
 NON_ROBOTICS_CV_TERMS = [
@@ -192,6 +212,10 @@ FOCUS_TRACK_TERMS = {
             "pretrained vla",
             "pretrained vlas",
             "vla anchoring",
+            "action interface",
+            "action head",
+            "decoder boundary",
+            "token interface",
             "anchoring",
             "real-world practice",
             "rl fine-tuning",
@@ -207,6 +231,9 @@ FOCUS_TRACK_TERMS = {
             "actor-critic",
             "actor critic",
             "vla anchoring",
+            "action interface",
+            "action head",
+            "decoder boundary",
             "flow-gspo",
             "gspo",
         ],
@@ -407,7 +434,7 @@ def _is_robotics_related(domain_labels: set[str], text: str, paper: ArxivPaper) 
         return False
     if _non_robotics_cv_hits(text) and not strong_anchor_hits:
         return False
-    if domain_labels & {"embodied_ai", "robot_learning", "bimanual", "dlo", "tactile", "planning"}:
+    if domain_labels & {"embodied_ai", "robot_learning", "bimanual", "dlo", "tactile", "planning", "action_interface", "robustness_recovery"}:
         return True
     return bool(domain_labels & {"manipulation", "vla_vlm", "sim_to_real", "diffusion"})
 
@@ -448,13 +475,13 @@ def rank_paper(paper: ArxivPaper) -> RankedPaper:
             domain_score += 2
         elif label in {"embodied_ai", "robot_learning", "manipulation"}:
             domain_score += 8
-        elif label in {"vla_vlm", "sim_to_real", "tactile", "bimanual", "dlo", "diffusion", "planning"}:
+        elif label in {"vla_vlm", "action_interface", "sim_to_real", "robustness_recovery", "tactile", "bimanual", "dlo", "diffusion", "planning"}:
             domain_score += 6
         reasons.append(f"domain:{label}")
     score += min(domain_score, 35)
 
     fit_score = 0
-    for label in ("dlo", "bimanual", "tactile", "sim_to_real", "vla_vlm", "diffusion", "planning"):
+    for label in ("vla_vlm", "action_interface", "tactile", "sim_to_real", "robustness_recovery", "dlo", "bimanual", "diffusion", "planning"):
         if _count_matches(text, DOMAIN_TERMS[label]):
             fit_score += 5
     if _count_matches(text, DOMAIN_TERMS["manipulation"]) and robotics_anchor_hits:

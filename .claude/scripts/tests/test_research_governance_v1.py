@@ -465,6 +465,36 @@ class GovernanceV1Test(unittest.TestCase):
         self.assertGreater(counts["outside_analogy"], 0)
         self.assertGreater(counts["local_lab_fit"], 0)
 
+    def test_intake_tracks_core_paper_research_axes(self) -> None:
+        payload = build_triage(
+            [
+                {
+                    "title": "VLA RL token action interface for manipulation",
+                    "summary": "decoder boundary and VLA anchoring for robot action heads",
+                },
+                {
+                    "title": "Tactile force contact-rich robot policy",
+                    "summary": "force-torque and haptic feedback for contact-rich manipulation",
+                },
+                {
+                    "title": "Sim-to-Real robustness and failure recovery",
+                    "summary": "out-of-distribution robot recovery under domain randomization",
+                },
+                {
+                    "title": "Bimanual DLO cable manipulation",
+                    "summary": "dual-arm rope and deformable linear object manipulation",
+                },
+            ],
+            run_date="2026-05-23",
+            target_deep_read=4,
+            max_deep_read=4,
+        )
+        counts = payload["research_value_quota_counts"]
+        self.assertGreater(counts["vla_action_interface"], 0)
+        self.assertGreater(counts["physical_feedback_contact"], 0)
+        self.assertGreater(counts["sim_to_real_robustness"], 0)
+        self.assertGreater(counts["dlo_bimanual_manipulation"], 0)
+
     def test_active_seed_record_requires_owner_budget_kill_criteria(self) -> None:
         write_json(governance_review_dir(CID) / "governance-review.json", {"schema_version": "governance_review.v1", "candidate_id": CID, "owner": "", "resource_budget": "", "timeline": "", "kill_criteria": "", "human_confirmed": True, "confirmed_by": "human", "confirmed_at": "x", "governance_signature": "sig"})
         errors = active_commit_validation(CID).errors

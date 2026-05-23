@@ -10,6 +10,10 @@ from kb_common import safe_print, vault_path
 from research_seed_v2_common import ensure_v2_dirs, run_dir, write_run_artifact, write_text
 
 RESEARCH_VALUE_LANES = [
+    "vla_action_interface",
+    "physical_feedback_contact",
+    "sim_to_real_robustness",
+    "dlo_bimanual_manipulation",
     "frontier_anomaly",
     "contradiction",
     "tool_infrastructure_gap",
@@ -62,13 +66,34 @@ def _summary(item: dict[str, Any]) -> str:
 def _research_value_lanes(item: dict[str, Any]) -> list[str]:
     text = " ".join([_title(item), _summary(item)]).lower()
     patterns = {
+        "vla_action_interface": [
+            "vla",
+            "vision-language-action",
+            "rl token",
+            "action interface",
+            "action head",
+            "decoder boundary",
+            "vla anchoring",
+        ],
+        "physical_feedback_contact": ["tactile", "force", "force-torque", "haptic", "contact-rich", "contact rich"],
+        "sim_to_real_robustness": [
+            "sim-to-real",
+            "sim2real",
+            "real-to-sim",
+            "domain randomization",
+            "robustness",
+            "failure recovery",
+            "out-of-distribution",
+            "ood",
+        ],
+        "dlo_bimanual_manipulation": ["dlo", "deformable linear object", "rope", "cable", "bimanual", "dual-arm", "dual arm"],
         "frontier_anomaly": ["anomaly", "unexpected", "emergent", "surprising"],
         "contradiction": ["contradict", "challenge", "against", "limitation"],
         "tool_infrastructure_gap": ["tool", "infrastructure", "system", "pipeline"],
         "benchmark_metric_gap": ["benchmark", "metric", "evaluation", "dataset", "protocol"],
         "negative_result": ["negative result", "failure", "does not", "no improvement", "ablation"],
         "outside_analogy": ["biology", "medical", "material", "graphics", "language model"],
-        "local_lab_fit": ["dlo", "cable", "rope", "bimanual", "tactile", "franka", "sim-to-real"],
+        "local_lab_fit": ["dlo", "cable", "rope", "bimanual", "tactile", "force", "vla", "rl token", "franka", "sim-to-real"],
         "baseline_weakness": ["baseline", "strongest", "comparison", "outperform"],
         "pilot_feasibility": ["pilot", "small-scale", "low-cost", "offline", "replay", "simulation"],
     }

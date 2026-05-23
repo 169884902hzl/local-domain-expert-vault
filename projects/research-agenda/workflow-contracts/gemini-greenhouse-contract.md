@@ -73,9 +73,20 @@ Gemini must not begin from "paper A has method X, paper B has interface Y, there
 
 For RL-token ideas, the candidate must explain what information survives token compression, where the signal enters, whether it crosses the decoder/action-head boundary, and how off-manifold latent/token corrections are detected.
 
+## Core Paper Axes
+
+The greenhouse should treat these as first-class research axes for paper ideas, not as mandatory keywords:
+
+- VLA / VLM / RL-token / action-interface;
+- tactile / force / contact-rich manipulation;
+- Sim-to-Real / robustness / failure recovery;
+- DLO / bimanual manipulation.
+
+A strong candidate should state which axis or axis intersection it uses and why. It should not force all four axes into one idea, and it should not produce generic VLA, generic tactile, generic Sim-to-Real, or generic DLO framing without a concrete interface, physical feedback path, robustness mechanism, or bimanual/DLO test.
+
 ## Lab Fit
 
-Candidates should exploit, or explicitly reject, this lab's advantages: Franka-quality arms, bimanual manipulation, wrist camera active viewpoints, FlexiTac/tactile sensing, DLO/cable tasks, and local offline logs. Ideas that mainly require low-cost hardware pathologies, large robot fleets, unavailable sensors, or industrial-scale infrastructure should be marked rewrite/park rather than S/A.
+Candidates should exploit, or explicitly reject, this lab's advantages: Franka-quality arms, bimanual manipulation, wrist camera active viewpoints, FlexiTac/tactile sensing, DLO/cable tasks, and local offline logs. Ideas that mainly require low-cost hardware pathologies, large robot fleets, unavailable sensors, or unavailable specialized infrastructure should be marked rewrite/park rather than S/A.
 
 ## Quality Bar
 

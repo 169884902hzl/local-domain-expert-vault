@@ -2753,6 +2753,20 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
         self.assertNotIn("def write_seed_folder", ideate_text)
         self.assertNotIn("write_seed_folder(", update_text)
 
+    def test_core_paper_axes_are_explicit_without_industrial_constraint_axis(self) -> None:
+        ideate_text = (SCRIPTS_DIR / "research_agenda_ideate.py").read_text(encoding="utf-8")
+        prompt_text = (SCRIPTS_DIR / "generate_gemini_idea_prompt.py").read_text(encoding="utf-8")
+        contract_text = (Path("projects/research-agenda/workflow-contracts/gemini-greenhouse-contract.md")).read_text(encoding="utf-8")
+        combined = "\n".join([ideate_text, prompt_text, contract_text]).lower()
+        for expected in [
+            "vla/vlm/rl-token/action-interface",
+            "tactile/force/contact-rich",
+            "sim-to-real/robustness/failure recovery",
+            "dlo/bimanual",
+        ]:
+            self.assertIn(expected, combined)
+        self.assertNotIn("industrial", combined)
+
     def test_audit_detects_variable_path_seed_writer(self) -> None:
         fake = """
 from research_agenda_common import IDEA_BANK_DIR

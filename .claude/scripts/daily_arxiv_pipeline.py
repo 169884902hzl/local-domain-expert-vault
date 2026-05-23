@@ -60,7 +60,15 @@ MIN_MIRROR_CANDIDATES_FOR_DAILY = 20
 PRIMARY_DAILY_IMPORT_CAP = 7
 FOCUS_DAILY_IMPORT_FLOOR = 2
 DOMAIN_DAILY_IMPORT_FLOOR = 1
-COVERAGE_DOMAIN_LABELS = {"dlo", "tactile", "bimanual", "sim_to_real"}
+COVERAGE_DOMAIN_LABELS = {
+    "vla_vlm",
+    "action_interface",
+    "tactile",
+    "sim_to_real",
+    "robustness_recovery",
+    "dlo",
+    "bimanual",
+}
 
 
 def _entry_text(entry: ET.Element, name: str) -> str:
@@ -464,7 +472,27 @@ def _robotics_relevant(item: RankedPaper) -> bool:
             " ".join(item.paper.categories),
         ]
     ).lower()
-    return any(term in text for term in ["robot", "embodied", "tactile", "bimanual", "dlo", "deformable", "grasp", "dexterous", "vla"])
+    return any(
+        term in text
+        for term in [
+            "robot",
+            "embodied",
+            "vla",
+            "vision-language-action",
+            "rl token",
+            "action interface",
+            "tactile",
+            "force",
+            "contact-rich",
+            "sim-to-real",
+            "failure recovery",
+            "bimanual",
+            "dlo",
+            "deformable",
+            "grasp",
+            "dexterous",
+        ]
+    )
 
 
 def _coverage_relevant(item: RankedPaper) -> bool:
