@@ -122,7 +122,7 @@ v0.2.1 是 hardening release，不是 formal publish enablement。Scheduled dail
 
 关键变化：
 
-- v2 daily intake 由 `paper_intake_triage.py` 的 `selected_for_deep_read` 控制 Zotero import 和 Claudian deep-read；默认 target 是 3 篇，日常 hard cap 是 4 篇，旧的 `min_new_imports=10` 不再把 v2 deep read 拉回 10 篇。
+- v2 daily intake 由 `paper_intake_triage.py` 的 `selected_for_deep_read` 控制 Zotero import 和 Claudian deep-read；默认 target 是 4 篇，日常 hard cap 是 4 篇，旧的 `min_new_imports=10` 不再把 v2 deep read 拉回 10 篇。
 - `paper_intake_triage.py` 同时支持 flat JSONL 和 nested `RankedPaper.to_dict()` JSONL，并记录稳定 `arxiv_id` 和 original candidate index。
 - Formal publish 要求 novelty verification 不是 `local_only`。v0.2.1 最低接受 `local_plus_arxiv_api`，并记录 `formal_publish_risk=external_scope_arxiv_only_not_full_prior_art`；这只是最低 arXiv API probe，不是完整 prior-art verification。
 - Formal mode 默认要求 DeepSeek provider mode 是 `opencode`，Codex execution provider mode 是 `codex-cli`。scheduled wrapper 必须显式注册 `-DeepSeekProvider opencode` 和 `-CodexExecutionProvider codex-cli`，或手动调用 pipeline 时传入 `--deepseek-provider opencode` 和 `--codex-execution-provider codex-cli`，才会完成 provider-backed review。`provider=json` 只允许显式手动测试覆盖，并会记录 `test_provider_not_production_provenance` 风险。

@@ -2742,7 +2742,7 @@ def main() -> int:
     parser.add_argument("--raw-candidate-limit", type=int, default=24)
     parser.add_argument("--min-raw-candidates", type=int, default=24)
     parser.add_argument("--max-generated", type=int, default=24)
-    parser.add_argument("--target-deep-read", type=int, default=3, help="v2 intake target for daily deep reads.")
+    parser.add_argument("--target-deep-read", type=int, default=4, help="v2 intake target for daily deep reads.")
     parser.add_argument("--max-deep-read", type=int, default=4, help="v2 hard cap for daily deep reads.")
     parser.add_argument(
         "--v2-intake-controls-imports",

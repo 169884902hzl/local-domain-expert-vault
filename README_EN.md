@@ -138,7 +138,7 @@ v0.2.1 is a hardening release, not a formal-publish enablement release. Schedule
 
 Key changes:
 
-- v2 daily intake is now controlled by `paper_intake_triage.py` and its `selected_for_deep_read` output for both Zotero import attempts and Claudian deep-read attempts. The default daily target is 3 papers and the daily hard cap is 4 papers; the legacy `min_new_imports=10` floor no longer forces v2 deep reading back to 10 papers.
+- v2 daily intake is now controlled by `paper_intake_triage.py` and its `selected_for_deep_read` output for both Zotero import attempts and Claudian deep-read attempts. The default daily target is 4 papers and the daily hard cap is 4 papers; the legacy `min_new_imports=10` floor no longer forces v2 deep reading back to 10 papers.
 - `paper_intake_triage.py` supports both flat JSONL and nested `RankedPaper.to_dict()` JSONL, with stable `arxiv_id` and original candidate index tracking.
 - Formal publish now requires novelty verification beyond `local_only`. In v0.2.1, the minimum accepted external scope is `local_plus_arxiv_api`, and the publish artifacts record `formal_publish_risk=external_scope_arxiv_only_not_full_prior_art`; this is only a minimum arXiv API probe, not full prior-art verification.
 - Formal mode requires DeepSeek provider mode `opencode` and Codex execution provider mode `codex-cli` by default. The scheduled wrapper must be registered with `-DeepSeekProvider opencode` and `-CodexExecutionProvider codex-cli`, or the pipeline must be invoked manually with `--deepseek-provider opencode` and `--codex-execution-provider codex-cli`, before provider-backed review can complete. `provider=json` is allowed only with an explicit manual test override, and that path records `test_provider_not_production_provenance`.

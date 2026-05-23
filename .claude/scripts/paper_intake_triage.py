@@ -224,7 +224,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run-date", required=True)
     parser.add_argument("--candidates", default="")
-    parser.add_argument("--target-deep-read", type=int, default=3)
+    parser.add_argument("--target-deep-read", type=int, default=4)
     parser.add_argument("--max-deep-read", type=int, default=4)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()

@@ -325,7 +325,7 @@ v2 相关 CLI flags：
 | `--codex-execution-provider-json PATH` | path | 读取已有 `codex_execution_review.v1` JSON，适合复现或 CI fixture。 |
 | `--v2-publish-policy` | `disabled`, `seed-candidates-only`, `formal` | v2 rollout publish policy；默认是 `seed-candidates-only`。 |
 | `--allow-formal-seed-publish` | historical | v0.2/v0.3 时代的 formal publish 确认；v1 legacy publish script 不再接受此 flag。 |
-| `--target-deep-read` | integer | v2 daily deep-read target；默认 3。 |
+| `--target-deep-read` | integer | v2 daily deep-read target；默认 4。 |
 | `--max-deep-read` | integer | v2 daily deep-read hard cap；默认 4。 |
 | `--legacy-import-fill` | flag | 手动恢复旧的 import fill 行为。默认关闭，所以 `min_new_imports=10` 不会强制 v2 import/read 10 篇。 |
 | `--allow-test-provider-for-formal` | historical | v0.2/v0.3 时代的 formal test-provider override；v1 legacy publish script 不再接受此 flag。 |
@@ -347,7 +347,7 @@ Scheduled daily wrapper 另有 PowerShell 参数：
 - DeepSeek provider mode 是 `opencode`，Codex execution provider mode 是 `codex-cli`；test-provider override 只作为 historical context 保留
 - DeepSeek scientific review、novelty/baseline scan、Codex execution review、survival decision、artifact hash 等 hard gates 全部通过
 
-v0.2.1 里，`paper_intake_triage.py` 会输出 `selected_for_deep_read`，daily pipeline 用这些 stable `arxiv_id` 同时控制 Zotero import attempts 和 Claudian deep-read attempts。默认 target 是 3 篇，hard cap 是 4 篇；除非显式启用 `--legacy-import-fill`，旧的 `min_new_imports=10` 不再把 v2 import/read 数量拉回 10。
+v0.2.1 里，`paper_intake_triage.py` 会输出 `selected_for_deep_read`，daily pipeline 用这些 stable `arxiv_id` 同时控制 Zotero import attempts 和 Claudian deep-read attempts。默认 target 是 4 篇，hard cap 是 4 篇；除非显式启用 `--legacy-import-fill`，旧的 `min_new_imports=10` 不再把 v2 import/read 数量拉回 10。
 
 Formal novelty verification 不能只依赖 local claim graph、local arXiv mirror 或 arXiv API。`novelty_scan.v1` 会记录 `verification_scope`、`external_providers_used`、`provider_results`、`provider_errors` 和 `formal_promotion_allowed`。v0.2.2 新增 OpenAlex 和 optional Semantic Scholar prior-art probes；Semantic Scholar 只有在 `SEMANTIC_SCHOLAR_API_KEY` 或 `S2_API_KEY` 存在时启用，没有 key 时记录 `provider_unavailable` 并 fail closed。所有外部 provider 都有 timeout、rate limit 和位于 `projects/research-agenda/cache/` 的 runtime cache；cache 不应提交。只用了 arXiv API 时仍记录 `formal_publish_risk=external_scope_arxiv_only_not_full_prior_art`，这不是完整 prior-art verification，不能写 formal seed。
 
