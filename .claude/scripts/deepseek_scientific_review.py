@@ -99,6 +99,25 @@ def _fallback_review_candidate(item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _provider_failure_fallback_review_candidate(item: dict[str, Any], provider_error: str) -> dict[str, Any]:
+    cid = candidate_id(item)
+    return {
+        "candidate_id": cid,
+        "candidate_title": item.get("title", ""),
+        "status": "failed_fallback_only",
+        "novelty_attack": "Provider review did not return validated JSON; do not use this candidate as reviewed.",
+        "baseline_attack": "Provider review unavailable; strongest-baseline pressure remains unverified.",
+        "mechanism_attack": "Provider review unavailable; mechanism critique remains unverified.",
+        "evaluation_attack": "Provider review unavailable; no-hardware evaluation critique remains unverified.",
+        "scope_attack": "Provider review unavailable; scope boundary remains unverified.",
+        "a_plus_b_risk": "fatal",
+        "fatal_flaw": provider_error or "deepseek_provider_review_unavailable",
+        "rescue_mutation": "",
+        "survivability_label": "reject_fatal",
+        "allowed_next_stage": "stop",
+    }
+
+
 def _load_provider_payload(path_value: str) -> dict[str, Any]:
     if not path_value:
         return {}
@@ -638,10 +657,30 @@ def _merge_opencode_provider_batches(
 ) -> dict[str, Any]:
     batch_statuses = [dict(payload.get("_provider_status") or payload.get("provider_status") or {}) for payload in batch_payloads]
     failures = [payload for payload in batch_payloads if payload.get("_provider_error")]
+    reviews: list[dict[str, Any]] = []
+    for payload in batch_payloads:
+        reviews.extend([item for item in payload.get("reviews", []) if isinstance(item, dict)])
     if failures:
-        failure = failures[0]
-        failure_status = str(failure.get("_provider_failure_status") or "partial_provider_unavailable")
+        failure_errors = [str(failure.get("_provider_error") or "provider_batch_failed") for failure in failures]
+        failure_status = (
+            "partial_provider_invalid"
+            if any(str(failure.get("_provider_failure_status")) == "partial_provider_invalid" for failure in failures)
+            else "partial_provider_unavailable"
+        )
+        by_id = {candidate_id(item): item for item in selected}
+        reviewed_ids = {str(review.get("candidate_id")) for review in reviews if str(review.get("candidate_id", "")).strip()}
+        failed_ids: list[str] = []
+        for failure in failures:
+            status = dict(failure.get("_provider_status") or failure.get("provider_status") or {})
+            failed_ids.extend(str(value) for value in status.get("batch_candidate_ids", []) if value)
+        fallback_ids = [cid for cid in [*failed_ids, *by_id] if cid in by_id and cid not in reviewed_ids]
+        fallback_ids = list(dict.fromkeys(fallback_ids))
+        fallback_reviews = [
+            _provider_failure_fallback_review_candidate(by_id[cid], ";".join(failure_errors))
+            for cid in fallback_ids
+        ]
         provider_status = {
+            "provider": "deepseek",
             "mode": "opencode",
             "requested_model": model,
             "effective_model": model,
@@ -651,16 +690,22 @@ def _merge_opencode_provider_batches(
             "batch_count": len(batch_payloads),
             "batch_size": batch_size,
             "batch_statuses": batch_statuses,
+            "batch_candidate_ids": [candidate_id(item) for item in selected],
+            "provider_backed": False,
+            "candidate_level_fail_closed": True,
+            "provider_backed_success_count": len(reviews),
+            "provider_fallback_count": len(fallback_reviews),
+            "provider_error": ";".join(failure_errors),
+            "boundary": "Failed provider candidates are marked failed_fallback_only and cannot pass survival.",
         }
-        return _provider_error_payload(
-            f"opencode_batch_failed:{failure.get('_provider_error')}",
-            status=failure_status,
-            provider_status=provider_status,
-        )
+        return {
+            "schema_version": "deepseek_review.v1",
+            "run_date": run_date,
+            "status": failure_status,
+            "provider_status": provider_status,
+            "reviews": [*reviews, *fallback_reviews],
+        }
 
-    reviews: list[dict[str, Any]] = []
-    for payload in batch_payloads:
-        reviews.extend([item for item in payload.get("reviews", []) if isinstance(item, dict)])
     return {
         "schema_version": "deepseek_review.v1",
         "run_date": run_date,
@@ -727,8 +772,6 @@ def _opencode_provider_payload(
         if not payload.get("_provider_error"):
             _write_opencode_batch_cache(payload, run_date=run_date, batch_index=index)
         payloads.append(payload)
-        if payload.get("_provider_error"):
-            break
     if len(payloads) == 1:
         payloads[0].setdefault("provider_status", {})
         payloads[0]["provider_status"].setdefault("batch_count", 1)
@@ -746,7 +789,8 @@ def _opencode_provider_payload(
 def _validate_provider_reviews(selected: list[dict[str, Any]], payload: dict[str, Any]) -> list[str]:
     errors: list[str] = []
     provider = payload.get("provider_status", {})
-    if not provider.get("provider_backed"):
+    allow_candidate_fallback = bool(provider.get("candidate_level_fail_closed"))
+    if not provider.get("provider_backed") and not allow_candidate_fallback:
         errors.append("provider_status_not_provider_backed")
     if provider.get("provider") != "deepseek":
         errors.append(f"provider_not_deepseek:{provider.get('provider')}")
@@ -768,7 +812,13 @@ def _validate_provider_reviews(selected: list[dict[str, Any]], payload: dict[str
         if not review:
             errors.append(f"missing_provider_review:{cid}")
             continue
-        if review.get("status") != "success":
+        review_status = review.get("status")
+        if review_status == "failed_fallback_only" and allow_candidate_fallback:
+            if review.get("survivability_label") != "reject_fatal":
+                errors.append(f"provider_fallback_review_not_reject_fatal:{cid}")
+            if review.get("allowed_next_stage") != "stop":
+                errors.append(f"provider_fallback_review_not_stop:{cid}")
+        elif review_status != "success":
             errors.append(f"provider_review_not_success:{cid}:{review.get('status')}")
         for field in REQUIRED_REVIEW_FIELDS:
             if field not in review:
@@ -820,9 +870,14 @@ def build_payload(selected: list[dict[str, Any]], *, run_date: str, provider_pay
     provider_payload = provider_payload or {}
     if provider_payload and not provider_payload.get("_provider_error"):
         errors = _validate_provider_reviews(selected, provider_payload)
-        status = "success" if not errors and selected else "partial_provider_invalid"
         provider_status = {**dict(provider_payload.get("provider_status", {})), "validation_errors": errors}
-        if status != "success":
+        candidate_level_fallback = bool(provider_status.get("candidate_level_fail_closed"))
+        status = (
+            str(provider_payload.get("status") or "partial_provider_invalid")
+            if candidate_level_fallback
+            else ("success" if not errors and selected else "partial_provider_invalid")
+        )
+        if status != "success" and not candidate_level_fallback:
             provider_status["provider_backed"] = False
         payload = {
             "schema_version": "deepseek_review.v1",
@@ -834,7 +889,7 @@ def build_payload(selected: list[dict[str, Any]], *, run_date: str, provider_pay
             "provider_status": provider_status,
             "artifact_hashes": artifact_hashes(run_date, ["selected-candidates.json"]),
         }
-        return payload, 0 if status == "success" else 2
+        return payload, 0 if (status == "success" or (candidate_level_fallback and not errors)) else 2
 
     reviews = [_fallback_review_candidate(item) for item in selected]
     provider_error = provider_payload.get("_provider_error", "deepseek_provider_unavailable")

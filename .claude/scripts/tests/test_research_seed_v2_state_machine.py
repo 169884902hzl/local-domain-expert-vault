@@ -45,7 +45,14 @@ from survival_decision import decide
 from tension_map import build_tensions, validate_tensions
 from validate_research_run import validate_run
 from weekly_strategy_review import sanitize_overrides
-from audit_daily_automation_quality import CONTRACT_DIR, _audit_v2_state_machine, _moved_to_v2_missing_artifact_issues, _provider_backed_artifact_issue, _scan_text_for_seed_writer
+from audit_daily_automation_quality import (
+    CONTRACT_DIR,
+    _audit_v2_state_machine,
+    _moved_to_v2_missing_artifact_issues,
+    _provider_backed_artifact_issue,
+    _scan_text_for_seed_writer,
+    _v2_deepseek_review_covers_battle,
+)
 import research_agenda_review as agenda_review
 import novelty_baseline_scan as novelty_scan
 import candidate_portfolio_select as portfolio_select
@@ -1549,12 +1556,20 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
                 retries=0,
             )
         payload, exit_code = build_deepseek_payload(candidates, run_date=RUN_DATE, provider_payload=provider_payload)
-        self.assertEqual(exit_code, 2)
+        self.assertEqual(exit_code, 0)
         self.assertEqual(payload["status"], "partial_provider_unavailable")
         self.assertFalse(payload["provider_status"]["provider_backed"])
-        self.assertIn("opencode_batch_failed", payload["provider_status"]["provider_error"])
+        self.assertTrue(payload["provider_status"]["candidate_level_fail_closed"])
+        self.assertEqual(payload["provider_status"]["provider_backed_success_count"], 1)
+        self.assertEqual(payload["provider_status"]["provider_fallback_count"], 1)
+        self.assertIn("nonzero_exit:1", payload["provider_status"]["provider_error"])
+        by_id = {review["candidate_id"]: review for review in payload["reviews"]}
+        self.assertEqual(by_id["cand-alpha"]["status"], "success")
+        self.assertEqual(by_id["cand-beta"]["status"], "failed_fallback_only")
+        self.assertEqual(by_id["cand-beta"]["survivability_label"], "reject_fatal")
+        self.assertEqual(by_id["cand-beta"]["allowed_next_stage"], "stop")
 
-    def test_deepseek_opencode_batch_failure_fails_fast(self) -> None:
+    def test_deepseek_opencode_batch_failure_marks_each_candidate_failed_fallback(self) -> None:
         candidates = [self.candidate("cand-alpha"), self.candidate("cand-beta")]
         calls = 0
 
@@ -1579,8 +1594,15 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
                 batch_size=1,
                 retries=0,
             )
-        self.assertEqual(calls, 1)
-        self.assertTrue(provider_payload.get("_provider_error"))
+        payload, exit_code = build_deepseek_payload(candidates, run_date=RUN_DATE, provider_payload=provider_payload)
+        self.assertEqual(calls, 2)
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["status"], "partial_provider_unavailable")
+        self.assertTrue(payload["provider_status"]["candidate_level_fail_closed"])
+        self.assertEqual(payload["provider_status"]["provider_backed_success_count"], 0)
+        self.assertEqual(payload["provider_status"]["provider_fallback_count"], 2)
+        self.assertEqual({review["status"] for review in payload["reviews"]}, {"failed_fallback_only"})
+        self.assertEqual({review["allowed_next_stage"] for review in payload["reviews"]}, {"stop"})
 
     def test_deepseek_opencode_invalid_json_retries_and_succeeds(self) -> None:
         calls = 0
@@ -1830,6 +1852,37 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
         payload = read_json(artifact_dir(RUN_DATE) / "codex-execution-review.json")
         self.assertFalse(payload["provider_status"]["provider_backed"])
 
+    def test_codex_cli_nonzero_exit_writes_fail_closed_fallback_and_continues(self) -> None:
+        self.write_review_artifacts()
+        with patch.object(codex_review.shutil, "which", return_value="codex"), patch.object(
+            codex_review.subprocess,
+            "Popen",
+            self._fake_codex_popen("", exit_code=1),
+        ):
+            result = execution_review(RUN_DATE, dry_run=False, provider="codex-cli", timeout_sec=5)
+        self.assertEqual(result["status"], "partial_provider_unavailable")
+        self.assertEqual(result["fallback_reviews_fail_closed"], "true")
+        payload = read_json(artifact_dir(RUN_DATE) / "codex-execution-review.json")
+        self.assertFalse(payload["provider_status"]["provider_backed"])
+        self.assertTrue(payload["provider_status"]["fallback_reviews_fail_closed"])
+        self.assertEqual(payload["provider_status"]["provider_fallback_count"], 1)
+        self.assertEqual(payload["reviews"][0]["status"], "failed_fallback_only")
+        self.assertEqual(payload["reviews"][0]["action"], "reject_with_rescue")
+
+    def test_codex_execution_review_main_returns_zero_for_fail_closed_fallback(self) -> None:
+        self.write_review_artifacts()
+        old_argv = sys.argv[:]
+        try:
+            sys.argv = ["codex_seed_review.py", "execution-review", "--run-date", RUN_DATE, "--provider", "codex-cli", "--timeout", "5"]
+            with patch.object(codex_review.shutil, "which", return_value="codex"), patch.object(
+                codex_review.subprocess,
+                "Popen",
+                self._fake_codex_popen("", exit_code=1),
+            ):
+                self.assertEqual(codex_review.main(), 0)
+        finally:
+            sys.argv = old_argv
+
     def test_codex_cli_field_presence_accept_fails_closed(self) -> None:
         self.write_review_artifacts()
         provider = self.provider_codex_payload()
@@ -1850,6 +1903,53 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
         self.assertEqual(payload["decisions"][0]["decision"], "killed")
         self.assertIn("unknown_novelty_without_human_override", payload["decisions"][0]["blocks"])
 
+    def test_codex_fallback_review_blocks_candidate_in_survival(self) -> None:
+        cid = self.write_review_artifacts()
+        write_run_artifact(
+            RUN_DATE,
+            "codex-execution-review.json",
+            {
+                "schema_version": "codex_execution_review.v1",
+                "run_date": RUN_DATE,
+                "status": "partial_provider_unavailable",
+                "reviews": [
+                    {
+                        "candidate_id": cid,
+                        "candidate_title": "Test candidate",
+                        "status": "failed_fallback_only",
+                        "action": "reject_with_rescue",
+                        "execution_risks": ["provider_backed_codex_execution_review_missing"],
+                        "no_hardware_pilot_feasibility": "not_verified",
+                        "public_dataset_or_sim_availability": "not_verified",
+                        "baseline_training_cost": "not_verified",
+                        "metric_automation": "not_verified",
+                        "data_leakage_risk": "not_verified",
+                        "minimal_repo_plan": "not_verified",
+                        "real_robot_pilot_complexity": "not_verified",
+                        "reproducibility_path": "not_verified",
+                        "compute_time_budget": "not_verified",
+                        "field_presence_only": True,
+                    }
+                ],
+                "provider_status": {
+                    "provider": "codex",
+                    "provider_backed": False,
+                    "mode": "codex-cli",
+                    "fallback_reviews_fail_closed": True,
+                },
+                "artifact_hashes": {},
+            },
+            state="execution_reviewed",
+        )
+
+        payload = decide(run_date=RUN_DATE, allow_human_override=False)
+
+        decision = payload["decisions"][0]
+        self.assertEqual(decision["decision"], "killed")
+        self.assertIn("codex_not_provider_backed_success", decision["blocks"])
+        self.assertIn("codex_status_not_success", decision["blocks"])
+        self.assertIn("codex_action_not_accept:reject_with_rescue", decision["blocks"])
+
     def test_local_only_likely_open_cannot_formal_publish(self) -> None:
         self.write_review_artifacts(novelty="likely_open", verification_scope="local_only")
         payload = decide(run_date=RUN_DATE, allow_human_override=False, target_policy="formal")
@@ -1865,6 +1965,149 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
         self.assertEqual(result["status"], "success")
         self.assertEqual(result["published"], [])
         self.assertEqual(len(result["bucketed"]), 1)
+
+    def test_deepseek_candidate_level_fallback_does_not_kill_reviewed_candidates(self) -> None:
+        alpha = self.candidate("cand-alpha")
+        beta = self.candidate("cand-beta")
+        self.write_claim_graph_node()
+        write_run_artifact(
+            RUN_DATE,
+            "selected-candidates.json",
+            {
+                "schema_version": "selected_candidates.v1",
+                "run_date": RUN_DATE,
+                "selected": [alpha, beta],
+                "rejected": [],
+                "selection_rules": {},
+                "artifact_hashes": {},
+            },
+            state="portfolio_selected",
+        )
+        write_run_artifact(
+            RUN_DATE,
+            "deepseek-review.json",
+            {
+                "schema_version": "deepseek_review.v1",
+                "run_date": RUN_DATE,
+                "status": "partial_provider_invalid",
+                "reviews": [
+                    {
+                        "candidate_id": "cand-alpha",
+                        "candidate_title": str(alpha["title"]),
+                        "status": "success",
+                        "novelty_attack": "nearest work reviewed",
+                        "baseline_attack": "baseline checked",
+                        "mechanism_attack": "mechanism checked",
+                        "evaluation_attack": "evaluation checked",
+                        "scope_attack": "scope checked",
+                        "a_plus_b_risk": "low",
+                        "fatal_flaw": "",
+                        "rescue_mutation": "",
+                        "survivability_label": "survives",
+                        "allowed_next_stage": "novelty_scan",
+                    },
+                    {
+                        "candidate_id": "cand-beta",
+                        "candidate_title": str(beta["title"]),
+                        "status": "failed_fallback_only",
+                        "novelty_attack": "Provider review unavailable.",
+                        "baseline_attack": "Provider review unavailable.",
+                        "mechanism_attack": "Provider review unavailable.",
+                        "evaluation_attack": "Provider review unavailable.",
+                        "scope_attack": "Provider review unavailable.",
+                        "a_plus_b_risk": "fatal",
+                        "fatal_flaw": "opencode_invalid_json",
+                        "rescue_mutation": "",
+                        "survivability_label": "reject_fatal",
+                        "allowed_next_stage": "stop",
+                    },
+                ],
+                "provider_status": {
+                    "provider": "deepseek",
+                    "provider_backed": False,
+                    "mode": "opencode",
+                    "candidate_level_fail_closed": True,
+                },
+                "artifact_hashes": {},
+            },
+            state="attacked_by_deepseek",
+        )
+        scans = []
+        codex_reviews = []
+        for item in [alpha, beta]:
+            cid = str(item["candidate_id"])
+            scans.append(
+                {
+                    "candidate_id": cid,
+                    "candidate_title": str(item["title"]),
+                    "status": "completed_local_only",
+                    "novelty_classification": "likely_open",
+                    "promotion_allowed": True,
+                    "formal_promotion_allowed": False,
+                    "verification_scope": "local_only",
+                    "external_providers_used": [],
+                    "formal_publish_risk": "",
+                    "provider_results": {},
+                    "provider_errors": [],
+                    "nearest_works": [{"source": "test", "score": 0.1, "title": "Near work"}],
+                    "strongest_baseline": {"source": "test", "score": 0.1, "title": "Near work"},
+                    "local_scan_evidence": {},
+                    "external_scan_evidence": {},
+                    "duplicate_guard": {"status": "pass", "action": "allow_with_lineage", "nearest_candidates": []},
+                }
+            )
+            codex_reviews.append(
+                {
+                    "candidate_id": cid,
+                    "candidate_title": str(item["title"]),
+                    "status": "success",
+                    "action": "accept_for_user_review",
+                    "no_hardware_pilot_feasibility": "feasible",
+                    "public_dataset_or_sim_availability": "available",
+                    "baseline_training_cost": "single GPU day",
+                    "metric_automation": "scriptable",
+                    "data_leakage_risk": "low",
+                    "minimal_repo_plan": "notebook plus evaluator",
+                    "real_robot_pilot_complexity": "low",
+                    "reproducibility_path": "public sim",
+                    "compute_time_budget": "one day",
+                }
+            )
+        write_run_artifact(
+            RUN_DATE,
+            "novelty-scan.json",
+            {
+                "schema_version": "novelty_scan.v1",
+                "run_date": RUN_DATE,
+                "status": "completed_local_only",
+                "scans": scans,
+                "provider_policy": {},
+                "artifact_hashes": {},
+            },
+            state="novelty_checked",
+        )
+        write_run_artifact(
+            RUN_DATE,
+            "codex-execution-review.json",
+            {
+                "schema_version": "codex_execution_review.v1",
+                "run_date": RUN_DATE,
+                "status": "success",
+                "reviews": codex_reviews,
+                "provider_status": {"provider": "codex", "provider_backed": True, "mode": "codex-cli"},
+                "artifact_hashes": {},
+            },
+            state="execution_reviewed",
+        )
+
+        survival = decide(run_date=RUN_DATE, allow_human_override=False)
+
+        by_id = {item["candidate_id"]: item for item in survival["decisions"]}
+        self.assertEqual(by_id["cand-alpha"]["decision"], "accept_for_user_review")
+        self.assertNotIn("deepseek_not_provider_backed_success", by_id["cand-alpha"]["blocks"])
+        self.assertEqual(by_id["cand-beta"]["decision"], "killed")
+        self.assertIn("deepseek_status_not_success", by_id["cand-beta"]["blocks"])
+        self.assertIn("deepseek_label_not_survivable", by_id["cand-beta"]["blocks"])
 
     def test_formal_candidate_with_only_low_note_only_core_evidence_blocks(self) -> None:
         self.write_review_artifacts(
@@ -2438,6 +2681,37 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
         self.assertEqual(validation["status"], "partial_schema_blocked")
         self.assertTrue(any("hash_mismatch:selected-candidates.json" in item for item in validation["errors"]))
 
+    def test_publish_preflight_ignores_stale_previous_publish_result_hashes(self) -> None:
+        self.write_review_artifacts()
+        survival = decide(run_date=RUN_DATE, allow_human_override=False)
+        write_run_artifact(RUN_DATE, "survival-decision.json", survival, state="survival_decided")
+        write_run_artifact(
+            RUN_DATE,
+            "publish-result.json",
+            {
+                "schema_version": "publish_result.v1",
+                "run_date": RUN_DATE,
+                "status": "blocked_validation",
+                "v2_publish_policy": "seed-candidates-only",
+                "formal_seed_publish_allowed": False,
+                "formal_seed_written": False,
+                "formal_rehearsal_written": False,
+                "published": [],
+                "bucketed": [],
+                "blocked": ["previous failure"],
+                "artifact_hashes": {"selected-candidates.json": "0" * 64},
+            },
+            state="publish_checked",
+        )
+        validation = validate_run(RUN_DATE, strict_publish=True)
+        self.assertEqual(validation["status"], "partial_schema_blocked")
+        self.assertTrue(any("publish-result.json:hash_mismatch:selected-candidates.json" in item for item in validation["errors"]))
+
+        result = publish(RUN_DATE, dry_run=True, target_policy="seed-candidates-only")
+
+        self.assertEqual(result["status"], "success")
+        self.assertGreaterEqual(len(result["bucketed"]), 1)
+
     def test_duplicate_guard_blocks_existing_seed_title(self) -> None:
         seed_dir = Path(self.tmp.name) / "idea_bank" / "seed" / "anchored-contact-failure-benchmark"
         seed_dir.mkdir(parents=True, exist_ok=True)
@@ -2838,6 +3112,84 @@ def bad(source, recommended):
         issue = _provider_backed_artifact_issue(run_date=RUN_DATE, artifact_name="deepseek-review.json", expected_mode="opencode", code="scheduled_deepseek_provider_not_provider_backed")
         self.assertIsNotNone(issue)
         self.assertEqual(issue["level"], "FAIL")
+
+    def test_audit_warns_for_scheduled_deepseek_candidate_level_fail_closed(self) -> None:
+        payload = {
+            "schema_version": "deepseek_review.v1",
+            "run_date": RUN_DATE,
+            "status": "partial_provider_invalid",
+            "provider_status": {
+                "provider": "deepseek",
+                "provider_backed": False,
+                "mode": "opencode",
+                "candidate_level_fail_closed": True,
+                "provider_backed_success_count": 1,
+                "provider_fallback_count": 1,
+            },
+            "reviews": [
+                {**self.provider_deepseek_payload()["reviews"][0], "candidate_id": "cand-alpha", "status": "success"},
+                {
+                    **self.provider_deepseek_payload()["reviews"][0],
+                    "candidate_id": "cand-beta",
+                    "status": "failed_fallback_only",
+                    "survivability_label": "reject_fatal",
+                    "allowed_next_stage": "stop",
+                },
+            ],
+            "artifact_hashes": {},
+        }
+        write_run_artifact(RUN_DATE, "deepseek-review.json", payload, state="attacked_by_deepseek")
+
+        issue = _provider_backed_artifact_issue(
+            run_date=RUN_DATE,
+            artifact_name="deepseek-review.json",
+            expected_mode="opencode",
+            code="scheduled_deepseek_provider_not_provider_backed",
+            allow_candidate_fail_closed=True,
+        )
+
+        self.assertIsNotNone(issue)
+        self.assertEqual(issue["level"], "WARN")
+        self.assertEqual(issue["code"], "scheduled_deepseek_provider_candidate_level_fail_closed")
+        self.assertTrue(_v2_deepseek_review_covers_battle(payload))
+
+    def test_audit_still_fails_when_deepseek_fail_closed_has_no_provider_success(self) -> None:
+        payload = {
+            "schema_version": "deepseek_review.v1",
+            "run_date": RUN_DATE,
+            "status": "partial_provider_unavailable",
+            "provider_status": {
+                "provider": "deepseek",
+                "provider_backed": False,
+                "mode": "opencode",
+                "candidate_level_fail_closed": True,
+                "provider_backed_success_count": 0,
+                "provider_fallback_count": 1,
+            },
+            "reviews": [
+                {
+                    **self.provider_deepseek_payload()["reviews"][0],
+                    "candidate_id": "cand-alpha",
+                    "status": "failed_fallback_only",
+                    "survivability_label": "reject_fatal",
+                    "allowed_next_stage": "stop",
+                }
+            ],
+            "artifact_hashes": {},
+        }
+        write_run_artifact(RUN_DATE, "deepseek-review.json", payload, state="attacked_by_deepseek")
+
+        issue = _provider_backed_artifact_issue(
+            run_date=RUN_DATE,
+            artifact_name="deepseek-review.json",
+            expected_mode="opencode",
+            code="scheduled_deepseek_provider_not_provider_backed",
+            allow_candidate_fail_closed=True,
+        )
+
+        self.assertIsNotNone(issue)
+        self.assertEqual(issue["level"], "FAIL")
+        self.assertEqual(issue["code"], "scheduled_deepseek_provider_not_provider_backed")
 
     def test_audit_runtime_root_uses_temp_agenda_root(self) -> None:
         repo_artifact = REPO_ROOT / "projects" / "research-agenda" / "runs" / RUN_DATE / "artifacts" / "deepseek-review.json"

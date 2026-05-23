@@ -265,9 +265,15 @@ def _validate_dashboard_alignment(run_date: str) -> list[str]:
     return errors
 
 
-def validate_run(run_date: str, *, strict_publish: bool = False) -> dict[str, Any]:
+def validate_run(
+    run_date: str,
+    *,
+    strict_publish: bool = False,
+    skip_hash_artifacts: set[str] | None = None,
+) -> dict[str, Any]:
     errors = _validate_manifest(run_date)
     checked: list[str] = ["manifest.json"]
+    skip_hash_artifacts = skip_hash_artifacts or set()
     for artifact_name in ARTIFACT_SCHEMAS:
         path = artifact_dir(run_date) / artifact_name
         if not path.exists():
@@ -276,7 +282,8 @@ def validate_run(run_date: str, *, strict_publish: bool = False) -> dict[str, An
             continue
         checked.append(f"artifacts/{artifact_name}")
         errors.extend(f"{artifact_name}:{issue}" for issue in validate_artifact(run_date, artifact_name))
-        errors.extend(_validate_referenced_hashes(run_date, artifact_name))
+        if artifact_name not in skip_hash_artifacts:
+            errors.extend(_validate_referenced_hashes(run_date, artifact_name))
     errors.extend(_validate_candidate_alignment(run_date))
     errors.extend(_validate_dashboard_alignment(run_date))
     if strict_publish:

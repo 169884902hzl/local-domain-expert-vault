@@ -328,6 +328,7 @@ def _provider_backed_artifact_issue(
     artifact_name: str,
     expected_mode: str,
     code: str,
+    allow_candidate_fail_closed: bool = False,
 ) -> dict[str, str] | None:
     path = artifact_dir(run_date) / artifact_name
     data = _json_read(path)
@@ -338,9 +339,53 @@ def _provider_backed_artifact_issue(
     mode = str(provider.get("mode") or data.get("mode") or "")
     provider_backed = provider.get("provider_backed") is True or data.get("provider_backed") is True
     if status != "success" or not provider_backed or mode != expected_mode:
+        if allow_candidate_fail_closed and _provider_candidate_level_fail_closed(data, expected_mode=expected_mode):
+            success_count = _provider_int(provider.get("provider_backed_success_count"))
+            fallback_count = _provider_int(provider.get("provider_fallback_count"))
+            if success_count > 0:
+                detail = (
+                    f"{artifact_name} used candidate-level fail-closed fallback: "
+                    f"provider_backed_success_count={success_count} provider_fallback_count={fallback_count} "
+                    f"mode={mode or 'missing'} expected_mode={expected_mode}"
+                )
+                warn_code = code.replace("_not_provider_backed", "_candidate_level_fail_closed")
+                return _issue("WARN", warn_code, detail, _rel(path))
         detail = f"{artifact_name} status={status or 'missing'} provider_backed={provider_backed} mode={mode or 'missing'} expected_mode={expected_mode}"
         return _issue("FAIL", code, detail, _rel(path))
     return None
+
+
+def _provider_int(value: object) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _provider_candidate_level_fail_closed(data: dict[str, Any], *, expected_mode: str) -> bool:
+    provider = data.get("provider_status", {})
+    if not isinstance(provider, dict):
+        return False
+    mode = str(provider.get("mode") or data.get("mode") or "")
+    reviews = data.get("reviews", [])
+    return (
+        mode == expected_mode
+        and provider.get("candidate_level_fail_closed") is True
+        and isinstance(reviews, list)
+        and bool(reviews)
+        and _provider_int(provider.get("provider_fallback_count")) > 0
+    )
+
+
+def _v2_deepseek_review_covers_battle(data: dict[str, Any]) -> bool:
+    provider = data.get("provider_status", {})
+    if not isinstance(provider, dict):
+        return False
+    return bool(
+        data.get("status") == "success"
+        and provider.get("provider_backed") is True
+        or _provider_candidate_level_fail_closed(data, expected_mode="opencode")
+    )
 
 
 def _moved_to_v2_missing_artifact_issues(
@@ -892,11 +937,7 @@ def audit_run(
 
     mandatory_battle = _classify_mandatory_battle(run_date, agenda_delta_text)
     v2_deepseek = _json_read(artifact_dir(run_date) / "deepseek-review.json")
-    v2_deepseek_ok = bool(
-        v2_deepseek.get("status") == "success"
-        and isinstance(v2_deepseek.get("provider_status"), dict)
-        and v2_deepseek["provider_status"].get("provider_backed") is True
-    )
+    v2_deepseek_ok = _v2_deepseek_review_covers_battle(v2_deepseek)
     battle_expected = bool(
         mandatory_battle["required"]
         and greenhouse_path.exists()
@@ -928,6 +969,7 @@ def audit_run(
             artifact_name="deepseek-review.json",
             expected_mode="opencode",
             code="scheduled_deepseek_provider_not_provider_backed",
+            allow_candidate_fail_closed=True,
         )
         if issue:
             issue_list.append(issue)

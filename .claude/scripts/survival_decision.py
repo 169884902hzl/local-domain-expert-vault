@@ -287,6 +287,14 @@ def decide(
     codex_by_id = {str(item.get("candidate_id")): item for item in codex_payload.get("reviews", [])}
     deepseek_provider = deepseek_payload.get("provider_status", {})
     codex_provider = codex_payload.get("provider_status", {})
+    deepseek_candidate_level_fail_closed = bool(deepseek_provider.get("candidate_level_fail_closed"))
+    deepseek_stage_usable = bool(
+        (deepseek_payload.get("status") == "success" and deepseek_provider.get("provider_backed"))
+        or (
+            deepseek_payload.get("status") in {"partial_provider_invalid", "partial_provider_unavailable"}
+            and deepseek_candidate_level_fail_closed
+        )
+    )
     claim_nodes = _load_claim_nodes(run_date)
     claim_edges = _load_claim_edges(run_date)
     tensions = _load_speculative_tensions(run_date)
@@ -304,7 +312,7 @@ def decide(
         baseline_table = baseline_tables.get(cid)
         pilot_plan = _pilot_plan(run_date, item)
         blocks: list[str] = []
-        if deepseek_payload.get("status") != "success" or not deepseek_provider.get("provider_backed"):
+        if not deepseek_stage_usable:
             blocks.append("deepseek_not_provider_backed_success")
         if not deepseek or deepseek.get("status") != "success":
             blocks.append("deepseek_status_not_success")

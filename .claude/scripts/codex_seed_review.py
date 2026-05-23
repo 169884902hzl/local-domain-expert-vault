@@ -2826,6 +2826,9 @@ def execution_review(run_date: str, *, dry_run: bool, provider_review_json: str 
             "boundary": "Field presence or polished prose is not an execution review and cannot promote.",
         }
         provider_status["provider_error"] = provider_payload.get("_provider_error", "codex_execution_provider_unavailable")
+        if reviews:
+            provider_status["fallback_reviews_fail_closed"] = True
+            provider_status["provider_fallback_count"] = len(reviews)
     payload = {
         "schema_version": "codex_execution_review.v1",
         "run_date": run_date,
@@ -2836,7 +2839,11 @@ def execution_review(run_date: str, *, dry_run: bool, provider_review_json: str 
         "boundary": "Execution review only; no files are moved and no formal seed is written.",
     }
     write_run_artifact(run_date, "codex-execution-review.json", payload, state="execution_reviewed", dry_run=dry_run)
-    return {"status": payload["status"], "reviews": str(len(reviews))}
+    return {
+        "status": payload["status"],
+        "reviews": str(len(reviews)),
+        "fallback_reviews_fail_closed": str(bool(provider_status.get("fallback_reviews_fail_closed"))).lower(),
+    }
 
 
 def main() -> int:
@@ -2911,7 +2918,11 @@ def main() -> int:
         safe_print(json.dumps(result, ensure_ascii=False, indent=2))
     else:
         safe_print(" ".join(f"{key}={value}" for key, value in result.items()))
-    if args.command == "execution-review" and result.get("status") != "success":
+    if (
+        args.command == "execution-review"
+        and result.get("status") != "success"
+        and result.get("fallback_reviews_fail_closed") != "true"
+    ):
         return 2
     return 0
 

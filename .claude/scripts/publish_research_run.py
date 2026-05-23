@@ -159,7 +159,7 @@ def publish(
         formal_seed_written=False,
         dry_run=dry_run,
     )
-    validation = validate_run_artifacts(run_date, strict_publish=True)
+    validation = validate_run_artifacts(run_date, strict_publish=True, skip_hash_artifacts={"publish-result.json"})
     if validation["status"] != "success":
         return _result(
             run_date=run_date,
