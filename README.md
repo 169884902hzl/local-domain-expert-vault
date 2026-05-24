@@ -761,7 +761,7 @@ python .claude/scripts/daily_arxiv_pipeline.py `
   --idea-mode gemini-divergent `
   --idea-timeout 1200 `
   --gemini-model gemini-3.1-pro-preview `
-  --read-timeout 2700
+  --read-timeout 4200
 ```
 
 输出通常写入：

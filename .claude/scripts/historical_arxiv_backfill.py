@@ -296,7 +296,7 @@ def main() -> int:
     parser.add_argument("--fetch-retries", type=int, default=1)
     parser.add_argument("--query-delay", type=float, default=3.2)
     parser.add_argument("--skip-read", action="store_true")
-    parser.add_argument("--read-timeout", type=int, default=3600)
+    parser.add_argument("--read-timeout", type=int, default=4200)
     return run_backfill(parser.parse_args())
 
 

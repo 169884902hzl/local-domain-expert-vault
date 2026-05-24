@@ -188,7 +188,7 @@ try {
     "--max-deep-read",
     "4",
     "--read-timeout",
-    "2700",
+    "4200",
     "--read-retries",
     "1",
     "--read-retry-delay",

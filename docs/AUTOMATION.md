@@ -263,7 +263,7 @@ python .claude/scripts/daily_arxiv_pipeline.py `
   --raw-candidate-limit 8 `
   --min-raw-candidates 6 `
   --max-generated 3 `
-  --read-timeout 2700 `
+  --read-timeout 4200 `
   --read-retries 1 `
   --read-retry-delay 90
 ```

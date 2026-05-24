@@ -2719,7 +2719,7 @@ def main() -> int:
     parser.add_argument("--max-read", type=int, default=None, help="Maximum newly created imports to deep-read. Defaults to --min-new-imports so every new daily import is read.")
     parser.add_argument("--resume-backlog", action="store_true", help="Resume reading Zotero keys listed in the run-date reading backlog instead of importing new papers.")
     parser.add_argument("--skip-read", action="store_true", help="Import and ingest but do not invoke Claude reading.")
-    parser.add_argument("--read-timeout", type=int, default=2700)
+    parser.add_argument("--read-timeout", type=int, default=4200)
     parser.add_argument("--read-retries", type=int, default=1, help="Retry failed Claudian reads this many extra times before marking failed.")
     parser.add_argument("--read-retry-delay", type=int, default=90, help="Seconds to wait between failed Claudian read attempts.")
     parser.add_argument("--read-failure-backfill", type=int, default=5, help="Extra candidate read slots used to replace failed Claudian reads before ending the daily run.")
