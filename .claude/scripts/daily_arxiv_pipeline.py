@@ -8,6 +8,7 @@ import re
 import subprocess
 import sys
 import time
+import uuid
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -69,6 +70,51 @@ COVERAGE_DOMAIN_LABELS = {
     "dlo",
     "bimanual",
 }
+STAGED_READ_VERSION = 1
+STAGED_READ_STAGES = [
+    (
+        "01-evidence-metadata",
+        "Evidence Metadata, source coverage, reading boundary",
+        "Inspect the local literature note and available full text. Write Fulltext Quality, Evidence Coverage, Confidence, source/section/table/figure coverage, and a concrete one-sentence Chinese summary. Do not write the final analysis yet.",
+    ),
+    (
+        "02-core-paper",
+        "Problem, contributions, method",
+        "Use the source evidence plus previous stage files. Write Problem, Key Contributions, and Method with claim_id references. Keep unsupported claims explicitly not_evidenced.",
+    ),
+    (
+        "03-evidence-ledger",
+        "Experiments, limitations, Evidence Ledger",
+        "Use the source evidence plus previous stage files. Write Experiments, Limitations, and the complete Evidence Ledger table. Numeric claims require concrete anchors or result_row_unconfirmed / figure_approximation with requires_human_check.",
+    ),
+    (
+        "04-review-pressure",
+        "Key takeaways, IF packets, baseline, transfer, no-hardware test",
+        "Use the previous stage files. Write Key Takeaways, Idea Fuel IF packets, Baseline Pressure, Transfer Risk, No-hardware Micro-test, Evidence Gaps, 结构化提取, and 本地引用关系. Treat Idea Fuel as screening-only review pressure.",
+    ),
+    (
+        "05-assemble-final-analysis",
+        "Assemble complete strict analysis",
+        "Read all previous stage files and synthesize one complete strict analysis file. The final file must contain every required section and must be coherent as a standalone deep reading. Do not run finalize_reading.py; the pipeline will run it after this stage.",
+    ),
+]
+STAGED_REQUIRED_FINAL_SECTIONS = [
+    "## Evidence Metadata",
+    "## Problem",
+    "## Key Contributions",
+    "## Method",
+    "## Experiments",
+    "## Limitations",
+    "## Key Takeaways",
+    "## Evidence Ledger",
+    "## Idea Fuel",
+    "## Baseline Pressure",
+    "## Transfer Risk",
+    "## No-hardware Micro-test",
+    "## Evidence Gaps",
+    "## 结构化提取",
+    "## 本地引用关系",
+]
 
 
 def _entry_text(entry: ET.Element, name: str) -> str:
@@ -1228,6 +1274,158 @@ def read_paper_prompt(zotero_key: str) -> str:
     return template.replace("$ARGUMENTS", zotero_key)
 
 
+def staged_read_root(zotero_key: str, *, attempt: int) -> Path:
+    safe_key = re.sub(r"[^A-Za-z0-9_.-]+", "_", zotero_key) or "unknown"
+    return vault_path("raw", "readings", "_staged", safe_key, f"attempt-{attempt}")
+
+
+def staged_session_id(zotero_key: str, *, attempt: int) -> str:
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"local-domain-expert-vault:staged-read:{zotero_key}:attempt:{attempt}"))
+
+
+def _rel(path: Path) -> str:
+    return str(path.relative_to(vault_path())).replace("\\", "/")
+
+
+def _stage_output_path(stage_dir: Path, stage_id: str) -> Path:
+    return stage_dir / f"{stage_id}.md"
+
+
+def _stage_log_path(stage_dir: Path, stage_id: str, suffix: str) -> Path:
+    return stage_dir / "logs" / f"{stage_id}.{suffix}.log"
+
+
+def _staged_manifest_path(stage_dir: Path) -> Path:
+    return stage_dir / "manifest.json"
+
+
+def _read_staged_manifest(stage_dir: Path) -> dict[str, Any]:
+    path = _staged_manifest_path(stage_dir)
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        return payload if isinstance(payload, dict) else {}
+    except Exception:
+        return {}
+
+
+def _write_staged_manifest(stage_dir: Path, payload: dict[str, Any]) -> str:
+    stage_dir.mkdir(parents=True, exist_ok=True)
+    payload["updated_at"] = datetime.now(timezone.utc).isoformat()
+    path = _staged_manifest_path(stage_dir)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return _rel(path)
+
+
+def _stage_complete(path: Path) -> bool:
+    if not path.exists() or not path.is_file():
+        return False
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    return len(text.strip()) >= 500
+
+
+def _final_analysis_path(zotero_key: str) -> Path:
+    return vault_path("raw", "readings", f"{zotero_key}-analysis.md")
+
+
+def _final_analysis_has_required_sections(path: Path) -> tuple[bool, list[str]]:
+    if not path.exists() or not path.is_file():
+        return False, ["missing_final_analysis"]
+    text = path.read_text(encoding="utf-8")
+    missing = [section for section in STAGED_REQUIRED_FINAL_SECTIONS if section not in text]
+    if len(text.strip()) < 2000:
+        missing.append("final_analysis_too_short")
+    return not missing, missing
+
+
+def staged_read_prompt(
+    *,
+    zotero_key: str,
+    session_id: str,
+    stage_id: str,
+    stage_title: str,
+    stage_instruction: str,
+    stage_path: Path,
+    stage_dir: Path,
+    prior_paths: list[Path],
+    final_analysis_path: Path,
+) -> str:
+    prior_block = "\n".join(f"- {_rel(path)}" for path in prior_paths) if prior_paths else "- none"
+    final_sections = "\n".join(f"- {section}" for section in STAGED_REQUIRED_FINAL_SECTIONS)
+    final_instruction = ""
+    if stage_id == "05-assemble-final-analysis":
+        final_instruction = f"""
+
+Assembly requirement:
+- Read all prior stage files listed above.
+- Write the complete final analysis to `{_rel(final_analysis_path)}`.
+- The final analysis must include these top-level sections exactly:
+{final_sections}
+- Also write a short assembly status note to `{_rel(stage_path)}`.
+- Do not run `finalize_reading.py`, `audit_kb.py`, Gemini, DeepSeek, Codex review, formal seed, or active seed. The pipeline will run finalization and target-note audit after this stage.
+"""
+    return f"""Continue the same staged strict /read-paper workflow.
+
+Zotero key: {zotero_key}
+Claude session id: {session_id}
+Current stage: {stage_id} - {stage_title}
+
+This is a checkpointed staged read. Do not restart the whole paper from scratch if prior stage files exist. Use the prior stage files as explicit conversation memory and continue from them.
+
+Before writing this stage, read `.claude/commands/read-paper.md` and obey that strict /read-paper contract. The staged instruction only splits the work into checkpoints; it does not weaken any required field, Evidence Ledger rule, IF packet rule, no-hardware rule, target-note audit expectation, or safety boundary.
+
+Prior stage files:
+{prior_block}
+
+Write this stage output to:
+- {_rel(stage_path)}
+
+Current stage instruction:
+{stage_instruction}
+
+Strict boundaries:
+- Use Chinese for analysis prose and English for technical terms.
+- Every research-facing claim must be anchored to Evidence Ledger claim_id or explicitly marked not_evidenced / screening_only.
+- Do not mark the note done by direct editing.
+- Do not write formal seeds, active seeds, governance ledger records, or production research-seed records.
+- Do not fetch multiple papers. This stage is only for {zotero_key}.
+- Keep Idea Fuel as adversarial review pressure, not confirmed evidence.
+- No-hardware Micro-test must explicitly state: no robot, no real scene, no new data collection.
+{final_instruction}
+
+Return a concise stage completion report after writing the required file(s)."""
+
+
+def _claude_command(
+    prompt: str,
+    *,
+    session_id: str | None = None,
+    allow_dangerous_claude: bool = False,
+) -> tuple[list[str], dict[str, str]]:
+    command = ["claude"]
+    dangerous_claude = allow_dangerous_claude or os.environ.get(DANGEROUS_CLAUDE_ENV, "").lower() in {"1", "true", "yes", "on"}
+    env_overrides: dict[str, str] = {}
+    if dangerous_claude:
+        command.extend(
+            [
+                "--dangerously-skip-permissions",
+                "--permission-mode",
+                "bypassPermissions",
+                "--allowedTools",
+                "Read,Write,Edit,MultiEdit,Glob,Grep,LS,Bash",
+            ]
+        )
+        env_overrides["CLAUDE_CODE_SUBPROCESS_ENV_SCRUB"] = "0"
+    if session_id:
+        command.extend(["--session-id", session_id])
+    command.extend(["--print", prompt])
+    return command, env_overrides
+
+
 def _write_read_attempt_log(
     *,
     run_date: str,
@@ -1409,6 +1607,7 @@ def _write_read_heartbeat(
     pid: int,
     status: str,
     timeout: int,
+    stage: str = "",
 ) -> str:
     log_dir = vault_path("projects", "arxiv-daily", "read-logs", run_date)
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -1419,6 +1618,7 @@ def _write_read_heartbeat(
         "attempt": attempt,
         "pid": pid,
         "status": status,
+        "stage": stage,
         "timeout_sec": timeout,
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -1462,21 +1662,7 @@ def read_zotero_key(
     allow_dangerous_claude: bool = False,
 ) -> tuple[str, str, dict[str, Any]]:
     prompt = read_paper_prompt(zotero_key)
-    command = ["claude"]
-    dangerous_claude = allow_dangerous_claude or os.environ.get(DANGEROUS_CLAUDE_ENV, "").lower() in {"1", "true", "yes", "on"}
-    env_overrides: dict[str, str] = {}
-    if dangerous_claude:
-        command.extend(
-            [
-                "--dangerously-skip-permissions",
-                "--permission-mode",
-                "bypassPermissions",
-                "--allowedTools",
-                "Read,Write,Edit,MultiEdit,Glob,Grep,LS,Bash",
-            ]
-        )
-        env_overrides["CLAUDE_CODE_SUBPROCESS_ENV_SCRUB"] = "0"
-    command.extend(["--print", prompt])
+    command, env_overrides = _claude_command(prompt, allow_dangerous_claude=allow_dangerous_claude)
     heartbeat_path = ""
 
     def heartbeat(pid: int) -> None:
@@ -1539,6 +1725,213 @@ def read_zotero_key(
     return f"failed:{reason}", output + verification, log_paths
 
 
+def read_zotero_key_staged(
+    zotero_key: str,
+    *,
+    timeout: int = 4200,
+    run_date: str = "",
+    attempt: int = 1,
+    allow_dangerous_claude: bool = False,
+) -> tuple[str, str, dict[str, Any]]:
+    stage_dir = staged_read_root(zotero_key, attempt=attempt)
+    stage_dir.mkdir(parents=True, exist_ok=True)
+    (stage_dir / "logs").mkdir(parents=True, exist_ok=True)
+    session_id = staged_session_id(zotero_key, attempt=attempt)
+    final_analysis_path = _final_analysis_path(zotero_key)
+    manifest = _read_staged_manifest(stage_dir)
+    manifest.update(
+        {
+            "schema_version": "staged_read_manifest.v1",
+            "staged_read_version": STAGED_READ_VERSION,
+            "zotero_key": zotero_key,
+            "attempt": attempt,
+            "session_id": session_id,
+            "stage_dir": _rel(stage_dir),
+            "final_analysis_path": _rel(final_analysis_path),
+        }
+    )
+    manifest.setdefault("stages", [])
+    manifest_path = _write_staged_manifest(stage_dir, manifest)
+    outputs: list[str] = [
+        f"STAGED_READ_START key={zotero_key} attempt={attempt} session_id={session_id} stage_dir={_rel(stage_dir)}",
+    ]
+    stderr_parts: list[str] = []
+    stage_records: list[dict[str, Any]] = []
+    completed_stage_paths: list[Path] = []
+    heartbeat_path = ""
+    stage_timeout = max(600, min(1200, max(600, timeout // 3)))
+
+    def heartbeat(pid: int, stage_id: str) -> None:
+        nonlocal heartbeat_path
+        if run_date:
+            heartbeat_path = _write_read_heartbeat(
+                run_date=run_date,
+                zotero_key=zotero_key,
+                attempt=attempt,
+                pid=pid,
+                status="running",
+                timeout=stage_timeout,
+                stage=stage_id,
+            )
+
+    for stage_id, stage_title, stage_instruction in STAGED_READ_STAGES:
+        stage_path = _stage_output_path(stage_dir, stage_id)
+        final_ok, final_missing = _final_analysis_has_required_sections(final_analysis_path)
+        if stage_id != "05-assemble-final-analysis" and _stage_complete(stage_path):
+            outputs.append(f"STAGED_STAGE_SKIP stage={stage_id} reason=existing_stage_file path={_rel(stage_path)}")
+            completed_stage_paths.append(stage_path)
+            stage_records.append({"stage": stage_id, "status": "skipped_existing", "path": _rel(stage_path)})
+            continue
+        if stage_id == "05-assemble-final-analysis" and _stage_complete(stage_path) and final_ok:
+            outputs.append(f"STAGED_STAGE_SKIP stage={stage_id} reason=existing_final_analysis path={_rel(final_analysis_path)}")
+            stage_records.append(
+                {
+                    "stage": stage_id,
+                    "status": "skipped_existing",
+                    "path": _rel(stage_path),
+                    "final_analysis": _rel(final_analysis_path),
+                }
+            )
+            continue
+
+        prompt = staged_read_prompt(
+            zotero_key=zotero_key,
+            session_id=session_id,
+            stage_id=stage_id,
+            stage_title=stage_title,
+            stage_instruction=stage_instruction,
+            stage_path=stage_path,
+            stage_dir=stage_dir,
+            prior_paths=completed_stage_paths,
+            final_analysis_path=final_analysis_path,
+        )
+        command, env_overrides = _claude_command(
+            prompt,
+            session_id=session_id,
+            allow_dangerous_claude=allow_dangerous_claude,
+        )
+        try:
+            code, stdout, stderr = run_subprocess_capture(
+                command,
+                timeout=stage_timeout,
+                heartbeat=(lambda pid, stage_id=stage_id: heartbeat(pid, stage_id)) if run_date else None,
+                heartbeat_interval=60,
+                env_overrides=env_overrides or None,
+            )
+        except FileNotFoundError:
+            return "failed", "claude CLI not found", {"staged_manifest": manifest_path}
+        stdout_path = _stage_log_path(stage_dir, stage_id, "out")
+        stderr_path = _stage_log_path(stage_dir, stage_id, "err")
+        stdout_path.parent.mkdir(parents=True, exist_ok=True)
+        stdout_path.write_text(stdout or "", encoding="utf-8")
+        stderr_path.write_text(stderr or "", encoding="utf-8")
+        outputs.append(
+            f"STAGED_STAGE_DONE stage={stage_id} exit_code={code} out={_rel(stdout_path)} err={_rel(stderr_path)}"
+        )
+        if stderr:
+            stderr_parts.append(f"--- {stage_id} STDERR ---\n{stderr}")
+
+        stage_ok = _stage_complete(stage_path)
+        final_ok, final_missing = _final_analysis_has_required_sections(final_analysis_path)
+        if stage_id != "05-assemble-final-analysis":
+            success = code == 0 and stage_ok
+            missing_reason = [] if stage_ok else ["missing_or_too_short_stage_file"]
+        else:
+            success = code == 0 and stage_ok and final_ok
+            missing_reason = final_missing
+            if not stage_ok:
+                missing_reason = ["missing_or_too_short_assemble_stage_file", *missing_reason]
+        record = {
+            "stage": stage_id,
+            "status": "success" if success else "failed",
+            "exit_code": code,
+            "path": _rel(stage_path),
+            "stdout": _rel(stdout_path),
+            "stderr": _rel(stderr_path),
+            "missing": missing_reason,
+        }
+        if stage_id == "05-assemble-final-analysis":
+            record["final_analysis"] = _rel(final_analysis_path)
+        stage_records.append(record)
+        manifest["stages"] = stage_records
+        manifest_path = _write_staged_manifest(stage_dir, manifest)
+        if not success:
+            summary_log = _write_read_attempt_log(
+                run_date=run_date or today_iso(),
+                zotero_key=zotero_key,
+                attempt=attempt,
+                stdout="\n".join(outputs),
+                stderr="\n\n".join(stderr_parts + [f"STAGED_STAGE_FAILED stage={stage_id} missing={missing_reason}"]),
+            )
+            if heartbeat_path:
+                summary_log["heartbeat"] = heartbeat_path
+            summary_log.update(
+                {
+                    "staged_manifest": manifest_path,
+                    "staged_session_id": session_id,
+                    "staged_dir": _rel(stage_dir),
+                    "stages": stage_records,
+                }
+            )
+            reason = "timeout" if code == 124 else "staged_stage_failed"
+            return f"failed:{reason}", "\n".join(outputs), summary_log
+        completed_stage_paths.append(stage_path)
+
+    finalize_cmd = [
+        sys.executable,
+        ".claude/scripts/finalize_reading.py",
+        zotero_key,
+        "--analysis",
+        _rel(final_analysis_path),
+    ]
+    finalize_code, finalize_stdout, finalize_stderr = run_subprocess_capture(finalize_cmd, timeout=420)
+    finalize_out_path = stage_dir / "logs" / "finalize.out.log"
+    finalize_err_path = stage_dir / "logs" / "finalize.err.log"
+    finalize_out_path.write_text(finalize_stdout or "", encoding="utf-8")
+    finalize_err_path.write_text(finalize_stderr or "", encoding="utf-8")
+    outputs.append(
+        f"STAGED_FINALIZE exit_code={finalize_code} out={_rel(finalize_out_path)} err={_rel(finalize_err_path)}"
+    )
+    if finalize_stderr:
+        stderr_parts.append(f"--- FINALIZE STDERR ---\n{finalize_stderr}")
+    note_status, note_path = local_note_status(zotero_key)
+    verification = f"\nREAD_VERIFY: note={note_path or '-'} status={note_status}"
+    summary_log = _write_read_attempt_log(
+        run_date=run_date or today_iso(),
+        zotero_key=zotero_key,
+        attempt=attempt,
+        stdout="\n".join(outputs) + verification,
+        stderr="\n\n".join(stderr_parts),
+    )
+    if heartbeat_path:
+        summary_log["heartbeat"] = heartbeat_path
+    summary_log.update(
+        {
+            "staged_manifest": manifest_path,
+            "staged_session_id": session_id,
+            "staged_dir": _rel(stage_dir),
+            "stages": stage_records,
+            "final_analysis": _rel(final_analysis_path),
+        }
+    )
+    if finalize_code != 0:
+        return "failed:finalize_reading", "\n".join(outputs) + verification, summary_log
+    if note_status != "done":
+        reason = _read_failure_reason("\n".join(outputs), note_status)
+        return f"failed:{reason}", "\n".join(outputs) + verification, summary_log
+    audit_status, audit_output, audit_fields = run_target_note_audit(zotero_key, run_date=run_date, attempt=attempt)
+    summary_log.update(audit_fields)
+    output = "\n".join(outputs) + verification + audit_output
+    if audit_status != "passed":
+        return "failed:target_note_audit", output, summary_log
+    manifest["status"] = "success_done"
+    manifest["target_note_audit_status"] = "passed"
+    manifest["audit_json_path"] = audit_fields.get("audit_json_path", "")
+    manifest_path = _write_staged_manifest(stage_dir, manifest)
+    summary_log["staged_manifest"] = manifest_path
+    return "success_done", output, summary_log
+
+
 def read_zotero_key_timed(
     zotero_key: str,
     *,
@@ -1547,13 +1940,16 @@ def read_zotero_key_timed(
     max_attempts: int = 1,
     retry_delay_sec: int = 60,
     allow_dangerous_claude: bool = False,
+    read_mode: str = "staged",
 ) -> tuple[str, str, float, list[dict[str, Any]]]:
     started = time.monotonic()
     outputs: list[str] = []
     logs: list[dict[str, Any]] = []
     status = "failed:not_started"
-    for attempt in range(1, max(1, max_attempts) + 1):
-        status, output, log_paths = read_zotero_key(
+    effective_attempts = 1 if read_mode == "staged" else max(1, max_attempts)
+    for attempt in range(1, effective_attempts + 1):
+        read_func = read_zotero_key_staged if read_mode == "staged" else read_zotero_key
+        status, output, log_paths = read_func(
             zotero_key,
             timeout=timeout,
             run_date=run_date,
@@ -1562,10 +1958,10 @@ def read_zotero_key_timed(
         )
         if log_paths:
             logs.append({"attempt": str(attempt), **log_paths})
-        outputs.append(f"READ_ATTEMPT {attempt}/{max_attempts}: status={status}\n{output}")
+        outputs.append(f"READ_ATTEMPT {attempt}/{effective_attempts}: mode={read_mode} status={status}\n{output}")
         if status.startswith("success"):
             break
-        if attempt < max_attempts:
+        if attempt < effective_attempts:
             time.sleep(max(0, retry_delay_sec))
     return status, "\n\n".join(outputs), round(time.monotonic() - started, 2), logs
 
@@ -1718,7 +2114,8 @@ def render_run_log(
         if item.get("read_attempt_logs"):
             logs = "; ".join(
                 f"attempt{log.get('attempt')}:out={log.get('stdout')},err={log.get('stderr')},"
-                f"heartbeat={log.get('heartbeat', '-')},audit={log.get('audit_json_path', '-')}"
+                f"heartbeat={log.get('heartbeat', '-')},audit={log.get('audit_json_path', '-')},"
+                f"staged_manifest={log.get('staged_manifest', '-')}"
                 for log in item.get("read_attempt_logs", [])
             )
             lines.append(f"  - read_attempt_logs: {logs}")
@@ -1845,7 +2242,8 @@ def render_resume_log(
         if item.get("read_attempt_logs"):
             logs = "; ".join(
                 f"attempt{log.get('attempt')}:out={log.get('stdout')},err={log.get('stderr')},"
-                f"heartbeat={log.get('heartbeat', '-')},audit={log.get('audit_json_path', '-')}"
+                f"heartbeat={log.get('heartbeat', '-')},audit={log.get('audit_json_path', '-')},"
+                f"staged_manifest={log.get('staged_manifest', '-')}"
                 for log in item.get("read_attempt_logs", [])
             )
             lines.append(f"  - read_attempt_logs: {logs}")
@@ -1951,6 +2349,7 @@ def run_resume_backlog(args: argparse.Namespace) -> int:
             f"run_date={run_date} "
             f"pending={len(pending_records)} "
             f"max_read={args.max_read} "
+            f"read_mode={args.read_mode} "
             f"read_retries={args.read_retries}"
         )
         for record, note_status, note_path in pending_records[: max(1, args.max_read)]:
@@ -2018,6 +2417,7 @@ def run_resume_backlog(args: argparse.Namespace) -> int:
                 max_attempts=args.read_retries + 1,
                 retry_delay_sec=args.read_retry_delay,
                 allow_dangerous_claude=args.allow_dangerous_claude,
+                read_mode=args.read_mode,
             )
         elif note_status == "missing_note" and ingest_status == "success" and not args.skip_read:
             read_status = "waiting_local_note"
@@ -2416,6 +2816,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
                         max_attempts=args.read_retries + 1,
                         retry_delay_sec=args.read_retry_delay,
                         allow_dangerous_claude=args.allow_dangerous_claude,
+                        read_mode=args.read_mode,
                     )
                 else:
                     read_status = "backlog"
@@ -2503,6 +2904,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
                     max_attempts=args.read_retries + 1,
                     retry_delay_sec=args.read_retry_delay,
                     allow_dangerous_claude=args.allow_dangerous_claude,
+                    read_mode=args.read_mode,
                 )
             elif note_status == "missing_note" and ingest_status == "success" and not args.skip_read:
                 read_status = "waiting_local_note"
@@ -2720,7 +3122,8 @@ def main() -> int:
     parser.add_argument("--resume-backlog", action="store_true", help="Resume reading Zotero keys listed in the run-date reading backlog instead of importing new papers.")
     parser.add_argument("--skip-read", action="store_true", help="Import and ingest but do not invoke Claude reading.")
     parser.add_argument("--read-timeout", type=int, default=4200)
-    parser.add_argument("--read-retries", type=int, default=1, help="Retry failed Claudian reads this many extra times before marking failed.")
+    parser.add_argument("--read-mode", choices=["staged", "single"], default="staged", help="Use checkpointed staged reading by default; single keeps the legacy one-shot /read-paper call.")
+    parser.add_argument("--read-retries", type=int, default=0, help="Retry failed one-shot Claudian reads this many extra times. Staged reads resume by stage and do not whole-paper retry.")
     parser.add_argument("--read-retry-delay", type=int, default=90, help="Seconds to wait between failed Claudian read attempts.")
     parser.add_argument("--read-failure-backfill", type=int, default=5, help="Extra candidate read slots used to replace failed Claudian reads before ending the daily run.")
     parser.add_argument(

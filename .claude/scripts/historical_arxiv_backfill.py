@@ -12,7 +12,7 @@ from daily_arxiv_pipeline import (
     collect_candidates,
     exclude_existing_candidates,
     ingest_zotero_key,
-    read_zotero_key,
+    read_zotero_key_staged,
     run_subprocess,
     write_jsonl,
 )
@@ -109,6 +109,8 @@ def render_report(
             lines.append(f"  - target_note_issues: {item.get('target_note_issues')}")
         if item.get("global_warning_counts"):
             lines.append(f"  - global_warning_counts: {item.get('global_warning_counts')}")
+        if item.get("staged_manifest"):
+            lines.append(f"  - staged_manifest: {item.get('staged_manifest')}")
     lines.extend(["", "## Existing Excluded Sample", ""])
     if not existing_candidates:
         lines.append("- none")
@@ -222,7 +224,7 @@ def run_backfill(args: argparse.Namespace) -> int:
         read_output = ""
         read_log_paths: dict[str, Any] = {}
         if not args.skip_read and ingest_status == "success":
-            read_status, read_output, read_log_paths = read_zotero_key(
+            read_status, read_output, read_log_paths = read_zotero_key_staged(
                 result.zotero_key,
                 timeout=args.read_timeout,
                 run_date=run_date,
@@ -239,6 +241,8 @@ def run_backfill(args: argparse.Namespace) -> int:
                 "global_warning_counts": read_log_paths.get("global_warning_counts", {}),
                 "global_warning_paths": read_log_paths.get("global_warning_paths", {}),
                 "audit_json_path": read_log_paths.get("audit_json_path", ""),
+                "staged_manifest": read_log_paths.get("staged_manifest", ""),
+                "final_analysis": read_log_paths.get("final_analysis", ""),
             }
         )
         if ingest_status != "success":

@@ -2857,6 +2857,15 @@ def bad(source, recommended):
         self.assertNotIn('"--deepseek-provider", "none"', text)
         self.assertNotIn('"--codex-execution-provider", "none"', text)
 
+    def test_run_daily_wrapper_uses_staged_read_without_whole_paper_retry(self) -> None:
+        wrapper = SCRIPTS_DIR / "run_daily_arxiv_task.ps1"
+        text = wrapper.read_text(encoding="utf-8")
+        self.assertIn('"--read-mode"', text)
+        self.assertIn('"staged"', text)
+        self.assertIn('"--read-retries"', text)
+        self.assertIn('"0"', text)
+        self.assertNotIn('"--read-retries",\n    "1"', text)
+
     def test_jsonschema_draft202012_validator_path_is_active(self) -> None:
         self.assertTrue(schema_validator_available())
         bad_payload = {

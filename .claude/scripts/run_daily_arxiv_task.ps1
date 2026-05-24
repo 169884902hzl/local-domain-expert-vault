@@ -189,8 +189,10 @@ try {
     "4",
     "--read-timeout",
     "4200",
+    "--read-mode",
+    "staged",
     "--read-retries",
-    "1",
+    "0",
     "--read-retry-delay",
     "90"
   )
