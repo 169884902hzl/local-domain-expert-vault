@@ -421,6 +421,10 @@ def non_negated_hits(text: str, tokens: list[str]) -> list[str]:
         "不使用",
         "不包含",
         "不做",
+        "不宣称",
+        "不声称",
+        "不评估",
+        "不验证",
     ]
     hits = []
     for token in tokens:
@@ -470,7 +474,7 @@ def claim_id_references(value: str) -> list[str]:
             continue
         if normalized.startswith("if_"):
             continue
-        if any(char.isdigit() for char in token) and ("-" in token or "_" in token or token[:1].upper() == "C"):
+        if token[:1].upper() == "C" and any(char.isdigit() for char in token):
             refs.append(token)
     return refs
 
@@ -507,10 +511,10 @@ def enough_material_for_three_idea_packets(evidence_ledger: str, idea_fuel: str)
 
 
 def protocol_step_count(protocol: str) -> int:
-    numbered = re.findall(r"(?:^|[;\n]\s*)(?:step\s*)?\d{1,2}[\).:]", protocol, flags=re.IGNORECASE)
+    numbered = re.findall(r"(?:^|[;；\n]\s*)(?:step\s*)?\d{1,2}[\).:]", protocol, flags=re.IGNORECASE)
     if numbered:
         return len(numbered)
-    semicolon_steps = [part for part in re.split(r";", protocol) if part.strip()]
+    semicolon_steps = [part for part in re.split(r"[;；]", protocol) if part.strip()]
     return len(semicolon_steps) if len(semicolon_steps) >= 3 else 0
 
 
@@ -604,7 +608,9 @@ NUMERIC_RESULT_TERMS = {
 
 def line_has_numeric_result_claim(line: str) -> bool:
     stripped = line.strip()
-    if not stripped or stripped.startswith("|"):
+    if not stripped or stripped.startswith("|") or stripped.startswith("#"):
+        return False
+    if re.match(r"^\*{0,2}\s*(step|步骤|阶段)\s*\d+", stripped, flags=re.IGNORECASE):
         return False
     text_without_ids = re.sub(r"\b[A-Za-z]+-[A-Za-z0-9_-]*\b", "", stripped)
     has_number = bool(re.search(r"\b\d+(?:\.\d+)?\s*(?:%|x|ms|s|m|cm|mm|points?|pts)?\b", text_without_ids))
@@ -620,7 +626,7 @@ def line_has_claim_id_or_anchor(line: str, known_claim_ids: set[str]) -> bool:
         return True
     return bool(
         re.search(
-            r"\b(table|figure|fig\.?|result_row|section|appendix|page|p\.)\s*[a-z]?\d+\b",
+            r"\b(table|figure|fig\.?|result_row|section|appendix|page|p\.)\s*(?:[a-z]?\d+|[ivxlcdm]+)\b",
             line,
             flags=re.IGNORECASE,
         )

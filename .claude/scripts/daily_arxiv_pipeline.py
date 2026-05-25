@@ -2255,6 +2255,7 @@ Hard source boundary:
 - Do not inspect the vault. Do not read any file. The orchestrator already supplied the only allowed source text.
 - If the supplied fulltext lacks evidence for a claim, write `not_evidenced`; do not infer from outside knowledge.
 - Do not run `finalize_reading.py`, `audit_kb.py`, Gemini, DeepSeek, Codex review, formal seed, active seed, or governance scripts.
+- Do not include a final report about whether `finalize_reading.py` or `audit_kb.py` ran. The orchestrator will run and report those checks after your markdown is produced.
 
 Output requirement:
 - Print the complete final analysis markdown only.
@@ -2262,6 +2263,12 @@ Output requirement:
 - The final markdown must include these top-level sections exactly:
 {final_sections}
 - It must satisfy the strict /read-paper contract below, including Evidence Ledger, IF packets, baseline pressure, transfer risk, no-hardware micro-test, 结构化提取, and 本地引用关系.
+- Machine-parseable strictness overrides prose style:
+  - Do not put the raw `|` character inside any Markdown table cell; replace formulas like `A||B` with `A double-bar B` or prose.
+  - Every Evidence Ledger `evidence_class` and every IF packet `Evidence class` must be exactly one token: `pdf_verified`, `table_verified`, `figure_verified`, `appendix_verified`, `result_row_unconfirmed`, `figure_approximation`, `note_derived`, `abstract_only`, or `not_evidenced`.
+  - Never write combined evidence classes such as `pdf_verified + table_verified`, `pdf_verified/table_verified`, or any other combined evidence class.
+  - Every IF packet and global no-hardware `Protocol` must use 3-6 numbered steps on separate lines, not one semicolon-separated line.
+  - In no-hardware micro-test sections, use the exact English confirmation `no robot; no real scene; no new data collection`; avoid Chinese hardware words such as `机器人`, `实机`, `机械臂`, `真实场景`.
 - Use Chinese prose and keep technical terms in English.
 - Every research-facing claim must be anchored to an Evidence Ledger claim_id or explicitly marked `not_evidenced` / `screening_only`.
 - Idea Fuel is adversarial review pressure, not confirmed evidence.
@@ -2277,6 +2284,18 @@ ZOTERO_FULLTEXT_BEGIN
 {fulltext}
 ZOTERO_FULLTEXT_END
 """
+
+
+def strip_controlled_read_orchestrator_status(text: str) -> str:
+    cleaned: list[str] = []
+    for line in text.splitlines():
+        lowered = line.lower()
+        if "finalize_reading.py" in lowered or "audit_kb.py" in lowered:
+            continue
+        if line.strip().lower().startswith("- governance status:"):
+            continue
+        cleaned.append(line)
+    return "\n".join(cleaned).strip() + "\n"
 
 
 def staged_read_prompt(
@@ -3223,6 +3242,8 @@ def read_zotero_key_codex_controlled(
     else:
         final_text = stdout
         codex_output_path.write_text(final_text or "", encoding="utf-8")
+    final_text = strip_controlled_read_orchestrator_status(final_text or "")
+    codex_output_path.write_text(final_text, encoding="utf-8")
     outputs.append(
         f"CODEX_CONTROLLED_DONE exit_code={code} out={_rel(stdout_path)} err={_rel(stderr_path)} final={_rel(codex_output_path)}"
     )

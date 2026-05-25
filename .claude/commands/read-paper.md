@@ -113,11 +113,23 @@ Section template to append after existing content:
 ## Key Takeaways
 
 ## Evidence Ledger
+Table safety rules:
+- Do not put the raw `|` character inside any table cell. Replace formulas such as `A||B` with `A double-bar B` or prose.
+- `evidence_class` must be exactly one allowed token, never a combined value.
+- Allowed evidence_class values: `pdf_verified`, `table_verified`, `figure_verified`, `appendix_verified`, `result_row_unconfirmed`, `figure_approximation`, `note_derived`, `abstract_only`, `not_evidenced`.
+- `anchor_type` must be exactly one allowed token: `section`, `table`, `figure`, `appendix`, `result_row`, `snippet`, `abstract`, `note_only`.
+
 | claim_id | claim_type | claim | evidence_class | anchor_type | anchor | page/section/table/figure/appendix | confidence | downstream_use |
 |---|---|---|---|---|---|---|---|---|
 | C1 | problem | ... | pdf_verified | section | Section 1 | Section 1 | medium | screening_only |
 
 ## Idea Fuel
+IF packet safety rules:
+- `Evidence class` must be exactly one allowed token from the Evidence Ledger list. If evidence is mixed, choose the weakest applicable token and mention the mixed anchors in `Evidence anchor`.
+- Never write combined evidence classes such as `pdf_verified + table_verified`, `pdf_verified/table_verified`, or any other combined evidence class.
+- In each `Protocol`, write 3-6 numbered steps on separate lines. Do not place all steps on one semicolon-separated line.
+- In no-hardware micro-test text, use the exact English confirmation `no robot; no real scene; no new data collection`; avoid Chinese hardware words such as `机器人`, `实机`, `机械臂`, `真实场景`.
+
 ### IF-1
 - Hypothesis / research opening:
 - Evidence anchor: C-...
@@ -137,7 +149,10 @@ Section template to append after existing content:
 - Minimum no-hardware micro-test:
   - Artifact:
   - Input:
-  - Protocol: 1. ...; 2. ...; 3. ...
+  - Protocol:
+    1. ...
+    2. ...
+    3. ...
   - Metric:
   - Threshold:
   - Pass condition:
@@ -165,7 +180,10 @@ Section template to append after existing content:
 - Minimum no-hardware micro-test:
   - Artifact:
   - Input:
-  - Protocol: 1. ...; 2. ...; 3. ...
+  - Protocol:
+    1. ...
+    2. ...
+    3. ...
   - Metric:
   - Threshold:
   - Pass condition:
@@ -193,7 +211,10 @@ Section template to append after existing content:
 - Minimum no-hardware micro-test:
   - Artifact:
   - Input:
-  - Protocol: 1. ...; 2. ...; 3. ...
+  - Protocol:
+    1. ...
+    2. ...
+    3. ...
   - Metric:
   - Threshold:
   - Pass condition:
@@ -228,7 +249,10 @@ Section template to append after existing content:
 - Explicit exclusions: no robot; no real scene; no new data collection.
 - Test artifact:
 - Input:
-- Protocol: 1. ...; 2. ...; 3. ...
+- Protocol:
+  1. ...
+  2. ...
+  3. ...
 - Metric:
 - Threshold:
 - Pass condition:

@@ -10,7 +10,7 @@ from v03_test_helpers import SCRIPTS_DIR  # noqa: F401
 
 import audit_kb
 import research_agenda_extract as extractor
-from finalize_reading import finalize_content, validate_analysis, extract_sections
+from finalize_reading import claim_id_references, extract_sections, finalize_content, protocol_step_count, validate_analysis, validate_no_hardware_micro_test
 from kb_common import load_schema
 from research_claim_graph import build_nodes
 from research_seed_v2_common import schema_validator_available, validate_payload
@@ -82,7 +82,11 @@ GOOD_BASELINE = """- Strongest Baseline: Contact-aware planner [C-B1]
 
 GOOD_IF_MICRO_TEST = """  - Artifact: synthetic toy arrays and static metric table from paper results.
   - Input: reported Table 2 values and three fixed toy state arrays.
-  - Protocol: 1. Extract the reported rows; 2. Build toy arrays with fixed seeds; 3. Recompute ranking; 4. Compare ranking against the paper.
+  - Protocol:
+    1. Extract the reported rows.
+    2. Build toy arrays with fixed seeds.
+    3. Recompute ranking.
+    4. Compare ranking against the paper.
   - Metric: ranking consistency and absolute metric error.
   - Threshold: ranking must match exactly and error must stay below 1e-6.
   - Pass condition: Recomputed ranking matches Table 2.
@@ -317,6 +321,9 @@ class FinalizeStrictContractTest(unittest.TestCase):
         bad_baseline = GOOD_BASELINE.replace("C-B1 / Table 2", "C-Z9 / Table 2")
         with self.assertRaisesRegex(ValueError, "baseline_pressure_unknown_claim_id:C-Z9"):
             validate_analysis(extract_sections(strict_analysis(baseline=bad_baseline)), load_schema())
+
+    def test_model_names_are_not_claim_id_references(self) -> None:
+        self.assertEqual(claim_id_references("Pi-0 w/o Gaze and OpenVLA table baseline, see C36"), ["C36"])
         validate_analysis(extract_sections(strict_analysis(baseline=GOOD_BASELINE)), load_schema())
 
     def test_missing_if_packet_fails(self) -> None:
@@ -336,6 +343,11 @@ class FinalizeStrictContractTest(unittest.TestCase):
     def test_valid_if_packets_pass(self) -> None:
         validate_analysis(extract_sections(strict_analysis(top_idea=GOOD_IDEA)), load_schema())
 
+    def test_if_packet_combined_evidence_class_fails(self) -> None:
+        bad_idea = GOOD_IDEA.replace("- Evidence class: pdf_verified", "- Evidence class: pdf_verified + table_verified", 1)
+        with self.assertRaisesRegex(ValueError, "idea_fuel_packet_bad_evidence_class:IF-1"):
+            validate_analysis(extract_sections(strict_analysis(top_idea=bad_idea)), load_schema())
+
     def test_no_hardware_micro_test_missing_executable_fields_fails(self) -> None:
         bad_sections = [
             GOOD_MICRO_TEST.replace("- Metric:", "- Removed metric:", 1),
@@ -346,6 +358,26 @@ class FinalizeStrictContractTest(unittest.TestCase):
             with self.subTest(section=section):
                 with self.assertRaisesRegex(ValueError, "no_hardware_micro_test_missing|no_hardware_micro_test_protocol"):
                     validate_analysis(extract_sections(strict_analysis(micro_test=section)), load_schema())
+
+    def test_protocol_count_accepts_chinese_semicolons(self) -> None:
+        self.assertEqual(protocol_step_count("1. A；2. B；3. C；4. D"), 4)
+
+    def test_no_hardware_negated_chinese_robot_claim_is_not_requirement(self) -> None:
+        section = """- Explicit exclusions: no robot; no real scene; no new data collection.
+- Test artifact: synthetic arrays only.
+- Input: table values and toy arrays.
+- Protocol:
+  1. Build toy arrays.
+  2. Compute static metrics.
+  3. Report proxy pass/fail.
+- Metric: static metric.
+- Threshold: exact ranking match.
+- Pass condition: ranking matches.
+- Fail/kill condition: ranking fails.
+- Compute/data cap: CPU-only.
+- Note: 不宣称真实机器人效果。
+- No-hardware confirmation: no robot; no real scene; no new data collection."""
+        self.assertNotIn("no_hardware_micro_test_invalid_hardware_requirement", "\n".join(validate_no_hardware_micro_test(section)))
 
     def test_figure_approximation_is_allowed_only_as_weak_human_check_evidence(self) -> None:
         ledger = GOOD_LEDGER + "\n| C-F1 | result | Figure-estimated success is approximately 62%. | figure_approximation | figure | Figure 3 | p6 Figure 3 | low | requires_human_check |"
@@ -793,6 +825,9 @@ class ReadPaperPromptContractTest(unittest.TestCase):
         self.assertIn("## Evidence Ledger", prompt)
         self.assertIn("claim_id", prompt)
         self.assertIn("figure_approximation", prompt)
+        self.assertIn("Do not put the raw `|` character inside any table cell", prompt)
+        self.assertIn("must be exactly one allowed token", prompt)
+        self.assertIn("Never write combined evidence classes", prompt)
         self.assertIn("### IF-1", prompt)
         self.assertIn("Downstream review target", prompt)
         self.assertIn("no robot", prompt)

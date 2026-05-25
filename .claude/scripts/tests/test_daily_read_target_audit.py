@@ -478,6 +478,21 @@ class DailyReadTargetAuditTest(unittest.TestCase):
         resolver_payload = json.loads(resolver_path.read_text(encoding="utf-8"))
         self.assertEqual(resolver_payload["attachment_key"], "ATTKEY")
 
+    def test_codex_controlled_read_strips_orchestrator_status_from_final_analysis(self) -> None:
+        dirty = """## Evidence Metadata
+- Fulltext Quality: fulltext
+- finalize_reading.py: not run
+- strict-reading audit_kb.py: not run
+
+## Evidence Gaps
+- Governance status: finalize_reading.py and audit_kb.py were not run.
+"""
+        cleaned = pipeline.strip_controlled_read_orchestrator_status(dirty)
+        self.assertNotIn("finalize_reading.py", cleaned)
+        self.assertNotIn("audit_kb.py", cleaned)
+        self.assertNotIn("Governance status", cleaned)
+        self.assertIn("## Evidence Metadata", cleaned)
+
     def test_codex_controlled_read_fails_closed_without_zotero_fulltext(self) -> None:
         calls: list[list[str]] = []
 
