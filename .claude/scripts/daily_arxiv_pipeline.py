@@ -2267,8 +2267,10 @@ Output requirement:
   - Do not put the raw `|` character inside any Markdown table cell; replace formulas like `A||B` with `A double-bar B` or prose.
   - Every Evidence Ledger `evidence_class` and every IF packet `Evidence class` must be exactly one token: `pdf_verified`, `table_verified`, `figure_verified`, `appendix_verified`, `result_row_unconfirmed`, `figure_approximation`, `note_derived`, `abstract_only`, or `not_evidenced`.
   - Never write combined evidence classes such as `pdf_verified + table_verified`, `pdf_verified/table_verified`, or any other combined evidence class.
+  - Do not use `abstract` as a strong anchor for key Problem, Contribution, Method, Experiments, Limitations, Baseline, or Transfer claims. Use a concrete section/table/figure/appendix/snippet/result_row anchor, or downgrade to `abstract_only` with `screening_only`.
   - Every IF packet and global no-hardware `Protocol` must use 3-6 numbered steps on separate lines, not one semicolon-separated line.
   - In no-hardware micro-test sections, use the exact English confirmation `no robot; no real scene; no new data collection`; avoid Chinese hardware words such as `机器人`, `实机`, `机械臂`, `真实场景`.
+  - In Evidence Metadata `Summary`, every number, percentage, table result, baseline comparison, or model score must cite an Evidence Ledger claim_id in the same sentence.
 - Use Chinese prose and keep technical terms in English.
 - Every research-facing claim must be anchored to an Evidence Ledger claim_id or explicitly marked `not_evidenced` / `screening_only`.
 - Idea Fuel is adversarial review pressure, not confirmed evidence.

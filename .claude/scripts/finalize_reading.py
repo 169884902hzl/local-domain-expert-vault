@@ -426,14 +426,59 @@ def non_negated_hits(text: str, tokens: list[str]) -> list[str]:
         "不评估",
         "不验证",
     ]
+    synthetic_context_markers = [
+        "synthetic",
+        "toy",
+        "token",
+        "tokens",
+        "label",
+        "labels",
+        "array",
+        "arrays",
+        "graph",
+        "static",
+        "proxy",
+        "placeholder",
+        "合成",
+        "玩具",
+        "标签",
+        "数组",
+        "静态",
+        "代理",
+    ]
+    requirement_context_markers = [
+        "real",
+        "use",
+        "run",
+        "collect",
+        "deploy",
+        "evaluate",
+        "require",
+        "requires",
+        "physical",
+        "真实",
+        "使用",
+        "运行",
+        "采集",
+        "部署",
+        "评估",
+        "需要",
+        "物理",
+    ]
     hits = []
     for token in tokens:
         token_lower = token.lower()
         for match in re.finditer(re.escape(token_lower), lowered):
             start = max(0, match.start() - 36)
+            end = min(len(lowered), match.end() + 36)
+            window = lowered[start:end]
             context = lowered[start : match.start()]
             clause_context = re.split(r"[.;。；\n]", context)[-1]
             if any(negator in clause_context for negator in negators):
+                continue
+            if any(marker in window for marker in synthetic_context_markers) and not any(
+                marker in window for marker in requirement_context_markers
+            ):
                 continue
             hits.append(token)
             break
@@ -639,8 +684,14 @@ def validate_numeric_claims(sections: dict[str, str]) -> list[str]:
     for heading, body in sections.items():
         if heading in {"## Evidence Ledger", "## Idea Fuel", "## No-hardware Micro-test", "__strict_issue__"}:
             continue
+        section_claim_refs = set(claim_id_references(body))
+        has_section_level_claim_anchor = heading in {"## Baseline Pressure", "## Transfer Risk"} and bool(section_claim_refs & known_claim_ids)
         for line in body.splitlines():
-            if line_has_numeric_result_claim(line) and not line_has_claim_id_or_anchor(line, known_claim_ids):
+            if (
+                line_has_numeric_result_claim(line)
+                and not line_has_claim_id_or_anchor(line, known_claim_ids)
+                and not has_section_level_claim_anchor
+            ):
                 snippet = " ".join(line.strip().split())[:80]
                 issues.append(f"numeric_claim_missing_claim_id_or_anchor:{heading.removeprefix('## ')}:{snippet}")
     return issues

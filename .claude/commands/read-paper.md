@@ -63,6 +63,7 @@ Strict Evidence Ledger contract:
 - Required coverage:
   at least one row for `problem`, `contribution` or `method`, `experiment` or `result` (or explicit `not_evidenced`), `limitation`, and `baseline` (or explicit `not_evidenced`).
 - Exact paper numbers require page/section/table/figure/result_row anchors. Prefer table/result_row anchors for numeric result claims when the paper provides them.
+- Key claims in Problem, Contributions, Method, Experiments, Limitations, Baseline, and Transfer must not use `abstract` as a strong anchor. Use a concrete section/table/figure/appendix/snippet/result_row anchor, or downgrade to `abstract_only` with `screening_only`.
 - If a value is visually estimated from a figure, use `evidence_class: figure_approximation`, `anchor_type: figure`, a concrete figure/page anchor, and `downstream_use: requires_human_check`; never present it as exact.
 - If a machine-extracted row is not manually confirmed, use `evidence_class: result_row_unconfirmed`, `anchor_type: result_row`, and `downstream_use: requires_human_check`.
 - For `pdf_verified`, `table_verified`, `figure_verified`, `appendix_verified`, `result_row_unconfirmed`, and `figure_approximation`, `anchor` must be non-empty and concrete.
@@ -98,7 +99,7 @@ Section template to append after existing content:
 - Fulltext Quality:
 - Evidence Coverage:
 - Confidence:
-- Summary:
+- Summary: one specific Chinese sentence; if it contains any number, percentage, table result, baseline comparison, or model score, cite the relevant Evidence Ledger claim_id in the same sentence.
 
 ## Problem
 

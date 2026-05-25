@@ -265,6 +265,14 @@ class FinalizeStrictContractTest(unittest.TestCase):
         )
         validate_analysis(extract_sections(strict_analysis(ledger=allowed)), load_schema())
 
+    def test_abstract_anchor_cannot_support_strong_key_claim(self) -> None:
+        bad = GOOD_LEDGER.replace(
+            "| C-P1 | problem | The paper frames DLO contact state drift as the core problem. | pdf_verified | section | Section 1 Problem | p1 Section 1 | high | candidate_ok |",
+            "| C-P1 | problem | The paper frames DLO contact state drift as the core problem. | pdf_verified | abstract | Abstract | Abstract | high | candidate_ok |",
+        )
+        with self.assertRaisesRegex(ValueError, "evidence_ledger_anchorless_key_claim:C-P1"):
+            validate_analysis(extract_sections(strict_analysis(ledger=bad)), load_schema())
+
     def test_hardware_micro_tests_fail_and_synthetic_static_test_passes(self) -> None:
         bad_sections = [
             GOOD_MICRO_TEST.replace("Build fixed toy arrays", "Use a real robot arm"),
@@ -326,6 +334,23 @@ class FinalizeStrictContractTest(unittest.TestCase):
         self.assertEqual(claim_id_references("Pi-0 w/o Gaze and OpenVLA table baseline, see C36"), ["C36"])
         validate_analysis(extract_sections(strict_analysis(baseline=GOOD_BASELINE)), load_schema())
 
+    def test_baseline_pressure_section_claim_id_can_anchor_numeric_model_lines(self) -> None:
+        baseline = """- Strongest Baseline: controlled-budget monolithic π0 for main results; data-rich π0.5 and GO-1 for data-efficiency pressure.
+- Why strongest: π0 shares the same 50 demonstrations per task and identical training steps in Table 1.
+- Evidence anchor / claim_id: C-B1 / Table 2
+- Paper win condition: Paper beats the planner on the paper metric.
+- Idea kill condition: If the planner matches the paper on the same static metric, the idea is killed.
+- DLO replacement baseline: A DLO-specific contact planner with the same observable inputs.
+- No-hardware proxy baseline: Recompute Table 2 ranking from reported values."""
+        validate_analysis(extract_sections(strict_analysis(baseline=baseline)), load_schema())
+
+    def test_transfer_risk_section_claim_id_can_anchor_numeric_kill_condition(self) -> None:
+        transfer = GOOD_TRANSFER.replace(
+            "- DLO-specific kill condition: The idea is killed if a DLO contact planner matches the static metric without new data.",
+            "- DLO-specific kill condition: The idea is killed if false-accept rate exceeds 10%.",
+        )
+        validate_analysis(extract_sections(strict_analysis(transfer=transfer)), load_schema())
+
     def test_missing_if_packet_fails(self) -> None:
         with self.assertRaisesRegex(ValueError, "idea_fuel_missing_if_packet:IF-1"):
             validate_analysis(extract_sections(strict_analysis(top_idea="- [C-L1] loose idea list.")), load_schema())
@@ -376,6 +401,22 @@ class FinalizeStrictContractTest(unittest.TestCase):
 - Fail/kill condition: ranking fails.
 - Compute/data cap: CPU-only.
 - Note: 不宣称真实机器人效果。
+- No-hardware confirmation: no robot; no real scene; no new data collection."""
+        self.assertNotIn("no_hardware_micro_test_invalid_hardware_requirement", "\n".join(validate_no_hardware_micro_test(section)))
+
+    def test_no_hardware_synthetic_gripper_token_is_not_requirement(self) -> None:
+        section = """- Explicit exclusions: no robot; no real scene; no new data collection.
+- Test artifact: synthetic toy arrays representing gripper, target, and DLO segment tokens.
+- Input: fixed synthetic token labels only.
+- Protocol:
+  1. Build synthetic gripper and DLO token arrays.
+  2. Compute static token relevance.
+  3. Report proxy pass/fail.
+- Metric: static token precision.
+- Threshold: precision above 0.8.
+- Pass condition: synthetic DLO tokens are selected.
+- Fail/kill condition: synthetic gripper token dominates the proxy.
+- Compute/data cap: CPU-only synthetic arrays.
 - No-hardware confirmation: no robot; no real scene; no new data collection."""
         self.assertNotIn("no_hardware_micro_test_invalid_hardware_requirement", "\n".join(validate_no_hardware_micro_test(section)))
 
