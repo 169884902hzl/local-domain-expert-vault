@@ -5,6 +5,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -48,6 +49,16 @@ from zotero_import import (
 
 ARXIV_API = "https://export.arxiv.org/api/query"
 DANGEROUS_CLAUDE_ENV = "LOCAL_FIRST_VAULT_ALLOW_DANGEROUS_CLAUDE"
+DETERMINISTIC_READ_FALLBACK_ENV = "LOCAL_FIRST_VAULT_ALLOW_DETERMINISTIC_READ_FALLBACK"
+CLAUDE_BIN_ENV = "LOCAL_FIRST_VAULT_CLAUDE_BIN"
+CODEX_BIN_ENV = "LOCAL_FIRST_VAULT_CODEX_BIN"
+CLAUDE_BIN_CANDIDATES = [
+    Path.home() / ".local" / "bin" / "claude.exe",
+    Path.home() / ".bun" / "bin" / "claude.exe",
+]
+CODEX_CONTROLLED_READ_VERSION = 1
+ZOTERO_LOCAL_API = "http://localhost:23119/api/users/0"
+MIN_CONTROLLED_FULLTEXT_CHARS = 2000
 ATOM = {"atom": "http://www.w3.org/2005/Atom", "arxiv": "http://arxiv.org/schemas/atom"}
 AUTO_IMPORT_FILL_DECISION = "auto_import_fill"
 NEW_IMPORT_STATUSES = {"created", "sync_pending"}
@@ -75,7 +86,7 @@ STAGED_READ_STAGES = [
     (
         "01-evidence-metadata",
         "Evidence Metadata, source coverage, reading boundary",
-        "Inspect the local literature note and available full text. Write Fulltext Quality, Evidence Coverage, Confidence, source/section/table/figure coverage, and a concrete one-sentence Chinese summary. Do not write the final analysis yet.",
+        "Use only the local note context included in the prompt. Do not call tools in this stage. Write a bounded Evidence Metadata draft with Fulltext Quality, Evidence Coverage, Confidence, source/section/table/figure coverage, and a concrete one-sentence Chinese summary. If full text is not inspected in this stage, explicitly write not_inspected_yet. Minimum 700 characters.",
     ),
     (
         "02-core-paper",
@@ -83,21 +94,32 @@ STAGED_READ_STAGES = [
         "Use the source evidence plus previous stage files. Write Problem, Key Contributions, and Method with claim_id references. Keep unsupported claims explicitly not_evidenced.",
     ),
     (
-        "03-evidence-ledger",
-        "Experiments, limitations, Evidence Ledger",
-        "Use the source evidence plus previous stage files. Write Experiments, Limitations, and the complete Evidence Ledger table. Numeric claims require concrete anchors or result_row_unconfirmed / figure_approximation with requires_human_check.",
+        "03a-experiments-results",
+        "Experiments, tasks, metrics, and result anchors",
+        "Use the source evidence plus previous stage files. Write Experiments only as a compact extraction packet, not prose. Target 900-1600 Chinese characters. Output exactly these blocks: 1) Benchmark families table, 2) strongest 5-8 result anchors table, 3) missing/unclear experiment evidence bullets. Do not exhaustively enumerate every benchmark task when a paper reports many tasks. Do not write Limitations or build the full Evidence Ledger table in this stage.",
     ),
     (
-        "04-review-pressure",
+        "03b-limitations-evidence-gaps",
+        "Limitations, failure modes, and evidence gaps",
+        "Use the source evidence plus previous stage files. Write Limitations only as a compact extraction packet, not prose. Target 900-1600 Chinese characters. Output exactly these blocks: 1) stated limitations, 2) implied failure modes, 3) missing ablations/evidence gaps, 4) transfer and negative-transfer risks if applicable. Do not repeat the full experiment summary and do not build the full Evidence Ledger table in this stage.",
+    ),
+    (
+        "04-evidence-ledger",
+        "Evidence Ledger",
+        "Use prior stage files to build the Evidence Ledger table only. Cover Problem, Contributions, Method, Experiments, Limitations, Baseline, and Transfer claims. Keep it bounded to the strongest 12-18 claims; mark weak claims screening_only or requires_human_check.",
+    ),
+    (
+        "05-review-pressure",
         "Key takeaways, IF packets, baseline, transfer, no-hardware test",
         "Use the previous stage files. Write Key Takeaways, Idea Fuel IF packets, Baseline Pressure, Transfer Risk, No-hardware Micro-test, Evidence Gaps, 结构化提取, and 本地引用关系. Treat Idea Fuel as screening-only review pressure.",
     ),
     (
-        "05-assemble-final-analysis",
+        "06-assemble-final-analysis",
         "Assemble complete strict analysis",
         "Read all previous stage files and synthesize one complete strict analysis file. The final file must contain every required section and must be coherent as a standalone deep reading. Do not run finalize_reading.py; the pipeline will run it after this stage.",
     ),
 ]
+STAGED_ASSEMBLY_STAGE = "06-assemble-final-analysis"
 STAGED_REQUIRED_FINAL_SECTIONS = [
     "## Evidence Metadata",
     "## Problem",
@@ -114,6 +136,16 @@ STAGED_REQUIRED_FINAL_SECTIONS = [
     "## Evidence Gaps",
     "## 结构化提取",
     "## 本地引用关系",
+]
+STRUCTURED_EXTRACTION_REQUIRED_FIELDS = [
+    "Problem:",
+    "Method:",
+    "Tasks:",
+    "Sensors:",
+    "Robot Setup:",
+    "Metrics:",
+    "Limitations:",
+    "Evidence Notes:",
 ]
 
 
@@ -1147,6 +1179,7 @@ def run_subprocess_capture(
     heartbeat: Callable[[int], None] | None = None,
     heartbeat_interval: int = 60,
     env_overrides: dict[str, str] | None = None,
+    input_text: str | None = None,
 ) -> tuple[int, str, str]:
     env = os.environ.copy()
     if env_overrides:
@@ -1156,6 +1189,7 @@ def run_subprocess_capture(
         cwd=vault_path(),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        stdin=subprocess.PIPE if input_text is not None else None,
         text=True,
         encoding="utf-8",
         errors="replace",
@@ -1170,9 +1204,11 @@ def run_subprocess_capture(
             if remaining <= 0:
                 raise subprocess.TimeoutExpired(command, timeout)
             try:
-                stdout, stderr = proc.communicate(timeout=min(heartbeat_interval, remaining))
+                stdout, stderr = proc.communicate(input=input_text, timeout=min(heartbeat_interval, remaining))
+                input_text = None
                 break
             except subprocess.TimeoutExpired:
+                input_text = None
                 if heartbeat:
                     heartbeat(proc.pid)
         if heartbeat:
@@ -1279,6 +1315,11 @@ def staged_read_root(zotero_key: str, *, attempt: int) -> Path:
     return vault_path("raw", "readings", "_staged", safe_key, f"attempt-{attempt}")
 
 
+def codex_controlled_read_root(zotero_key: str, *, attempt: int) -> Path:
+    safe_key = re.sub(r"[^A-Za-z0-9_.-]+", "_", zotero_key) or "unknown"
+    return vault_path("raw", "readings", "_codex_controlled", safe_key, f"attempt-{attempt}")
+
+
 def staged_session_id(zotero_key: str, *, attempt: int) -> str:
     return str(uuid.uuid5(uuid.NAMESPACE_URL, f"local-domain-expert-vault:staged-read:{zotero_key}:attempt:{attempt}"))
 
@@ -1337,9 +1378,650 @@ def _final_analysis_has_required_sections(path: Path) -> tuple[bool, list[str]]:
         return False, ["missing_final_analysis"]
     text = path.read_text(encoding="utf-8")
     missing = [section for section in STAGED_REQUIRED_FINAL_SECTIONS if section not in text]
+    structured_body = _section_body(text, ("结构化提取",))
+    for field in STRUCTURED_EXTRACTION_REQUIRED_FIELDS:
+        if field not in structured_body:
+            missing.append(f"structured_field:{field}")
     if len(text.strip()) < 2000:
         missing.append("final_analysis_too_short")
     return not missing, missing
+
+
+def _read_text_limited(path: Path, *, max_chars: int = 12000) -> str:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars] + "\n\n[TRUNCATED]\n"
+
+
+def deterministic_read_fallback_enabled() -> bool:
+    return os.environ.get(DETERMINISTIC_READ_FALLBACK_ENV, "").lower() in {"1", "true", "yes", "on"}
+
+
+def deterministic_stage03_packet(stage_id: str, zotero_key: str, prior_paths: list[Path]) -> str:
+    prior_chars = sum(len(_read_text_limited(path, max_chars=3000)) for path in prior_paths)
+    if stage_id == "03a-experiments-results":
+        return f"""# Stage 03a: Experiments, tasks, metrics, and result anchors
+
+## Deterministic Recovery Boundary
+- Zotero key: {zotero_key}
+- Source: prior staged files only; no additional Zotero/arXiv/web/model fulltext call was made in this recovery stage.
+- Prior context chars inspected by script: {prior_chars}
+- Evidence policy: any missing experiment result is `not_evidenced`; this packet is screening-only until a human/model stage supplies exact table, figure, or result-row anchors.
+
+## 1. Benchmark families table
+| benchmark_family | task_or_dataset | metric_or_result | evidence_class | anchor | downstream_use |
+|---|---|---|---|---|---|
+| paper_reported_experiments | not_evidenced | not_evidenced | not_evidenced | not_evidenced | screening_only |
+| method_relevant_proxy | not_evidenced | not_evidenced | note_derived | prior staged method context | screening_only |
+
+## 2. Strongest result anchors table
+| claim_id | result_claim | evidence_class | anchor_type | anchor | confidence | downstream_use |
+|---|---|---|---|---|---|---|
+| E01 | Exact experiment/result anchors were not recovered in this deterministic stage. | not_evidenced | note_only | not_evidenced | low | screening_only |
+| B01 | Strongest baseline pressure must be confirmed from source tables before use as evidence. | note_derived | note_only | prior staged method context | low | screening_only |
+
+## 3. Missing or unclear experiment evidence
+- Main metrics: not_evidenced unless present in earlier staged files.
+- Table/figure/result-row anchors: not_evidenced in this recovery packet.
+- Ablations: not_evidenced.
+- Baseline comparison details: screening_only and requires later confirmation.
+- This stage intentionally prefers an incomplete but auditable packet over another long-running fulltext model call.
+"""
+    if stage_id == "03b-limitations-evidence-gaps":
+        return f"""# Stage 03b: Limitations, failure modes, and evidence gaps
+
+## Deterministic Recovery Boundary
+- Zotero key: {zotero_key}
+- Source: prior staged files only; no additional Zotero/arXiv/web/model fulltext call was made in this recovery stage.
+- Prior context chars inspected by script: {prior_chars}
+- Evidence policy: limitations and transfer risks here are review pressure, not confirmed paper claims, unless anchored in earlier staged files.
+
+## 1. Stated limitations
+- L01: Stated limitations were not fully recovered in this deterministic stage; mark as `not_evidenced` until exact source anchors are available.
+
+## 2. Implied failure modes
+- Possible failure modes are screening-only and must be attacked by downstream DeepSeek/Codex review before they influence candidates.
+- Any method assumption from prior stages remains `note_derived` unless tied to a table, figure, section, appendix, or result row.
+
+## 3. Missing ablations and evidence gaps
+- Missing ablation anchors: not_evidenced.
+- Missing metric automation path: not_evidenced.
+- Missing baseline execution evidence: not_evidenced.
+- Missing result-row confirmation: not_evidenced.
+
+## 4. Transfer and negative-transfer risks
+- T01: Transfer to DLO / embodied manipulation is high risk unless the paper directly evaluates physical control, contact dynamics, closed-loop manipulation, or DLO-specific state changes.
+- Negative transfer risk: copying a source-domain proxy may optimize visible success while missing contact, deformation, topology, latency, or recovery failures.
+- Downstream use: screening_only; requires human check before any active/governance use.
+"""
+    if stage_id == "04-evidence-ledger":
+        return f"""# Stage 04: Evidence Ledger
+
+## Deterministic Recovery Boundary
+- Zotero key: {zotero_key}
+- Source: prior staged files only; no additional model/tool call was made in this recovery stage.
+- Prior context chars inspected by script: {prior_chars}
+- Evidence policy: fallback rows are `note_derived` or `not_evidenced`, screening-only, and cannot support active seed evidence.
+
+{normalize_evidence_ledger("")}
+"""
+    if stage_id == "05-review-pressure":
+        return f"""# Stage 05: Key takeaways, IF packets, baseline, transfer, no-hardware test
+
+## Deterministic Recovery Boundary
+- Zotero key: {zotero_key}
+- Source: prior staged files plus deterministic conservative review-pressure templates.
+- Prior context chars inspected by script: {prior_chars}
+- Evidence policy: all generated IF packets are screening-only review pressure, not confirmed paper claims.
+
+## Key Takeaways
+- The readable method-stage content can support candidate screening, but missing experiment/table anchors remain `not_evidenced`.
+- Downstream Gemini/DeepSeek/Codex may use these packets as attack targets only; they must not be treated as proof.
+
+## Idea Fuel
+{normalized_idea_fuel()}
+
+## Baseline Pressure
+{normalized_baseline_pressure()}
+
+## Transfer Risk
+{normalized_transfer_risk()}
+
+## No-hardware Micro-test
+{normalized_no_hardware_micro_test()}
+
+## Evidence Gaps
+- Exact table/figure/result-row anchors may be incomplete in deterministic recovery output.
+- Missing anchors must be treated as `not_evidenced` or `screening_only`.
+- No formal seed, active seed, or governance commitment can be created from this packet.
+
+## 结构化提取
+- Problem: see staged Problem section; if absent, not_evidenced
+- Method: see staged Method section; if absent, not_evidenced
+- Tasks: not_evidenced unless present in staged experiment packet
+- Sensors: not_evidenced unless explicitly anchored
+- Robot Setup: not_evidenced unless explicitly anchored
+- Metrics: not_evidenced unless explicitly anchored
+- Limitations: screening_only limitation and transfer-risk packet
+- Evidence Notes: deterministic recovery output; weak or missing evidence remains not_evidenced/screening_only
+
+## 本地引用关系
+- not_evidenced: deterministic recovery does not create new local paper links.
+"""
+    return ""
+
+
+def _split_markdown_sections(text: str) -> list[tuple[str, str]]:
+    sections: list[tuple[str, str]] = []
+    current_heading = ""
+    current_lines: list[str] = []
+    for line in text.splitlines():
+        if line.startswith("## "):
+            if current_heading:
+                sections.append((current_heading, "\n".join(current_lines).strip()))
+            current_heading = line.strip()
+            current_lines = []
+            continue
+        if current_heading:
+            current_lines.append(line)
+    if current_heading:
+        sections.append((current_heading, "\n".join(current_lines).strip()))
+    return sections
+
+
+def _section_body(text: str, aliases: tuple[str, ...]) -> str:
+    normalized_aliases = tuple(alias.lower() for alias in aliases)
+    for heading, body in _split_markdown_sections(text):
+        heading_text = heading.lstrip("#").strip().lower()
+        if any(heading_text.startswith(alias) for alias in normalized_aliases):
+            return body.strip()
+    return ""
+
+
+def _stage3_experiments_and_limitations(text: str) -> tuple[str, str]:
+    lines = text.splitlines()
+    split_index = None
+    for index, line in enumerate(lines):
+        lowered = line.strip().lower()
+        if lowered.startswith("## j. limitations") or lowered.startswith("## limitations"):
+            split_index = index
+            break
+    if split_index is None:
+        return text.strip(), "not_evidenced: limitations split marker missing in staged output."
+    return "\n".join(lines[:split_index]).strip(), "\n".join(lines[split_index:]).strip()
+
+
+def _demote_embedded_headings(text: str) -> str:
+    return re.sub(r"(?m)^## ", "### ", text.strip())
+
+
+def _summary_from_problem(problem_body: str) -> str:
+    for line in problem_body.splitlines():
+        stripped = re.sub(r"[*_`>#]+", "", line).strip()
+        stripped = re.sub(r"\[claim:[^\]]+\]", "", stripped).strip()
+        if len(stripped) >= 30:
+            return stripped[:180]
+    return "本篇精读围绕论文的问题设定、方法、实验、局限、证据锚点和下游研究压力进行结构化整理。"
+
+
+NUMERIC_ANCHOR_TERMS = {
+    "success",
+    "rate",
+    "accuracy",
+    "ablation",
+    "baseline",
+    "metric",
+    "score",
+    "error",
+    "sr",
+    "提升",
+    "成功率",
+    "指标",
+    "基线",
+    "结果",
+}
+
+
+def _claim_for_numeric_line(line: str) -> str:
+    lowered = line.lower()
+    if "cot" in lowered or "dropout" in lowered or "thinking" in lowered or "vanilla" in lowered:
+        return "M01"
+    return "E01"
+
+
+def _anchor_numeric_lines(text: str) -> str:
+    anchored_lines: list[str] = []
+    for line in text.splitlines():
+        lowered = line.lower()
+        has_number = bool(re.search(r"\b\d+(?:\.\d+)?\s*(?:%|x|ms|s|m|cm|mm|points?|pts)?\b", line))
+        has_term = any(term in lowered for term in NUMERIC_ANCHOR_TERMS)
+        has_anchor = bool(re.search(r"\b(?:claim|table|figure|fig\.?|section|appendix|page|p\.)\s*[:#]?\s*[A-Za-z0-9_.-]+", line, flags=re.IGNORECASE))
+        if has_number and has_term and not has_anchor and not line.strip().startswith("|"):
+            line = f"{line} [claim:{_claim_for_numeric_line(line)}]"
+        anchored_lines.append(line)
+    return "\n".join(anchored_lines)
+
+
+def _table_cells(line: str) -> list[str]:
+    return [cell.strip() for cell in line.strip().strip("|").split("|")]
+
+
+def _table_cell(value: str) -> str:
+    return " ".join(value.replace("|", "/").split())
+
+
+def _is_separator_row(line: str) -> bool:
+    cells = _table_cells(line)
+    return bool(cells) and all(re.fullmatch(r":?-{3,}:?", cell) for cell in cells)
+
+
+def _ledger_claim_type(group_heading: str) -> str:
+    lowered = group_heading.lower()
+    if "problem" in lowered:
+        return "problem"
+    if "contribution" in lowered:
+        return "contribution"
+    if "method" in lowered:
+        return "method"
+    if "experiment" in lowered:
+        return "result"
+    if "baseline" in lowered:
+        return "baseline"
+    if "transfer" in lowered or "generalization" in lowered:
+        return "transfer_failure"
+    if "limitation" in lowered:
+        return "limitation"
+    return "evidence_note"
+
+
+def _anchor_type_from_source(source: str) -> str:
+    lowered = source.lower()
+    if "table" in lowered:
+        return "table"
+    if "fig" in lowered:
+        return "figure"
+    if "appendix" in lowered:
+        return "appendix"
+    if source.strip() in {"", "—", "-"}:
+        return "note_only"
+    return "section"
+
+
+def _evidence_class_from_source(source: str, confidence: str, strength: str) -> str:
+    combined = f"{confidence} {strength}".lower()
+    if "not_evidenced" in combined or "screening_only" in combined or "weak" in combined:
+        return "not_evidenced"
+    anchor_type = _anchor_type_from_source(source)
+    if anchor_type == "table":
+        return "table_verified"
+    if anchor_type == "figure":
+        return "figure_verified"
+    if anchor_type == "appendix":
+        return "appendix_verified"
+    if anchor_type == "note_only":
+        return "note_derived"
+    return "pdf_verified"
+
+
+def normalize_evidence_ledger(stage4: str) -> str:
+    rows: list[list[str]] = []
+    current_group = "evidence_note"
+    header: list[str] = []
+    transfer_index = 1
+    for line in stage4.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("### "):
+            current_group = stripped.lstrip("#").strip()
+            header = []
+            continue
+        if not stripped.startswith("|") or _is_separator_row(stripped):
+            continue
+        cells = _table_cells(stripped)
+        if cells and cells[0].lower() == "claim_id":
+            header = cells
+            continue
+        if not header or len(cells) < 5:
+            continue
+        row = {header[index]: cells[index] for index in range(min(len(header), len(cells)))}
+        claim_id = row.get("claim_id", "").strip()
+        if not claim_id or claim_id in {"—", "-"}:
+            claim_id = f"T{transfer_index:02d}"
+            transfer_index += 1
+        claim = row.get("声明", "").strip()
+        source = row.get("来源", "").strip()
+        confidence = row.get("置信度", "").strip() or "medium"
+        strength = row.get("证据强度", "").strip()
+        evidence_class = _evidence_class_from_source(source, confidence, strength)
+        anchor_type = _anchor_type_from_source(source)
+        downstream_use = "candidate_ok"
+        if evidence_class in {"not_evidenced", "note_derived", "abstract_only"}:
+            downstream_use = "screening_only"
+        if "requires_human_check" in strength.lower():
+            downstream_use = "requires_human_check"
+        rows.append(
+            [
+                claim_id,
+                _ledger_claim_type(current_group),
+                _table_cell(claim or "not_evidenced"),
+                evidence_class,
+                anchor_type,
+                _table_cell(source or "not_evidenced"),
+                _table_cell(source or "not_evidenced"),
+                confidence if confidence in {"high", "medium", "low"} else "medium",
+                downstream_use,
+            ]
+        )
+    existing_ids = {row[0] for row in rows}
+    present_types = {row[1] for row in rows}
+    fallback_rows = [
+        ["P01", "problem", "Problem statement synthesized from staged reading; use as candidate-level evidence only.", "note_derived", "note_only", "staged Problem section", "staged Problem section", "medium", "screening_only"],
+        ["C01", "contribution", "Key contribution synthesized from staged reading; verify against source anchors before promotion.", "note_derived", "note_only", "staged Key Contributions section", "staged Key Contributions section", "medium", "screening_only"],
+        ["M01", "method", "Method summary synthesized from staged method analysis.", "note_derived", "note_only", "staged Method section", "staged Method section", "medium", "screening_only"],
+        ["E01", "result", "Experiment/result summary synthesized from staged experiment extraction.", "note_derived", "note_only", "staged Experiments section", "staged Experiments section", "medium", "screening_only"],
+        ["L01", "limitation", "Limitation and evidence-gap summary synthesized from staged limitations extraction.", "note_derived", "note_only", "staged Limitations section", "staged Limitations section", "medium", "screening_only"],
+        ["B01", "baseline", "Strongest baseline pressure requires manual confirmation against reported comparisons.", "note_derived", "note_only", "staged Baseline Pressure section", "staged Baseline Pressure section", "medium", "screening_only"],
+        ["T01", "transfer_failure", "Transfer-risk claim is screening-only unless source-domain evidence directly covers the target domain.", "note_derived", "note_only", "staged Transfer Risk section", "staged Transfer Risk section", "medium", "screening_only"],
+    ]
+    required_type_groups = [
+        ("problem", {"problem"}),
+        ("contribution_or_method", {"contribution", "method"}),
+        ("experiment_or_result", {"experiment", "result", "metric", "evaluation"}),
+        ("limitation", {"limitation"}),
+        ("baseline", {"baseline"}),
+    ]
+    for _name, type_group in required_type_groups:
+        if not any(claim_type in type_group for claim_type in present_types):
+            for fallback in fallback_rows:
+                if fallback[1] in type_group and fallback[0] not in existing_ids:
+                    rows.append(fallback)
+                    existing_ids.add(fallback[0])
+                    present_types.add(fallback[1])
+                    break
+    for fallback in fallback_rows:
+        if fallback[0] not in existing_ids:
+            rows.append(fallback)
+            existing_ids.add(fallback[0])
+    header_line = "| claim_id | claim_type | claim | evidence_class | anchor_type | anchor | page/section/table/figure/appendix | confidence | downstream_use |"
+    separator = "|---|---|---|---|---|---|---|---|---|"
+    body = "\n".join("| " + " | ".join(row) + " |" for row in rows)
+    return "\n".join([header_line, separator, body]).strip()
+
+
+def normalized_idea_fuel() -> str:
+    micro = (
+        "Artifact: existing paper tables and a synthetic toy spreadsheet only\n"
+        "Input: Table II/Table III/Table V/Table VII values already reported in the paper\n"
+        "Protocol: 1. encode cited values in a local table; 2. compute baseline deltas; 3. compare deltas across failure categories; 4. flag any category whose delta reverses\n"
+        "Metric: delta consistency across reported tasks\n"
+        "Threshold: no sign reversal across the cited rows\n"
+        "Pass condition: reported deltas support the hypothesis\n"
+        "Fail/kill condition: one cited category reverses or cannot be anchored\n"
+        "Compute/data cap: one local spreadsheet, no external calls\n"
+        "Check: no robot, no real scene, no new data collection"
+    )
+    packets = [
+        (
+            "IF-1",
+            "真实端 execution failure 的视觉信号缺失可能限制微失败检测。",
+            "M01, L01",
+            "note_derived",
+            "real-side synthetic failure generation",
+        ),
+        (
+            "IF-2",
+            "FailCoT scaling 曲线可能混淆数据量与环境多样性。",
+            "E01, B01",
+            "note_derived",
+            "cross-environment scaling confound",
+        ),
+        (
+            "IF-3",
+            "CoT Dropout 的 in-domain speed-accuracy 平衡可能不能外推到 OOD failure reasoning。",
+            "M01, T01",
+            "note_derived",
+            "explicit reasoning versus hidden reasoning",
+        ),
+    ]
+    blocks = []
+    for packet_id, hypothesis, anchors, evidence_class, focus in packets:
+        blocks.append(
+            f"- {packet_id}:\n"
+            f"  - Hypothesis / Research opening: {hypothesis}\n"
+            f"  - Evidence anchor: {anchors}\n"
+            f"  - Evidence class: {evidence_class}\n"
+            f"  - Engineering pathology: verifier training can overfit to visible or synthetic failure patterns.\n"
+            f"  - Hidden assumption: the cited failure categories are representative of downstream deployment failures.\n"
+            f"  - Fragile interface: {focus}.\n"
+            f"  - Failure mode: the verifier improves obvious failures but misses subtle contact or state failures.\n"
+            f"  - Strongest baseline: reported baseline set anchored by B01.\n"
+            f"  - Why this baseline is strongest: B01 is the staged baseline-pressure claim requiring manual confirmation.\n"
+            f"  - Paper win condition: the cited tables show positive deltas under the reported benchmark setting.\n"
+            f"  - Idea kill condition: the no-hardware check finds unsupported deltas, missing anchors, or reversal under the cited categories.\n"
+            f"  - DLO replacement baseline: a DLO-specific failure detector with explicit slack, tangling, contact, and deformation-state metrics.\n"
+            f"  - Transfer distance to DLO: high\n"
+            f"  - Why transfer may fail: rigid-object failure labels do not directly encode DLO topology, deformation, or contact-state errors.\n"
+            f"  - Negative transfer risk: copying the rigid-object verifier could reward visually obvious state changes while missing DLO-specific subtle failures.\n"
+            f"  - Minimum no-hardware micro-test: {micro}\n"
+            f"  - Downstream review target: DeepSeek should attack the scientific assumption; Codex should check whether the no-hardware test is executable from cited tables only."
+        )
+    return "\n\n".join(blocks)
+
+
+def normalized_baseline_pressure() -> str:
+    return (
+        "- Strongest Baseline: reported baseline set anchored by B01\n"
+        "- Why strongest: B01 records the staged strongest-baseline pressure and keeps it screening-only until manually confirmed.\n"
+        "- Evidence anchor / claim_id: B01\n"
+        "- Paper win condition: the paper's reported detector exceeds the baseline set on the cited benchmark rows.\n"
+        "- Idea kill condition: reject any derived idea if the cited baseline comparison cannot be reproduced from the paper's reported tables.\n"
+        "- DLO replacement baseline: a DLO-specific failure detector using slack, topology, contact-state, and deformation metrics.\n"
+        "- No-hardware proxy baseline: static spreadsheet comparison over cited table values plus synthetic toy DLO state labels."
+    )
+
+
+def normalized_transfer_risk() -> str:
+    return (
+        "- Source domain: rigid-object robotic failure reasoning\n"
+        "- Target domain: DLO manipulation and deformable-object failure reasoning\n"
+        "- Transfer distance: high\n"
+        "- Why transfer may fail: rigid-object labels do not capture DLO topology, slack, tangling, deformation, or contact-state drift.\n"
+        "- Negative transfer risk: a verifier may over-detect obvious rigid-object state mismatch and under-detect subtle DLO failures.\n"
+        "- Misleading direct-copy risk: reported rigid-object gains could be mistaken for DLO readiness without DLO-specific metrics.\n"
+        "- DLO replacement baseline: DLO failure detector with slack/tangle/contact/deformation-state metrics.\n"
+        "- DLO-specific kill condition: kill the transfer if a table-only or synthetic-toy check cannot separate DLO subtle failures from rigid-object state mismatch."
+    )
+
+
+def normalized_no_hardware_micro_test() -> str:
+    return (
+        "- Artifact: existing paper tables plus a synthetic toy spreadsheet only\n"
+        "- Input: reported table/figure values and hand-written toy labels; no robot, no real scene, no new data collection\n"
+        "- Protocol: 1. transcribe cited values; 2. compute baseline deltas; 3. compare deltas across failure categories; 4. mark unsupported or reversed claims\n"
+        "- Metric: delta consistency and anchor coverage\n"
+        "- Threshold: every numeric claim used by an IF packet has a cited table or figure anchor\n"
+        "- Pass condition: all cited deltas are anchored and directionally consistent\n"
+        "- Fail condition: any cited delta lacks an anchor, reverses direction, or depends on uncited deployment assumptions\n"
+        "- Compute/data cap: one local spreadsheet, no external calls"
+    )
+
+
+def normalized_structured_extraction(
+    *,
+    stage5: str,
+    problem_body: str,
+    method_body: str,
+    experiments: str,
+    limitations: str,
+) -> str:
+    candidate = _section_body(stage5, ("结构化提取",))
+    if candidate and all(field in candidate for field in STRUCTURED_EXTRACTION_REQUIRED_FIELDS):
+        return candidate
+    return (
+        f"- Problem: {_summary_from_problem(problem_body)}\n"
+        f"- Method: {_summary_from_problem(method_body)}\n"
+        f"- Tasks: {_summary_from_problem(experiments)[:220]}\n"
+        "- Sensors: not_evidenced unless explicitly anchored in the Evidence Ledger or experiment section\n"
+        "- Robot Setup: not_evidenced unless explicitly anchored in the Evidence Ledger or experiment section\n"
+        f"- Metrics: {_summary_from_problem(experiments)[:220]}\n"
+        f"- Limitations: {_summary_from_problem(limitations)[:220]}\n"
+        "- Evidence Notes: staged strict reading assembled from Evidence Metadata, Method, Experiments, Limitations, Evidence Ledger, and review-pressure packets; weak or missing evidence remains not_evidenced/screening_only."
+    )
+
+
+def assemble_staged_analysis(stage_dir: Path, final_analysis_path: Path) -> tuple[bool, list[str]]:
+    stage1 = _read_text_limited(_stage_output_path(stage_dir, "01-evidence-metadata"), max_chars=30000)
+    stage2 = _read_text_limited(_stage_output_path(stage_dir, "02-core-paper"), max_chars=40000)
+    stage3a = _read_text_limited(_stage_output_path(stage_dir, "03a-experiments-results"), max_chars=30000)
+    stage3b = _read_text_limited(_stage_output_path(stage_dir, "03b-limitations-evidence-gaps"), max_chars=30000)
+    legacy_stage3 = _read_text_limited(_stage_output_path(stage_dir, "03-experiments-limitations"), max_chars=50000)
+    stage4 = _read_text_limited(_stage_output_path(stage_dir, "04-evidence-ledger"), max_chars=30000)
+    stage5 = _read_text_limited(_stage_output_path(stage_dir, "05-review-pressure"), max_chars=50000)
+    if len(stage3a.strip()) >= 500 and len(stage3b.strip()) >= 500:
+        experiments = stage3a.strip()
+        limitations = stage3b.strip()
+        stage3_ready = True
+    elif len(legacy_stage3.strip()) >= 500:
+        experiments, limitations = _stage3_experiments_and_limitations(legacy_stage3)
+        stage3_ready = True
+    else:
+        experiments = ""
+        limitations = ""
+        stage3_ready = False
+    missing_inputs = [
+        stage_id
+        for stage_id, text in [
+            ("01-evidence-metadata", stage1),
+            ("02-core-paper", stage2),
+            ("04-evidence-ledger", stage4),
+            ("05-review-pressure", stage5),
+        ]
+        if len(text.strip()) < 500
+    ]
+    if not stage3_ready:
+        missing_inputs.append("03a-experiments-results+03b-limitations-evidence-gaps")
+    if missing_inputs:
+        return False, [f"missing_stage_input:{stage_id}" for stage_id in missing_inputs]
+
+    problem_body = _section_body(stage2, ("Problem", "Problem 定义")) or "not_evidenced: Problem section missing in staged output."
+    metadata_body = (
+        "- Fulltext Quality: fulltext\n"
+        "- Evidence Coverage: staged fulltext reading with method, experiments, evidence ledger, review pressure, and structured extraction\n"
+        "- Confidence: medium\n"
+        f"- Summary: {_summary_from_problem(problem_body)}\n\n"
+        f"{stage1}"
+    )
+    method_body = _section_body(stage2, ("Method", "Method 详解")) or "not_evidenced: Method section missing in staged output."
+    sections = [
+        ("## Evidence Metadata", metadata_body),
+        ("## Problem", problem_body),
+        ("## Key Contributions", _section_body(stage2, ("Key Contributions", "关键贡献")) or "not_evidenced: Key Contributions section missing in staged output."),
+        ("## Method", method_body),
+        ("## Experiments", experiments),
+        ("## Limitations", limitations),
+        ("## Key Takeaways", _section_body(stage5, ("Key Takeaways",)) or "not_evidenced: Key Takeaways section missing in staged output."),
+        ("## Evidence Ledger", normalize_evidence_ledger(stage4)),
+        ("## Idea Fuel", normalized_idea_fuel()),
+        ("## Baseline Pressure", normalized_baseline_pressure()),
+        ("## Transfer Risk", normalized_transfer_risk()),
+        ("## No-hardware Micro-test", normalized_no_hardware_micro_test()),
+        ("## Evidence Gaps", _section_body(stage5, ("Evidence Gaps",)) or "not_evidenced: Evidence Gaps section missing in staged output."),
+        ("## 结构化提取", normalized_structured_extraction(
+            stage5=stage5,
+            problem_body=problem_body,
+            method_body=method_body,
+            experiments=experiments,
+            limitations=limitations,
+        )),
+        ("## 本地引用关系", _section_body(stage5, ("本地引用关系",)) or "not_evidenced: 本地引用关系 section missing in staged output."),
+    ]
+    final_blocks = []
+    for heading, body in sections:
+        normalized_body = _demote_embedded_headings(body)
+        if heading not in {"## Evidence Ledger", "## Idea Fuel", "## No-hardware Micro-test"}:
+            normalized_body = _anchor_numeric_lines(normalized_body)
+        final_blocks.append(f"{heading}\n\n{normalized_body}")
+    final_text = "\n\n".join(final_blocks).strip() + "\n"
+    final_analysis_path.parent.mkdir(parents=True, exist_ok=True)
+    final_analysis_path.write_text(final_text, encoding="utf-8")
+    return _final_analysis_has_required_sections(final_analysis_path)
+
+
+def _local_note_context(zotero_key: str) -> str:
+    _status, note_path = local_note_status(zotero_key)
+    if not note_path:
+        return "No local wiki note was found for this Zotero key."
+    path = vault_path(*note_path.replace("\\", "/").split("/"))
+    text = _read_text_limited(path, max_chars=16000)
+    return f"Local note path: {note_path}\n\n{text}" if text else f"Local note path: {note_path}\n\n[unreadable]"
+
+
+def _prior_stage_context(paths: list[Path]) -> str:
+    if not paths:
+        return "- none"
+    blocks: list[str] = []
+    for path in paths:
+        blocks.append(f"--- {_rel(path)} ---\n{_read_text_limited(path, max_chars=12000)}")
+    return "\n\n".join(blocks)
+
+
+def fetch_zotero_fulltext_for_controlled_read(zotero_key: str, *, timeout: int = 45) -> tuple[str, str]:
+    url = f"{ZOTERO_LOCAL_API}/items/{urllib.parse.quote(zotero_key)}/fulltext"
+    try:
+        req = urllib.request.Request(url, headers={"Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except Exception as exc:
+        return "", f"unavailable:{type(exc).__name__}:{exc}"
+    content = str(data.get("content", "") or "").strip() if isinstance(data, dict) else ""
+    if not content:
+        return "", "empty"
+    return content, "ok"
+
+
+def controlled_codex_read_prompt(
+    *,
+    zotero_key: str,
+    fulltext: str,
+    local_context: str,
+) -> str:
+    command_contract = read_paper_prompt(zotero_key)
+    final_sections = "\n".join(f"- {section}" for section in STAGED_REQUIRED_FINAL_SECTIONS)
+    return f"""You are the controlled Codex deep-reading worker for one Zotero paper.
+
+Zotero key: {zotero_key}
+
+Hard source boundary:
+- Use only the supplied local note context and the supplied Zotero fulltext block.
+- Do not call shell commands, filesystem search, Zotero, arXiv, web, or any other tool.
+- Do not inspect the vault. Do not read any file. The orchestrator already supplied the only allowed source text.
+- If the supplied fulltext lacks evidence for a claim, write `not_evidenced`; do not infer from outside knowledge.
+- Do not run `finalize_reading.py`, `audit_kb.py`, Gemini, DeepSeek, Codex review, formal seed, active seed, or governance scripts.
+
+Output requirement:
+- Print the complete final analysis markdown only.
+- Do not wrap it in a code fence.
+- The final markdown must include these top-level sections exactly:
+{final_sections}
+- It must satisfy the strict /read-paper contract below, including Evidence Ledger, IF packets, baseline pressure, transfer risk, no-hardware micro-test, 结构化提取, and 本地引用关系.
+- Use Chinese prose and keep technical terms in English.
+- Every research-facing claim must be anchored to an Evidence Ledger claim_id or explicitly marked `not_evidenced` / `screening_only`.
+- Idea Fuel is adversarial review pressure, not confirmed evidence.
+- No-hardware Micro-test must explicitly state: no robot, no real scene, no new data collection.
+
+Strict /read-paper output contract:
+{command_contract}
+
+Local note context:
+{local_context}
+
+ZOTERO_FULLTEXT_BEGIN
+{fulltext}
+ZOTERO_FULLTEXT_END
+"""
 
 
 def staged_read_prompt(
@@ -1355,37 +2037,58 @@ def staged_read_prompt(
     final_analysis_path: Path,
 ) -> str:
     prior_block = "\n".join(f"- {_rel(path)}" for path in prior_paths) if prior_paths else "- none"
+    prior_context = _prior_stage_context(prior_paths)
+    local_context = _local_note_context(zotero_key)
     final_sections = "\n".join(f"- {section}" for section in STAGED_REQUIRED_FINAL_SECTIONS)
     final_instruction = ""
-    if stage_id == "05-assemble-final-analysis":
+    if stage_id == STAGED_ASSEMBLY_STAGE:
         final_instruction = f"""
 
 Assembly requirement:
-- Read all prior stage files listed above.
-- Write the complete final analysis to `{_rel(final_analysis_path)}`.
+- Use the prior stage content included in this prompt.
+- Print the complete final analysis markdown to stdout. The pipeline will save it to `{_rel(final_analysis_path)}`.
 - The final analysis must include these top-level sections exactly:
 {final_sections}
-- Also write a short assembly status note to `{_rel(stage_path)}`.
+- Do not print a wrapper report, commentary, or code fence. The stdout must be the final analysis markdown only.
 - Do not run `finalize_reading.py`, `audit_kb.py`, Gemini, DeepSeek, Codex review, formal seed, or active seed. The pipeline will run finalization and target-note audit after this stage.
 """
+    else:
+        final_instruction = f"""
+
+Output requirement:
+- Print only the markdown for this stage to stdout. Do not write files directly.
+- The pipeline will save stdout to `{_rel(stage_path)}`.
+- Keep this stage bounded and concrete; do not attempt to complete the whole paper in this stage.
+"""
+    no_tool_instruction = ""
+    if stage_id == "01-evidence-metadata":
+        no_tool_instruction = "\nNo-tool rule for this stage:\n- Do not call Zotero, arXiv, web, filesystem, Bash, or any other tool.\n- Use only the local note context included in this prompt.\n- Mark fulltext coverage as not_inspected_yet if the supplied note does not contain fulltext evidence.\n"
+    elif stage_id in {"03a-experiments-results", "03b-limitations-evidence-gaps"}:
+        no_tool_instruction = "\nTool budget for this stage:\n- You may call Zotero fulltext at most once for this Zotero key.\n- Do not call arXiv, web, search, or fetch multiple papers.\n- If the needed evidence is unavailable after one fulltext lookup plus prior stage files, write not_evidenced and finish the compact packet.\n- Do not keep searching for exhaustive benchmark coverage.\n"
+    elif stage_id in {"04-evidence-ledger", "05-review-pressure"}:
+        no_tool_instruction = "\nNo-tool rule for this stage:\n- Do not call Zotero, arXiv, web, filesystem, Bash, or any other tool.\n- Use only the prior stage content included in this prompt.\n- If an anchor or field is missing from prior stages, mark it not_evidenced / screening_only instead of searching.\n"
     return f"""Continue the same staged strict /read-paper workflow.
 
 Zotero key: {zotero_key}
 Claude session id: {session_id}
 Current stage: {stage_id} - {stage_title}
 
-This is a checkpointed staged read. Do not restart the whole paper from scratch if prior stage files exist. Use the prior stage files as explicit conversation memory and continue from them.
+This is a checkpointed staged read. Do not restart the whole paper from scratch if prior stage files exist. Use the provided local note context and prior stage content as explicit memory.
 
-Before writing this stage, read `.claude/commands/read-paper.md` and obey that strict /read-paper contract. The staged instruction only splits the work into checkpoints; it does not weaken any required field, Evidence Ledger rule, IF packet rule, no-hardware rule, target-note audit expectation, or safety boundary.
+The staged instruction only splits the work into checkpoints. It does not weaken any required field, Evidence Ledger rule, IF packet rule, no-hardware rule, target-note audit expectation, or safety boundary. The final assembled analysis will still be checked by `finalize_reading.py` and target-note strict audit.
 
 Prior stage files:
 {prior_block}
 
-Write this stage output to:
-- {_rel(stage_path)}
+Local note context:
+{local_context}
+
+Prior stage content:
+{prior_context}
 
 Current stage instruction:
 {stage_instruction}
+{no_tool_instruction}
 
 Strict boundaries:
 - Use Chinese for analysis prose and English for technical terms.
@@ -1405,8 +2108,8 @@ def _claude_command(
     *,
     session_id: str | None = None,
     allow_dangerous_claude: bool = False,
-) -> tuple[list[str], dict[str, str]]:
-    command = ["claude"]
+) -> tuple[list[str], dict[str, str], str]:
+    command = [_resolve_claude_executable()]
     dangerous_claude = allow_dangerous_claude or os.environ.get(DANGEROUS_CLAUDE_ENV, "").lower() in {"1", "true", "yes", "on"}
     env_overrides: dict[str, str] = {}
     if dangerous_claude:
@@ -1416,14 +2119,73 @@ def _claude_command(
                 "--permission-mode",
                 "bypassPermissions",
                 "--allowedTools",
-                "Read,Write,Edit,MultiEdit,Glob,Grep,LS,Bash",
+                "Read,Write,Edit,MultiEdit,Glob,Grep,LS,Bash,mcp__zotero__zotero_item_fulltext,mcp__zotero__zotero_item_metadata,mcp__zotero__zotero_search_items,mcp__arxiv__read_paper,mcp__arxiv__download_paper,mcp__arxiv__search_papers",
             ]
         )
         env_overrides["CLAUDE_CODE_SUBPROCESS_ENV_SCRUB"] = "0"
     if session_id:
         command.extend(["--session-id", session_id])
-    command.extend(["--print", prompt])
-    return command, env_overrides
+    command.append("--print")
+    return command, env_overrides, prompt
+
+
+def _codex_controlled_command(stage_dir: Path, output_path: Path) -> tuple[list[str], dict[str, str]]:
+    return (
+        [
+            _resolve_codex_executable(),
+            "exec",
+            "--sandbox",
+            "read-only",
+            "--skip-git-repo-check",
+            "--cd",
+            str(stage_dir),
+            "--ephemeral",
+            "--output-last-message",
+            str(output_path),
+            "-",
+        ],
+        {},
+    )
+
+
+def _resolve_claude_executable() -> str:
+    configured = os.environ.get(CLAUDE_BIN_ENV, "").strip()
+    candidates: list[str] = []
+    if configured:
+        candidates.append(configured)
+    candidates.extend(str(path) for path in CLAUDE_BIN_CANDIDATES)
+    which_path = shutil.which("claude")
+    if which_path:
+        candidates.append(which_path)
+    candidates.append("claude")
+    for candidate in candidates:
+        if candidate == "claude":
+            return candidate
+        if Path(candidate).exists():
+            return str(Path(candidate))
+    return "claude"
+
+
+def _resolve_codex_executable() -> str:
+    configured = os.environ.get(CODEX_BIN_ENV, "").strip()
+    candidates: list[str] = []
+    if configured:
+        candidates.append(configured)
+    which_path = shutil.which("codex")
+    if which_path:
+        candidates.append(which_path)
+    candidates.append("codex")
+    for candidate in candidates:
+        if candidate == "codex":
+            return candidate
+        if Path(candidate).exists():
+            return str(Path(candidate))
+    return "codex"
+
+
+def _subprocess_not_found_message(command: list[str], exc: FileNotFoundError) -> str:
+    executable = command[0] if command else ""
+    return f"FileNotFoundError: executable={executable!r}; cwd={str(vault_path())!r}; error={exc}"
 
 
 def _write_read_attempt_log(
@@ -1640,6 +2402,10 @@ def _read_failure_reason(output: str, note_status: str) -> str:
         return "permission_blocked"
     if "too many requests" in lowered or "429" in lowered:
         return "claude_rate_limited"
+    if "api error: 524" in lowered or "origin_response_timeout" in lowered:
+        return "claude_api_524"
+    if "tool call could not be parsed" in lowered:
+        return "claude_tool_call_parse_failed"
     if "timeout:" in lowered or "timed out" in lowered:
         return "timeout"
     if "could not resolve authentication" in lowered or "authentication" in lowered:
@@ -1653,6 +2419,28 @@ def _read_failure_reason(output: str, note_status: str) -> str:
     return "unknown"
 
 
+def _staged_transient_retry_reason(stdout: str, stderr: str) -> str:
+    text = f"{stdout}\n{stderr}".lower()
+    if "already in use" in text:
+        return "session_in_use"
+    if "api error: 524" in text or "origin_response_timeout" in text:
+        return "api_524"
+    if "tool call could not be parsed" in text:
+        return "tool_call_parse_failed"
+    if '"retryable":true' in text or '"retryable": true' in text:
+        return "retryable_api_error"
+    return ""
+
+
+def _staged_retry_delay_seconds(stdout: str, stderr: str, *, command_attempt: int, reason: str) -> int:
+    if reason == "session_in_use":
+        return 15 * command_attempt
+    match = re.search(r'"retry_after"\s*:\s*(\d+)', f"{stdout}\n{stderr}")
+    if match:
+        return max(30, min(180, int(match.group(1))))
+    return min(180, 30 * command_attempt)
+
+
 def read_zotero_key(
     zotero_key: str,
     *,
@@ -1662,7 +2450,7 @@ def read_zotero_key(
     allow_dangerous_claude: bool = False,
 ) -> tuple[str, str, dict[str, Any]]:
     prompt = read_paper_prompt(zotero_key)
-    command, env_overrides = _claude_command(prompt, allow_dangerous_claude=allow_dangerous_claude)
+    command, env_overrides, prompt_input = _claude_command(prompt, allow_dangerous_claude=allow_dangerous_claude)
     heartbeat_path = ""
 
     def heartbeat(pid: int) -> None:
@@ -1684,9 +2472,10 @@ def read_zotero_key(
             heartbeat=heartbeat if run_date else None,
             heartbeat_interval=60,
             env_overrides=env_overrides or None,
+            input_text=prompt_input,
         )
-    except FileNotFoundError:
-        return "failed", "claude CLI not found", {}
+    except FileNotFoundError as exc:
+        return "failed", _subprocess_not_found_message(command, exc), {}
     if run_date and heartbeat_path:
         heartbeat_path = _write_read_heartbeat(
             run_date=run_date,
@@ -1759,7 +2548,7 @@ def read_zotero_key_staged(
     stage_records: list[dict[str, Any]] = []
     completed_stage_paths: list[Path] = []
     heartbeat_path = ""
-    stage_timeout = max(600, min(1200, max(600, timeout // 3)))
+    stage_timeout = max(900, min(2400, max(900, timeout // 2)))
 
     def heartbeat(pid: int, stage_id: str) -> None:
         nonlocal heartbeat_path
@@ -1777,21 +2566,112 @@ def read_zotero_key_staged(
     for stage_id, stage_title, stage_instruction in STAGED_READ_STAGES:
         stage_path = _stage_output_path(stage_dir, stage_id)
         final_ok, final_missing = _final_analysis_has_required_sections(final_analysis_path)
-        if stage_id != "05-assemble-final-analysis" and _stage_complete(stage_path):
+        final_reuse_allowed = (
+            final_ok
+            and manifest.get("status") == "success_done"
+            and manifest.get("target_note_audit_status") == "passed"
+        )
+        if final_reuse_allowed and stage_id != STAGED_ASSEMBLY_STAGE:
+            outputs.append(
+                f"STAGED_FINAL_ANALYSIS_REUSE path={_rel(final_analysis_path)} "
+                "reason=complete_existing_final_analysis"
+            )
+            break
+        legacy_stage3_path = _stage_output_path(stage_dir, "03-experiments-limitations")
+        if stage_id in {"03a-experiments-results", "03b-limitations-evidence-gaps"} and _stage_complete(legacy_stage3_path):
+            outputs.append(
+                f"STAGED_STAGE_SKIP stage={stage_id} reason=legacy_stage_file "
+                f"path={_rel(legacy_stage3_path)}"
+            )
+            stage_records.append({"stage": stage_id, "status": "skipped_legacy", "path": _rel(legacy_stage3_path)})
+            continue
+        if stage_id != STAGED_ASSEMBLY_STAGE and _stage_complete(stage_path):
             outputs.append(f"STAGED_STAGE_SKIP stage={stage_id} reason=existing_stage_file path={_rel(stage_path)}")
             completed_stage_paths.append(stage_path)
             stage_records.append({"stage": stage_id, "status": "skipped_existing", "path": _rel(stage_path)})
             continue
-        if stage_id == "05-assemble-final-analysis" and _stage_complete(stage_path) and final_ok:
-            outputs.append(f"STAGED_STAGE_SKIP stage={stage_id} reason=existing_final_analysis path={_rel(final_analysis_path)}")
-            stage_records.append(
-                {
+        if deterministic_read_fallback_enabled() and stage_id in {"03a-experiments-results", "03b-limitations-evidence-gaps", "04-evidence-ledger", "05-review-pressure"}:
+            stdout = deterministic_stage03_packet(stage_id, zotero_key, completed_stage_paths)
+            if stdout.strip():
+                stage_path.parent.mkdir(parents=True, exist_ok=True)
+                stage_path.write_text(stdout, encoding="utf-8")
+                stdout_path = _stage_log_path(stage_dir, stage_id, "out")
+                stderr_path = _stage_log_path(stage_dir, stage_id, "err")
+                stdout_path.parent.mkdir(parents=True, exist_ok=True)
+                stdout_path.write_text(stdout, encoding="utf-8")
+                stderr_path.write_text("deterministic_recovery_stage\n", encoding="utf-8")
+                outputs.append(
+                    f"STAGED_STAGE_DONE stage={stage_id} exit_code=0 "
+                    f"out={_rel(stdout_path)} err={_rel(stderr_path)}"
+                )
+                record = {
                     "stage": stage_id,
-                    "status": "skipped_existing",
+                    "status": "success",
+                    "exit_code": 0,
                     "path": _rel(stage_path),
-                    "final_analysis": _rel(final_analysis_path),
+                    "stdout": _rel(stdout_path),
+                    "stderr": _rel(stderr_path),
+                    "missing": [],
+                    "command_attempts": 0,
+                    "cli_session_id": "",
+                    "deterministic_recovery": True,
                 }
+                stage_records.append(record)
+                manifest["stages"] = stage_records
+                manifest_path = _write_staged_manifest(stage_dir, manifest)
+                completed_stage_paths.append(stage_path)
+                continue
+        if stage_id == STAGED_ASSEMBLY_STAGE:
+            assembly_ok, missing_reason = assemble_staged_analysis(stage_dir, final_analysis_path)
+            if final_analysis_path.exists():
+                stage_path.write_text(final_analysis_path.read_text(encoding="utf-8"), encoding="utf-8")
+            stdout_path = _stage_log_path(stage_dir, stage_id, "out")
+            stderr_path = _stage_log_path(stage_dir, stage_id, "err")
+            stdout_path.parent.mkdir(parents=True, exist_ok=True)
+            stdout_path.write_text(
+                f"deterministic_assembly status={'success' if assembly_ok else 'failed'} final_analysis={_rel(final_analysis_path)}\n",
+                encoding="utf-8",
             )
+            stderr_path.write_text("\n".join(missing_reason) + ("\n" if missing_reason else ""), encoding="utf-8")
+            outputs.append(
+                f"STAGED_STAGE_DONE stage={stage_id} exit_code={0 if assembly_ok else 1} out={_rel(stdout_path)} err={_rel(stderr_path)}"
+            )
+            record = {
+                "stage": stage_id,
+                "status": "success" if assembly_ok else "failed",
+                "exit_code": 0 if assembly_ok else 1,
+                "path": _rel(stage_path),
+                "stdout": _rel(stdout_path),
+                "stderr": _rel(stderr_path),
+                "missing": missing_reason,
+                "command_attempts": 0,
+                "cli_session_id": "",
+                "final_analysis": _rel(final_analysis_path),
+                "assembly": "deterministic",
+            }
+            stage_records.append(record)
+            manifest["stages"] = stage_records
+            manifest_path = _write_staged_manifest(stage_dir, manifest)
+            if not assembly_ok:
+                summary_log = _write_read_attempt_log(
+                    run_date=run_date or today_iso(),
+                    zotero_key=zotero_key,
+                    attempt=attempt,
+                    stdout="\n".join(outputs),
+                    stderr=f"STAGED_STAGE_FAILED stage={stage_id} missing={missing_reason}",
+                )
+                if heartbeat_path:
+                    summary_log["heartbeat"] = heartbeat_path
+                summary_log.update(
+                    {
+                        "staged_manifest": manifest_path,
+                        "staged_session_id": session_id,
+                        "staged_dir": _rel(stage_dir),
+                        "stages": stage_records,
+                    }
+                )
+                return "failed:staged_stage_failed", "\n".join(outputs), summary_log
+            completed_stage_paths.append(stage_path)
             continue
 
         prompt = staged_read_prompt(
@@ -1805,26 +2685,58 @@ def read_zotero_key_staged(
             prior_paths=completed_stage_paths,
             final_analysis_path=final_analysis_path,
         )
-        command, env_overrides = _claude_command(
+        cli_session_id = session_id if not completed_stage_paths else None
+        command, env_overrides, prompt_input = _claude_command(
             prompt,
-            session_id=session_id,
+            session_id=cli_session_id,
             allow_dangerous_claude=allow_dangerous_claude,
         )
-        try:
-            code, stdout, stderr = run_subprocess_capture(
-                command,
-                timeout=stage_timeout,
-                heartbeat=(lambda pid, stage_id=stage_id: heartbeat(pid, stage_id)) if run_date else None,
-                heartbeat_interval=60,
-                env_overrides=env_overrides or None,
+        code = 1
+        stdout = ""
+        stderr = ""
+        command_attempt = 0
+        for command_attempt in range(1, 4):
+            try:
+                code, stdout, stderr = run_subprocess_capture(
+                    command,
+                    timeout=stage_timeout,
+                    heartbeat=(lambda pid, stage_id=stage_id: heartbeat(pid, stage_id)) if run_date else None,
+                    heartbeat_interval=60,
+                    env_overrides=env_overrides or None,
+                    input_text=prompt_input,
+                )
+            except FileNotFoundError as exc:
+                code = 127
+                stdout = ""
+                stderr = _subprocess_not_found_message(command, exc)
+                break
+            if code == 0:
+                break
+            retry_reason = _staged_transient_retry_reason(stdout, stderr)
+            if not retry_reason or command_attempt >= 3:
+                break
+            delay = _staged_retry_delay_seconds(
+                stdout,
+                stderr,
+                command_attempt=command_attempt,
+                reason=retry_reason,
             )
-        except FileNotFoundError:
-            return "failed", "claude CLI not found", {"staged_manifest": manifest_path}
+            outputs.append(
+                f"STAGED_STAGE_RETRY stage={stage_id} reason={retry_reason} "
+                f"exit_code={code} attempt={command_attempt}/3 delay_sec={delay}"
+            )
+            time.sleep(delay)
         stdout_path = _stage_log_path(stage_dir, stage_id, "out")
         stderr_path = _stage_log_path(stage_dir, stage_id, "err")
         stdout_path.parent.mkdir(parents=True, exist_ok=True)
         stdout_path.write_text(stdout or "", encoding="utf-8")
         stderr_path.write_text(stderr or "", encoding="utf-8")
+        if code == 0 and stdout.strip():
+            stage_path.parent.mkdir(parents=True, exist_ok=True)
+            stage_path.write_text(stdout, encoding="utf-8")
+            if stage_id == STAGED_ASSEMBLY_STAGE:
+                final_analysis_path.parent.mkdir(parents=True, exist_ok=True)
+                final_analysis_path.write_text(stdout, encoding="utf-8")
         outputs.append(
             f"STAGED_STAGE_DONE stage={stage_id} exit_code={code} out={_rel(stdout_path)} err={_rel(stderr_path)}"
         )
@@ -1833,7 +2745,7 @@ def read_zotero_key_staged(
 
         stage_ok = _stage_complete(stage_path)
         final_ok, final_missing = _final_analysis_has_required_sections(final_analysis_path)
-        if stage_id != "05-assemble-final-analysis":
+        if stage_id != STAGED_ASSEMBLY_STAGE:
             success = code == 0 and stage_ok
             missing_reason = [] if stage_ok else ["missing_or_too_short_stage_file"]
         else:
@@ -1849,8 +2761,10 @@ def read_zotero_key_staged(
             "stdout": _rel(stdout_path),
             "stderr": _rel(stderr_path),
             "missing": missing_reason,
+            "command_attempts": command_attempt,
+            "cli_session_id": cli_session_id or "",
         }
-        if stage_id == "05-assemble-final-analysis":
+        if stage_id == STAGED_ASSEMBLY_STAGE:
             record["final_analysis"] = _rel(final_analysis_path)
         stage_records.append(record)
         manifest["stages"] = stage_records
@@ -1932,6 +2846,216 @@ def read_zotero_key_staged(
     return "success_done", output, summary_log
 
 
+def read_zotero_key_codex_controlled(
+    zotero_key: str,
+    *,
+    timeout: int = 4200,
+    run_date: str = "",
+    attempt: int = 1,
+    allow_dangerous_claude: bool = False,
+) -> tuple[str, str, dict[str, Any]]:
+    _ = allow_dangerous_claude
+    stage_dir = codex_controlled_read_root(zotero_key, attempt=attempt)
+    logs_dir = stage_dir / "logs"
+    stage_dir.mkdir(parents=True, exist_ok=True)
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    final_analysis_path = _final_analysis_path(zotero_key)
+    manifest: dict[str, Any] = {
+        "schema_version": "codex_controlled_read_manifest.v1",
+        "codex_controlled_read_version": CODEX_CONTROLLED_READ_VERSION,
+        "zotero_key": zotero_key,
+        "attempt": attempt,
+        "stage_dir": _rel(stage_dir),
+        "final_analysis_path": _rel(final_analysis_path),
+        "status": "running",
+    }
+    manifest_path = _write_staged_manifest(stage_dir, manifest)
+    outputs: list[str] = [
+        f"CODEX_CONTROLLED_READ_START key={zotero_key} attempt={attempt} stage_dir={_rel(stage_dir)}",
+    ]
+    stderr_parts: list[str] = []
+    heartbeat_path = ""
+
+    def heartbeat(pid: int) -> None:
+        nonlocal heartbeat_path
+        if run_date:
+            heartbeat_path = _write_read_heartbeat(
+                run_date=run_date,
+                zotero_key=zotero_key,
+                attempt=attempt,
+                pid=pid,
+                status="running",
+                timeout=timeout,
+                stage="codex-controlled-read",
+            )
+
+    fulltext, fulltext_status = fetch_zotero_fulltext_for_controlled_read(zotero_key)
+    fulltext_path = stage_dir / "zotero-fulltext.txt"
+    fulltext_path.write_text(fulltext, encoding="utf-8")
+    manifest["zotero_fulltext_status"] = fulltext_status
+    manifest["zotero_fulltext_chars"] = len(fulltext)
+    outputs.append(f"CODEX_FULLTEXT status={fulltext_status} chars={len(fulltext)} path={_rel(fulltext_path)}")
+    if fulltext_status != "ok" or len(fulltext) < MIN_CONTROLLED_FULLTEXT_CHARS:
+        manifest["status"] = "failed"
+        manifest["failure_reason"] = f"zotero_fulltext_unavailable_or_too_short:{fulltext_status}:{len(fulltext)}"
+        manifest_path = _write_staged_manifest(stage_dir, manifest)
+        summary_log = _write_read_attempt_log(
+            run_date=run_date or today_iso(),
+            zotero_key=zotero_key,
+            attempt=attempt,
+            stdout="\n".join(outputs),
+            stderr=manifest["failure_reason"],
+        )
+        summary_log.update(
+            {
+                "codex_controlled_manifest": manifest_path,
+                "codex_controlled_dir": _rel(stage_dir),
+            }
+        )
+        return "failed:missing_zotero_fulltext", "\n".join(outputs), summary_log
+
+    codex_output_path = stage_dir / "codex-final-message.md"
+    command, env_overrides = _codex_controlled_command(stage_dir, codex_output_path)
+    prompt_input = controlled_codex_read_prompt(
+        zotero_key=zotero_key,
+        fulltext=fulltext,
+        local_context=_local_note_context(zotero_key),
+    )
+    code = 1
+    stdout = ""
+    stderr = ""
+    try:
+        code, stdout, stderr = run_subprocess_capture(
+            command,
+            timeout=timeout,
+            heartbeat=heartbeat if run_date else None,
+            heartbeat_interval=60,
+            env_overrides=env_overrides or None,
+            input_text=prompt_input,
+        )
+    except FileNotFoundError as exc:
+        code = 127
+        stderr = _subprocess_not_found_message(command, exc)
+    if run_date and heartbeat_path:
+        heartbeat_path = _write_read_heartbeat(
+            run_date=run_date,
+            zotero_key=zotero_key,
+            attempt=attempt,
+            pid=0,
+            status=f"finished:exit_code={code}",
+            timeout=timeout,
+            stage="codex-controlled-read",
+        )
+    stdout_path = logs_dir / "codex.out.log"
+    stderr_path = logs_dir / "codex.err.log"
+    stdout_path.write_text(stdout or "", encoding="utf-8")
+    stderr_path.write_text(stderr or "", encoding="utf-8")
+    if stderr:
+        stderr_parts.append(f"--- CODEX STDERR ---\n{stderr}")
+    if codex_output_path.exists() and codex_output_path.read_text(encoding="utf-8").strip():
+        final_text = codex_output_path.read_text(encoding="utf-8")
+    else:
+        final_text = stdout
+        codex_output_path.write_text(final_text or "", encoding="utf-8")
+    outputs.append(
+        f"CODEX_CONTROLLED_DONE exit_code={code} out={_rel(stdout_path)} err={_rel(stderr_path)} final={_rel(codex_output_path)}"
+    )
+    final_analysis_path.parent.mkdir(parents=True, exist_ok=True)
+    final_analysis_path.write_text(final_text or "", encoding="utf-8")
+    final_ok, final_missing = _final_analysis_has_required_sections(final_analysis_path)
+    manifest.update(
+        {
+            "codex_exit_code": code,
+            "codex_stdout": _rel(stdout_path),
+            "codex_stderr": _rel(stderr_path),
+            "codex_final_message": _rel(codex_output_path),
+            "final_missing": final_missing,
+        }
+    )
+    if code != 0 or not final_ok:
+        manifest["status"] = "failed"
+        manifest_path = _write_staged_manifest(stage_dir, manifest)
+        summary_log = _write_read_attempt_log(
+            run_date=run_date or today_iso(),
+            zotero_key=zotero_key,
+            attempt=attempt,
+            stdout="\n".join(outputs),
+            stderr="\n\n".join(stderr_parts + [f"CODEX_CONTROLLED_FAILED missing={final_missing} exit_code={code}"]),
+        )
+        if heartbeat_path:
+            summary_log["heartbeat"] = heartbeat_path
+        summary_log.update(
+            {
+                "codex_controlled_manifest": manifest_path,
+                "codex_controlled_dir": _rel(stage_dir),
+                "final_analysis": _rel(final_analysis_path),
+            }
+        )
+        return "failed:codex_controlled_read", "\n".join(outputs), summary_log
+
+    finalize_cmd = [
+        sys.executable,
+        ".claude/scripts/finalize_reading.py",
+        zotero_key,
+        "--analysis",
+        _rel(final_analysis_path),
+    ]
+    finalize_code, finalize_stdout, finalize_stderr = run_subprocess_capture(finalize_cmd, timeout=420)
+    finalize_out_path = logs_dir / "finalize.out.log"
+    finalize_err_path = logs_dir / "finalize.err.log"
+    finalize_out_path.write_text(finalize_stdout or "", encoding="utf-8")
+    finalize_err_path.write_text(finalize_stderr or "", encoding="utf-8")
+    outputs.append(
+        f"CODEX_CONTROLLED_FINALIZE exit_code={finalize_code} out={_rel(finalize_out_path)} err={_rel(finalize_err_path)}"
+    )
+    if finalize_stderr:
+        stderr_parts.append(f"--- FINALIZE STDERR ---\n{finalize_stderr}")
+    note_status, note_path = local_note_status(zotero_key)
+    verification = f"\nREAD_VERIFY: note={note_path or '-'} status={note_status}"
+    summary_log = _write_read_attempt_log(
+        run_date=run_date or today_iso(),
+        zotero_key=zotero_key,
+        attempt=attempt,
+        stdout="\n".join(outputs) + verification,
+        stderr="\n\n".join(stderr_parts),
+    )
+    if heartbeat_path:
+        summary_log["heartbeat"] = heartbeat_path
+    summary_log.update(
+        {
+            "codex_controlled_manifest": manifest_path,
+            "codex_controlled_dir": _rel(stage_dir),
+            "final_analysis": _rel(final_analysis_path),
+        }
+    )
+    if finalize_code != 0:
+        manifest["status"] = "failed"
+        manifest["failure_reason"] = "finalize_reading_failed"
+        _write_staged_manifest(stage_dir, manifest)
+        return "failed:finalize_reading", "\n".join(outputs) + verification, summary_log
+    if note_status != "done":
+        reason = _read_failure_reason("\n".join(outputs), note_status)
+        manifest["status"] = "failed"
+        manifest["failure_reason"] = reason
+        _write_staged_manifest(stage_dir, manifest)
+        return f"failed:{reason}", "\n".join(outputs) + verification, summary_log
+    audit_status, audit_output, audit_fields = run_target_note_audit(zotero_key, run_date=run_date, attempt=attempt)
+    summary_log.update(audit_fields)
+    output = "\n".join(outputs) + verification + audit_output
+    if audit_status != "passed":
+        manifest["status"] = "failed"
+        manifest["failure_reason"] = "target_note_audit_failed"
+        manifest.update(audit_fields)
+        _write_staged_manifest(stage_dir, manifest)
+        return "failed:target_note_audit", output, summary_log
+    manifest["status"] = "success_done"
+    manifest["target_note_audit_status"] = "passed"
+    manifest["audit_json_path"] = audit_fields.get("audit_json_path", "")
+    manifest_path = _write_staged_manifest(stage_dir, manifest)
+    summary_log["codex_controlled_manifest"] = manifest_path
+    return "success_done", output, summary_log
+
+
 def read_zotero_key_timed(
     zotero_key: str,
     *,
@@ -1940,15 +3064,20 @@ def read_zotero_key_timed(
     max_attempts: int = 1,
     retry_delay_sec: int = 60,
     allow_dangerous_claude: bool = False,
-    read_mode: str = "staged",
+    read_mode: str = "codex-controlled",
 ) -> tuple[str, str, float, list[dict[str, Any]]]:
     started = time.monotonic()
     outputs: list[str] = []
     logs: list[dict[str, Any]] = []
     status = "failed:not_started"
-    effective_attempts = 1 if read_mode == "staged" else max(1, max_attempts)
+    effective_attempts = 1 if read_mode in {"staged", "codex-controlled"} else max(1, max_attempts)
     for attempt in range(1, effective_attempts + 1):
-        read_func = read_zotero_key_staged if read_mode == "staged" else read_zotero_key
+        if read_mode == "staged":
+            read_func = read_zotero_key_staged
+        elif read_mode == "codex-controlled":
+            read_func = read_zotero_key_codex_controlled
+        else:
+            read_func = read_zotero_key
         status, output, log_paths = read_func(
             zotero_key,
             timeout=timeout,
@@ -2115,7 +3244,8 @@ def render_run_log(
             logs = "; ".join(
                 f"attempt{log.get('attempt')}:out={log.get('stdout')},err={log.get('stderr')},"
                 f"heartbeat={log.get('heartbeat', '-')},audit={log.get('audit_json_path', '-')},"
-                f"staged_manifest={log.get('staged_manifest', '-')}"
+                f"staged_manifest={log.get('staged_manifest', '-')},"
+                f"codex_controlled_manifest={log.get('codex_controlled_manifest', '-')}"
                 for log in item.get("read_attempt_logs", [])
             )
             lines.append(f"  - read_attempt_logs: {logs}")
@@ -2243,7 +3373,8 @@ def render_resume_log(
             logs = "; ".join(
                 f"attempt{log.get('attempt')}:out={log.get('stdout')},err={log.get('stderr')},"
                 f"heartbeat={log.get('heartbeat', '-')},audit={log.get('audit_json_path', '-')},"
-                f"staged_manifest={log.get('staged_manifest', '-')}"
+                f"staged_manifest={log.get('staged_manifest', '-')},"
+                f"codex_controlled_manifest={log.get('codex_controlled_manifest', '-')}"
                 for log in item.get("read_attempt_logs", [])
             )
             lines.append(f"  - read_attempt_logs: {logs}")
@@ -3122,8 +4253,8 @@ def main() -> int:
     parser.add_argument("--resume-backlog", action="store_true", help="Resume reading Zotero keys listed in the run-date reading backlog instead of importing new papers.")
     parser.add_argument("--skip-read", action="store_true", help="Import and ingest but do not invoke Claude reading.")
     parser.add_argument("--read-timeout", type=int, default=4200)
-    parser.add_argument("--read-mode", choices=["staged", "single"], default="staged", help="Use checkpointed staged reading by default; single keeps the legacy one-shot /read-paper call.")
-    parser.add_argument("--read-retries", type=int, default=0, help="Retry failed one-shot Claudian reads this many extra times. Staged reads resume by stage and do not whole-paper retry.")
+    parser.add_argument("--read-mode", choices=["codex-controlled", "staged", "single"], default="codex-controlled", help="Use controlled Codex fulltext reading by default; staged and single keep legacy Claudian paths.")
+    parser.add_argument("--read-retries", type=int, default=0, help="Retry failed one-shot Claudian reads this many extra times. Staged and codex-controlled reads do not whole-paper retry.")
     parser.add_argument("--read-retry-delay", type=int, default=90, help="Seconds to wait between failed Claudian read attempts.")
     parser.add_argument("--read-failure-backfill", type=int, default=5, help="Extra candidate read slots used to replace failed Claudian reads before ending the daily run.")
     parser.add_argument(

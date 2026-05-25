@@ -869,6 +869,21 @@ def _schema_safe_deepseek_reviews(reviews: list[dict[str, Any]]) -> list[dict[st
 
 def build_payload(selected: list[dict[str, Any]], *, run_date: str, provider_payload: dict[str, Any] | None = None) -> tuple[dict[str, Any], int]:
     provider_payload = provider_payload or {}
+    if not selected:
+        payload = {
+            "schema_version": "deepseek_review.v1",
+            "run_date": run_date,
+            "status": "success_empty_selection",
+            "reviews": [],
+            "provider_status": {
+                "provider": "deepseek",
+                "provider_backed": False,
+                "mode": "no_selection",
+                "boundary": "No selected candidates; no model review was required or used as gate evidence.",
+            },
+            "artifact_hashes": artifact_hashes(run_date, ["selected-candidates.json"]),
+        }
+        return payload, 0
     if provider_payload and not provider_payload.get("_provider_error"):
         errors = _validate_provider_reviews(selected, provider_payload)
         provider_status = {**dict(provider_payload.get("provider_status", {})), "validation_errors": errors}

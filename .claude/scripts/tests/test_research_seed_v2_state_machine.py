@@ -220,6 +220,7 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
         script_dir = root / ".claude" / "scripts"
         script_dir.mkdir(parents=True, exist_ok=True)
         shutil.copy2(SCRIPTS_DIR / "run_daily_arxiv_task.ps1", script_dir / "run_daily_arxiv_task.ps1")
+        shutil.copy2(SCRIPTS_DIR / "automation_pause_guard.ps1", script_dir / "automation_pause_guard.ps1")
         env = os.environ.copy()
         env["DAILY_ARXIV_WRAPPER_TEST_MODE"] = "1"
         env["DAILY_ARXIV_WRAPPER_TEST_PIPELINE_EXIT"] = str(pipeline_exit)
@@ -1110,6 +1111,14 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
         self.assertEqual(exit_code, 2)
         self.assertEqual(blocked["status"], "partial_provider_invalid")
         self.assertFalse(blocked["provider_status"]["provider_backed"])
+
+    def test_deepseek_empty_selection_is_success_noop(self) -> None:
+        payload, exit_code = build_deepseek_payload([], run_date=RUN_DATE, provider_payload={})
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["status"], "success_empty_selection")
+        self.assertEqual(payload["reviews"], [])
+        self.assertFalse(payload["provider_status"]["provider_backed"])
+        self.assertEqual(payload["provider_status"]["mode"], "no_selection")
 
     def test_deepseek_opencode_provider_success_with_mocked_cli(self) -> None:
         output = {
@@ -2857,14 +2866,15 @@ def bad(source, recommended):
         self.assertNotIn('"--deepseek-provider", "none"', text)
         self.assertNotIn('"--codex-execution-provider", "none"', text)
 
-    def test_run_daily_wrapper_uses_staged_read_without_whole_paper_retry(self) -> None:
+    def test_run_daily_wrapper_uses_codex_controlled_read_without_whole_paper_retry(self) -> None:
         wrapper = SCRIPTS_DIR / "run_daily_arxiv_task.ps1"
         text = wrapper.read_text(encoding="utf-8")
         self.assertIn('"--read-mode"', text)
-        self.assertIn('"staged"', text)
+        self.assertIn('"codex-controlled"', text)
         self.assertIn('"--read-retries"', text)
         self.assertIn('"0"', text)
         self.assertNotIn('"--read-retries",\n    "1"', text)
+        self.assertNotIn('"--allow-dangerous-claude"', text)
 
     def test_jsonschema_draft202012_validator_path_is_active(self) -> None:
         self.assertTrue(schema_validator_available())

@@ -12,6 +12,7 @@ from daily_arxiv_pipeline import (
     collect_candidates,
     exclude_existing_candidates,
     ingest_zotero_key,
+    read_zotero_key_codex_controlled,
     read_zotero_key_staged,
     run_subprocess,
     write_jsonl,
@@ -111,6 +112,8 @@ def render_report(
             lines.append(f"  - global_warning_counts: {item.get('global_warning_counts')}")
         if item.get("staged_manifest"):
             lines.append(f"  - staged_manifest: {item.get('staged_manifest')}")
+        if item.get("codex_controlled_manifest"):
+            lines.append(f"  - codex_controlled_manifest: {item.get('codex_controlled_manifest')}")
     lines.extend(["", "## Existing Excluded Sample", ""])
     if not existing_candidates:
         lines.append("- none")
@@ -224,7 +227,8 @@ def run_backfill(args: argparse.Namespace) -> int:
         read_output = ""
         read_log_paths: dict[str, Any] = {}
         if not args.skip_read and ingest_status == "success":
-            read_status, read_output, read_log_paths = read_zotero_key_staged(
+            read_func = read_zotero_key_codex_controlled if args.read_mode == "codex-controlled" else read_zotero_key_staged
+            read_status, read_output, read_log_paths = read_func(
                 result.zotero_key,
                 timeout=args.read_timeout,
                 run_date=run_date,
@@ -242,6 +246,7 @@ def run_backfill(args: argparse.Namespace) -> int:
                 "global_warning_paths": read_log_paths.get("global_warning_paths", {}),
                 "audit_json_path": read_log_paths.get("audit_json_path", ""),
                 "staged_manifest": read_log_paths.get("staged_manifest", ""),
+                "codex_controlled_manifest": read_log_paths.get("codex_controlled_manifest", ""),
                 "final_analysis": read_log_paths.get("final_analysis", ""),
             }
         )
@@ -301,6 +306,7 @@ def main() -> int:
     parser.add_argument("--query-delay", type=float, default=3.2)
     parser.add_argument("--skip-read", action="store_true")
     parser.add_argument("--read-timeout", type=int, default=4200)
+    parser.add_argument("--read-mode", choices=["codex-controlled", "staged"], default="codex-controlled")
     return run_backfill(parser.parse_args())
 
 

@@ -3,7 +3,9 @@ param(
   [string]$DeepSeekProvider = "none",
 
   [ValidateSet("none", "codex-cli")]
-  [string]$CodexExecutionProvider = "none"
+  [string]$CodexExecutionProvider = "none",
+
+  [switch]$IgnorePauseGuard
 )
 
 $ErrorActionPreference = "Stop"
@@ -25,6 +27,19 @@ Set-Location $VaultRoot
 function Write-TaskLog {
   param([string]$Message)
   $Message | Out-File -FilePath $LogPath -Append -Encoding utf8
+}
+
+. (Join-Path $ScriptPath "automation_pause_guard.ps1")
+
+$StartedAt = Get-Date -Format "yyyy-MM-dd HH:mm:ss zzz"
+Write-TaskLog "[$StartedAt] START DailyArxivEmbodiedAIScout"
+if (-not $IgnorePauseGuard -and (Test-VaultAutomationPaused -VaultRoot $VaultRoot -TaskName "DailyArxivEmbodiedAIScout" -LogPath $LogPath)) {
+  $FinishedAt = Get-Date -Format "yyyy-MM-dd HH:mm:ss zzz"
+  Write-TaskLog "[$FinishedAt] END exit_code=0 status=paused_by_pause_guard"
+  exit 0
+}
+if ($IgnorePauseGuard) {
+  Write-TaskLog "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss zzz")] PAUSE_GUARD ignored_by_switch task=DailyArxivEmbodiedAIScout"
 }
 
 function Assert-NoGovernanceMutationArgs {
@@ -123,8 +138,6 @@ foreach ($Name in @("ZOTERO_API_KEY", "ZOTERO_USER_ID")) {
 }
 
 $Python = (Get-Command python).Source
-$StartedAt = Get-Date -Format "yyyy-MM-dd HH:mm:ss zzz"
-Write-TaskLog "[$StartedAt] START DailyArxivEmbodiedAIScout"
 $SyncTimeoutSeconds = 900
 $WrapperTestMode = [Environment]::GetEnvironmentVariable("DAILY_ARXIV_WRAPPER_TEST_MODE", "Process") -eq "1"
 
@@ -190,7 +203,7 @@ try {
     "--read-timeout",
     "4200",
     "--read-mode",
-    "staged",
+    "codex-controlled",
     "--read-retries",
     "0",
     "--read-retry-delay",
