@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -40,6 +41,37 @@ def audit_payload(*, passed: bool = True, issues: list[str] | None = None, globa
             "exit_policy": "target_note_only",
         }
     )
+
+
+def write_zotero_attachment_db(root: Path, *, parent_key: str = "AUDITKEY", attachment_key: str = "ATTKEY", attachment_path: str = "storage:paper.pdf") -> Path:
+    db_path = root / "zotero.sqlite"
+    con = sqlite3.connect(db_path)
+    con.executescript(
+        """
+        CREATE TABLE items (
+          itemID INTEGER PRIMARY KEY,
+          itemTypeID INT NOT NULL DEFAULT 0,
+          dateModified TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          key TEXT NOT NULL
+        );
+        CREATE TABLE itemAttachments (
+          itemID INTEGER PRIMARY KEY,
+          parentItemID INT,
+          contentType TEXT,
+          path TEXT
+        );
+        INSERT INTO items(itemID, key) VALUES (1, 'AUDITKEY');
+        INSERT INTO items(itemID, key) VALUES (2, 'ATTKEY');
+        INSERT INTO itemAttachments(itemID, parentItemID, contentType, path)
+        VALUES (2, 1, 'application/pdf', 'storage:paper.pdf');
+        """
+    )
+    con.execute("UPDATE items SET key = ? WHERE itemID = 1", (parent_key,))
+    con.execute("UPDATE items SET key = ? WHERE itemID = 2", (attachment_key,))
+    con.execute("UPDATE itemAttachments SET path = ? WHERE itemID = 2", (attachment_path,))
+    con.commit()
+    con.close()
+    return db_path
 
 
 class DailyReadTargetAuditTest(unittest.TestCase):
@@ -292,6 +324,108 @@ class DailyReadTargetAuditTest(unittest.TestCase):
         manifest = json.loads((self.root / logs["staged_manifest"]).read_text(encoding="utf-8"))
         self.assertEqual(manifest["status"], "success_done")
 
+    def test_controlled_fulltext_resolver_uses_local_api_when_available(self) -> None:
+        text = "API fulltext evidence. " * 200
+        with patch.object(pipeline, "_fetch_zotero_fulltext_via_local_api", return_value=(text, "ok")):
+            fulltext, manifest = pipeline.resolve_zotero_fulltext_for_controlled_read(
+                "AUDITKEY",
+                db_path=self.root / "missing.sqlite",
+                storage_root=self.root / "storage",
+            )
+
+        self.assertEqual(fulltext, text)
+        self.assertEqual(manifest["status"], "ok")
+        self.assertEqual(manifest["source"], "zotero_local_api")
+        self.assertEqual(manifest["chars"], len(text))
+        self.assertTrue(manifest["source_hash"])
+
+    def test_controlled_fulltext_resolver_falls_back_to_zotero_ft_cache(self) -> None:
+        db_path = write_zotero_attachment_db(self.root)
+        cache_path = self.root / "storage" / "ATTKEY" / ".zotero-ft-cache"
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        cache_text = "Cached fulltext evidence. " * 200
+        cache_path.write_text(cache_text, encoding="utf-8")
+
+        with patch.object(pipeline, "_fetch_zotero_fulltext_via_local_api", return_value=("", "HTTPError:404")):
+            fulltext, manifest = pipeline.resolve_zotero_fulltext_for_controlled_read(
+                "AUDITKEY",
+                db_path=db_path,
+                storage_root=self.root / "storage",
+            )
+
+        self.assertEqual(fulltext, cache_text.strip())
+        self.assertEqual(manifest["status"], "ok")
+        self.assertEqual(manifest["source"], "zotero_ft_cache")
+        self.assertEqual(manifest["attachment_key"], "ATTKEY")
+        self.assertIn("HTTPError:404", manifest["errors"][0])
+
+    def test_controlled_fulltext_resolver_queries_temp_sqlite_copy(self) -> None:
+        db_path = write_zotero_attachment_db(self.root)
+        cache_path = self.root / "storage" / "ATTKEY" / ".zotero-ft-cache"
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        cache_path.write_text("Cached fulltext evidence. " * 200, encoding="utf-8")
+        real_connect = sqlite3.connect
+        connected_paths: list[str] = []
+
+        def connect_spy(database, *args, **kwargs):
+            connected_paths.append(str(database))
+            self.assertNotIn(db_path.as_posix(), str(database))
+            self.assertNotIn(str(db_path), str(database))
+            return real_connect(database, *args, **kwargs)
+
+        with (
+            patch.object(pipeline, "_fetch_zotero_fulltext_via_local_api", return_value=("", "HTTPError:404")),
+            patch.object(pipeline.sqlite3, "connect", side_effect=connect_spy),
+        ):
+            _fulltext, manifest = pipeline.resolve_zotero_fulltext_for_controlled_read(
+                "AUDITKEY",
+                db_path=db_path,
+                storage_root=self.root / "storage",
+            )
+
+        self.assertEqual(manifest["status"], "ok")
+        self.assertTrue(connected_paths)
+
+    def test_controlled_fulltext_resolver_falls_back_to_pdf_text_extraction(self) -> None:
+        db_path = write_zotero_attachment_db(self.root)
+        pdf_path = self.root / "storage" / "ATTKEY" / "paper.pdf"
+        pdf_path.parent.mkdir(parents=True, exist_ok=True)
+        pdf_path.write_bytes(b"%PDF-1.4 fixture")
+        pdf_text = "PDF extracted fulltext evidence. " * 200
+
+        with (
+            patch.object(pipeline, "_fetch_zotero_fulltext_via_local_api", return_value=("", "HTTPError:404")),
+            patch.object(pipeline, "_extract_pdf_text_for_controlled_read", return_value=(pdf_text, "pypdf")),
+        ):
+            fulltext, manifest = pipeline.resolve_zotero_fulltext_for_controlled_read(
+                "AUDITKEY",
+                db_path=db_path,
+                storage_root=self.root / "storage",
+            )
+
+        self.assertEqual(fulltext, pdf_text)
+        self.assertEqual(manifest["status"], "ok")
+        self.assertEqual(manifest["source"], "pdf_text_extraction")
+        self.assertEqual(manifest["attachment_key"], "ATTKEY")
+
+    def test_controlled_fulltext_resolver_fails_closed_when_all_sources_short(self) -> None:
+        db_path = write_zotero_attachment_db(self.root)
+        cache_path = self.root / "storage" / "ATTKEY" / ".zotero-ft-cache"
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        cache_path.write_text("too short", encoding="utf-8")
+
+        with patch.object(pipeline, "_fetch_zotero_fulltext_via_local_api", return_value=("short", "ok")):
+            fulltext, manifest = pipeline.resolve_zotero_fulltext_for_controlled_read(
+                "AUDITKEY",
+                db_path=db_path,
+                storage_root=self.root / "storage",
+            )
+
+        self.assertEqual(fulltext, "")
+        self.assertEqual(manifest["status"], "failed")
+        self.assertEqual(manifest["source"], "none")
+        self.assertIn("chars=5", manifest["errors"][0])
+
     def test_codex_controlled_read_uses_supplied_fulltext_and_target_audit(self) -> None:
         calls: list[list[str]] = []
 
@@ -312,8 +446,18 @@ class DailyReadTargetAuditTest(unittest.TestCase):
                 return 0, audit_payload(), ""
             return 0, "", ""
 
+        resolver_text = "Fulltext evidence. " * 300
+        resolver_manifest = pipeline._controlled_fulltext_manifest(
+            zotero_key="AUDITKEY",
+            status="ok",
+            source="zotero_ft_cache",
+            content=resolver_text,
+            errors=["zotero_local_api:HTTPError:404:chars=0"],
+            attachment_key="ATTKEY",
+            source_path=str(self.root / "storage" / "ATTKEY" / ".zotero-ft-cache"),
+        )
         with (
-            patch.object(pipeline, "fetch_zotero_fulltext_for_controlled_read", return_value=("Fulltext evidence. " * 300, "ok")),
+            patch.object(pipeline, "resolve_zotero_fulltext_for_controlled_read", return_value=(resolver_text, resolver_manifest)),
             patch.object(pipeline, "run_subprocess_capture", side_effect=side_effect),
         ):
             status, output, logs = pipeline.read_zotero_key_codex_controlled("AUDITKEY", run_date=RUN_DATE)
@@ -327,6 +471,12 @@ class DailyReadTargetAuditTest(unittest.TestCase):
         manifest = json.loads((self.root / logs["codex_controlled_manifest"]).read_text(encoding="utf-8"))
         self.assertEqual(manifest["status"], "success_done")
         self.assertEqual(manifest["zotero_fulltext_status"], "ok")
+        self.assertEqual(manifest["zotero_fulltext_source"], "zotero_ft_cache")
+        self.assertTrue(logs["zotero_fulltext_resolution_manifest"].endswith("zotero-fulltext-resolution.json"))
+        resolver_path = self.root / logs["zotero_fulltext_resolution_manifest"]
+        self.assertTrue(resolver_path.exists())
+        resolver_payload = json.loads(resolver_path.read_text(encoding="utf-8"))
+        self.assertEqual(resolver_payload["attachment_key"], "ATTKEY")
 
     def test_codex_controlled_read_fails_closed_without_zotero_fulltext(self) -> None:
         calls: list[list[str]] = []
@@ -335,16 +485,24 @@ class DailyReadTargetAuditTest(unittest.TestCase):
             calls.append(command)
             return 0, "", ""
 
+        resolver_manifest = pipeline._controlled_fulltext_manifest(
+            zotero_key="AUDITKEY",
+            status="failed",
+            source="none",
+            content="",
+            errors=["zotero_local_api:empty:chars=0"],
+        )
         with (
-            patch.object(pipeline, "fetch_zotero_fulltext_for_controlled_read", return_value=("", "empty")),
+            patch.object(pipeline, "resolve_zotero_fulltext_for_controlled_read", return_value=("", resolver_manifest)),
             patch.object(pipeline, "run_subprocess_capture", side_effect=side_effect),
         ):
             status, output, logs = pipeline.read_zotero_key_codex_controlled("AUDITKEY", run_date=RUN_DATE)
 
         self.assertEqual(status, "failed:missing_zotero_fulltext")
-        self.assertIn("CODEX_FULLTEXT status=empty chars=0", output)
+        self.assertIn("CODEX_FULLTEXT status=failed source=none chars=0", output)
         self.assertFalse(calls)
         self.assertTrue(logs["codex_controlled_manifest"].endswith("raw/readings/_codex_controlled/AUDITKEY/attempt-1/manifest.json"))
+        self.assertTrue(logs["zotero_fulltext_resolution_manifest"].endswith("zotero-fulltext-resolution.json"))
 
     def test_staged_transient_retry_reason_handles_tool_call_parse_failure(self) -> None:
         self.assertEqual(

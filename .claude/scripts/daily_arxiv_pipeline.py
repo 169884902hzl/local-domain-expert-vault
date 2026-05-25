@@ -2,18 +2,21 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
 import shutil
+import sqlite3
 import subprocess
 import sys
+import tempfile
 import time
 import uuid
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -59,6 +62,8 @@ CLAUDE_BIN_CANDIDATES = [
 CODEX_CONTROLLED_READ_VERSION = 1
 ZOTERO_LOCAL_API = "http://localhost:23119/api/users/0"
 MIN_CONTROLLED_FULLTEXT_CHARS = 2000
+ZOTERO_DB_ENV = "LOCAL_FIRST_VAULT_ZOTERO_DB"
+ZOTERO_STORAGE_ENV = "LOCAL_FIRST_VAULT_ZOTERO_STORAGE"
 ATOM = {"atom": "http://www.w3.org/2005/Atom", "arxiv": "http://arxiv.org/schemas/atom"}
 AUTO_IMPORT_FILL_DECISION = "auto_import_fill"
 NEW_IMPORT_STATUSES = {"created", "sync_pending"}
@@ -119,6 +124,14 @@ STAGED_READ_STAGES = [
         "Read all previous stage files and synthesize one complete strict analysis file. The final file must contain every required section and must be coherent as a standalone deep reading. Do not run finalize_reading.py; the pipeline will run it after this stage.",
     ),
 ]
+
+
+@dataclass(frozen=True)
+class ZoteroAttachmentCandidate:
+    attachment_key: str
+    attachment_path: str
+    content_type: str
+
 STAGED_ASSEMBLY_STAGE = "06-assemble-final-analysis"
 STAGED_REQUIRED_FINAL_SECTIONS = [
     "## Evidence Metadata",
@@ -1968,7 +1981,45 @@ def _prior_stage_context(paths: list[Path]) -> str:
     return "\n\n".join(blocks)
 
 
-def fetch_zotero_fulltext_for_controlled_read(zotero_key: str, *, timeout: int = 45) -> tuple[str, str]:
+def _sha256_text(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _controlled_fulltext_manifest(
+    *,
+    zotero_key: str,
+    status: str,
+    source: str,
+    content: str,
+    errors: list[str],
+    attachment_key: str = "",
+    source_path: str = "",
+) -> dict[str, Any]:
+    return {
+        "schema_version": "zotero_fulltext_resolution.v1",
+        "zotero_key": zotero_key,
+        "attachment_key": attachment_key,
+        "source": source,
+        "source_path": source_path,
+        "chars": len(content),
+        "status": status,
+        "errors": errors,
+        "source_hash": _sha256_text(content) if content else "",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def _zotero_db_path() -> Path:
+    configured = os.environ.get(ZOTERO_DB_ENV, "").strip()
+    return Path(configured) if configured else Path.home() / "Zotero" / "zotero.sqlite"
+
+
+def _zotero_storage_root() -> Path:
+    configured = os.environ.get(ZOTERO_STORAGE_ENV, "").strip()
+    return Path(configured) if configured else Path.home() / "Zotero" / "storage"
+
+
+def _fetch_zotero_fulltext_via_local_api(zotero_key: str, *, timeout: int = 45) -> tuple[str, str]:
     url = f"{ZOTERO_LOCAL_API}/items/{urllib.parse.quote(zotero_key)}/fulltext"
     try:
         req = urllib.request.Request(url, headers={"Accept": "application/json"})
@@ -1980,6 +2031,210 @@ def fetch_zotero_fulltext_for_controlled_read(zotero_key: str, *, timeout: int =
     if not content:
         return "", "empty"
     return content, "ok"
+
+
+def _resolve_zotero_attachment_from_sqlite(zotero_key: str, *, db_path: Path | None = None) -> tuple[ZoteroAttachmentCandidate | None, list[str]]:
+    source_db = db_path or _zotero_db_path()
+    errors: list[str] = []
+    if not source_db.exists():
+        return None, [f"zotero_sqlite_missing:{source_db}"]
+    with tempfile.TemporaryDirectory(prefix="zotero-readonly-") as temp_dir:
+        temp_db = Path(temp_dir) / "zotero.sqlite"
+        try:
+            shutil.copy2(source_db, temp_db)
+        except OSError as exc:
+            return None, [f"zotero_sqlite_copy_failed:{type(exc).__name__}:{exc}"]
+        try:
+            con = sqlite3.connect(f"file:{temp_db.as_posix()}?mode=ro", uri=True)
+            rows = con.execute(
+                """
+                SELECT attachment_items.key, itemAttachments.path, itemAttachments.contentType
+                FROM items parent_items
+                JOIN itemAttachments ON itemAttachments.parentItemID = parent_items.itemID
+                JOIN items attachment_items ON attachment_items.itemID = itemAttachments.itemID
+                WHERE parent_items.key = ?
+                ORDER BY
+                  CASE
+                    WHEN itemAttachments.contentType = 'application/pdf' THEN 0
+                    WHEN lower(coalesce(itemAttachments.path, '')) LIKE '%.pdf' THEN 1
+                    ELSE 2
+                  END,
+                  attachment_items.dateModified DESC
+                """,
+                (zotero_key,),
+            ).fetchall()
+            if not rows:
+                rows = con.execute(
+                    """
+                    SELECT items.key, itemAttachments.path, itemAttachments.contentType
+                    FROM items
+                    JOIN itemAttachments ON itemAttachments.itemID = items.itemID
+                    WHERE items.key = ?
+                    ORDER BY
+                      CASE
+                        WHEN itemAttachments.contentType = 'application/pdf' THEN 0
+                        WHEN lower(coalesce(itemAttachments.path, '')) LIKE '%.pdf' THEN 1
+                        ELSE 2
+                      END
+                    """,
+                    (zotero_key,),
+                ).fetchall()
+        except sqlite3.Error as exc:
+            return None, [f"zotero_sqlite_query_failed:{type(exc).__name__}:{exc}"]
+        finally:
+            try:
+                con.close()
+            except Exception:
+                pass
+    if not rows:
+        return None, ["zotero_attachment_not_found"]
+    key, path, content_type = rows[0]
+    return ZoteroAttachmentCandidate(
+        attachment_key=str(key or ""),
+        attachment_path=str(path or ""),
+        content_type=str(content_type or ""),
+    ), errors
+
+
+def _attachment_storage_dir(attachment_key: str, *, storage_root: Path | None = None) -> Path:
+    return (storage_root or _zotero_storage_root()) / attachment_key
+
+
+def _attachment_cache_path(attachment_key: str, *, storage_root: Path | None = None) -> Path:
+    return _attachment_storage_dir(attachment_key, storage_root=storage_root) / ".zotero-ft-cache"
+
+
+def _attachment_pdf_path(candidate: ZoteroAttachmentCandidate, *, storage_root: Path | None = None) -> Path | None:
+    root = storage_root or _zotero_storage_root()
+    raw_path = candidate.attachment_path.strip()
+    possible: list[Path] = []
+    if raw_path.startswith("storage:"):
+        possible.append(root / candidate.attachment_key / raw_path.split(":", 1)[1])
+    elif raw_path:
+        path = Path(raw_path)
+        possible.append(path if path.is_absolute() else root / candidate.attachment_key / raw_path)
+    possible.extend(sorted((root / candidate.attachment_key).glob("*.pdf")))
+    for path in possible:
+        if path.exists() and path.is_file():
+            return path
+    return None
+
+
+def _read_cached_fulltext(path: Path) -> tuple[str, str]:
+    if not path.exists():
+        return "", "cache_missing"
+    try:
+        return path.read_text(encoding="utf-8", errors="replace").strip(), "ok"
+    except OSError as exc:
+        return "", f"cache_read_failed:{type(exc).__name__}:{exc}"
+
+
+def _extract_pdf_text_for_controlled_read(pdf_path: Path, *, timeout: int = 180) -> tuple[str, str]:
+    extraction_errors: list[str] = []
+    for module_name in ("pypdf", "PyPDF2"):
+        try:
+            module = __import__(module_name)
+            reader = module.PdfReader(str(pdf_path))
+            text = "\n".join((page.extract_text() or "") for page in reader.pages)
+            if text.strip():
+                return text.strip(), module_name
+            extraction_errors.append(f"{module_name}:empty")
+        except Exception as exc:
+            extraction_errors.append(f"{module_name}:{type(exc).__name__}:{exc}")
+    try:
+        code, stdout, stderr = run_subprocess_capture(["pdftotext", "-layout", str(pdf_path), "-"], timeout=timeout)
+        if code == 0 and stdout.strip():
+            return stdout.strip(), "pdftotext"
+        extraction_errors.append(f"pdftotext:exit_{code}:{(stderr or '')[:200]}")
+    except Exception as exc:
+        extraction_errors.append(f"pdftotext:{type(exc).__name__}:{exc}")
+    return "", "pdf_text_extraction_failed:" + "|".join(extraction_errors)
+
+
+def resolve_zotero_fulltext_for_controlled_read(
+    zotero_key: str,
+    *,
+    timeout: int = 45,
+    min_chars: int = MIN_CONTROLLED_FULLTEXT_CHARS,
+    db_path: Path | None = None,
+    storage_root: Path | None = None,
+) -> tuple[str, dict[str, Any]]:
+    errors: list[str] = []
+    api_text, api_status = _fetch_zotero_fulltext_via_local_api(zotero_key, timeout=timeout)
+    if len(api_text) >= min_chars:
+        return api_text, _controlled_fulltext_manifest(
+            zotero_key=zotero_key,
+            status="ok",
+            source="zotero_local_api",
+            content=api_text,
+            errors=errors,
+        )
+    errors.append(f"zotero_local_api:{api_status}:chars={len(api_text)}")
+
+    candidate, sqlite_errors = _resolve_zotero_attachment_from_sqlite(zotero_key, db_path=db_path)
+    errors.extend(sqlite_errors)
+    if candidate is None or not candidate.attachment_key:
+        return "", _controlled_fulltext_manifest(
+            zotero_key=zotero_key,
+            status="failed",
+            source="none",
+            content="",
+            errors=errors,
+        )
+
+    cache_path = _attachment_cache_path(candidate.attachment_key, storage_root=storage_root)
+    cache_text, cache_status = _read_cached_fulltext(cache_path)
+    if len(cache_text) >= min_chars:
+        return cache_text, _controlled_fulltext_manifest(
+            zotero_key=zotero_key,
+            status="ok",
+            source="zotero_ft_cache",
+            content=cache_text,
+            errors=errors,
+            attachment_key=candidate.attachment_key,
+            source_path=str(cache_path),
+        )
+    errors.append(f"zotero_ft_cache:{cache_status}:chars={len(cache_text)}")
+
+    pdf_path = _attachment_pdf_path(candidate, storage_root=storage_root)
+    if pdf_path is None:
+        errors.append("pdf_attachment_not_found")
+        return "", _controlled_fulltext_manifest(
+            zotero_key=zotero_key,
+            status="failed",
+            source="none",
+            content="",
+            errors=errors,
+            attachment_key=candidate.attachment_key,
+        )
+    pdf_text, pdf_status = _extract_pdf_text_for_controlled_read(pdf_path)
+    if len(pdf_text) >= min_chars:
+        return pdf_text, _controlled_fulltext_manifest(
+            zotero_key=zotero_key,
+            status="ok",
+            source="pdf_text_extraction",
+            content=pdf_text,
+            errors=errors,
+            attachment_key=candidate.attachment_key,
+            source_path=str(pdf_path),
+        )
+    errors.append(f"pdf_text_extraction:{pdf_status}:chars={len(pdf_text)}")
+    return "", _controlled_fulltext_manifest(
+        zotero_key=zotero_key,
+        status="failed",
+        source="none",
+        content="",
+        errors=errors,
+        attachment_key=candidate.attachment_key,
+    )
+
+
+def fetch_zotero_fulltext_for_controlled_read(zotero_key: str, *, timeout: int = 45) -> tuple[str, str]:
+    fulltext, manifest = resolve_zotero_fulltext_for_controlled_read(zotero_key, timeout=timeout)
+    if manifest.get("status") == "ok":
+        return fulltext, "ok"
+    errors = manifest.get("errors", [])
+    return fulltext, ";".join(str(error) for error in errors) or "failed"
 
 
 def controlled_codex_read_prompt(
@@ -2889,12 +3144,22 @@ def read_zotero_key_codex_controlled(
                 stage="codex-controlled-read",
             )
 
-    fulltext, fulltext_status = fetch_zotero_fulltext_for_controlled_read(zotero_key)
+    fulltext, fulltext_manifest = resolve_zotero_fulltext_for_controlled_read(zotero_key)
+    fulltext_status = str(fulltext_manifest.get("status", "failed"))
+    fulltext_source = str(fulltext_manifest.get("source", "none"))
+    fulltext_manifest_path = stage_dir / "zotero-fulltext-resolution.json"
+    fulltext_manifest_path.write_text(json.dumps(fulltext_manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     fulltext_path = stage_dir / "zotero-fulltext.txt"
     fulltext_path.write_text(fulltext, encoding="utf-8")
     manifest["zotero_fulltext_status"] = fulltext_status
+    manifest["zotero_fulltext_source"] = fulltext_source
     manifest["zotero_fulltext_chars"] = len(fulltext)
-    outputs.append(f"CODEX_FULLTEXT status={fulltext_status} chars={len(fulltext)} path={_rel(fulltext_path)}")
+    manifest["zotero_fulltext_resolution"] = fulltext_manifest
+    manifest["zotero_fulltext_resolution_manifest"] = _rel(fulltext_manifest_path)
+    outputs.append(
+        f"CODEX_FULLTEXT status={fulltext_status} source={fulltext_source} chars={len(fulltext)} "
+        f"path={_rel(fulltext_path)} resolver={_rel(fulltext_manifest_path)}"
+    )
     if fulltext_status != "ok" or len(fulltext) < MIN_CONTROLLED_FULLTEXT_CHARS:
         manifest["status"] = "failed"
         manifest["failure_reason"] = f"zotero_fulltext_unavailable_or_too_short:{fulltext_status}:{len(fulltext)}"
@@ -2910,6 +3175,7 @@ def read_zotero_key_codex_controlled(
             {
                 "codex_controlled_manifest": manifest_path,
                 "codex_controlled_dir": _rel(stage_dir),
+                "zotero_fulltext_resolution_manifest": _rel(fulltext_manifest_path),
             }
         )
         return "failed:missing_zotero_fulltext", "\n".join(outputs), summary_log
@@ -2988,6 +3254,7 @@ def read_zotero_key_codex_controlled(
             {
                 "codex_controlled_manifest": manifest_path,
                 "codex_controlled_dir": _rel(stage_dir),
+                "zotero_fulltext_resolution_manifest": _rel(fulltext_manifest_path),
                 "final_analysis": _rel(final_analysis_path),
             }
         )
@@ -3025,6 +3292,7 @@ def read_zotero_key_codex_controlled(
         {
             "codex_controlled_manifest": manifest_path,
             "codex_controlled_dir": _rel(stage_dir),
+            "zotero_fulltext_resolution_manifest": _rel(fulltext_manifest_path),
             "final_analysis": _rel(final_analysis_path),
         }
     )
