@@ -48,17 +48,20 @@ from weekly_strategy_review import sanitize_overrides
 from audit_daily_automation_quality import (
     CONTRACT_DIR,
     _audit_v2_state_machine,
+    _failed_or_backlog_read_items,
     _moved_to_v2_missing_artifact_issues,
     _provider_backed_artifact_issue,
     _scan_text_for_seed_writer,
     _v2_deepseek_review_covers_battle,
 )
 import research_agenda_review as agenda_review
+import research_agenda_ideate as agenda_ideate
 import novelty_baseline_scan as novelty_scan
 import candidate_portfolio_select as portfolio_select
 import deepseek_scientific_review as deepseek_review
 import codex_seed_review as codex_review
 import opencode_cli_adapter
+import active_seed_dashboard as seed_dashboard
 
 
 RUN_DATE = "2099-01-02"
@@ -93,18 +96,136 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
         self.assertEqual(text, "".join(chunks))
         self.assertEqual(payload["reviews"][0]["candidate_id"], "cand-alpha")
 
+    def test_quality_audit_ignores_read_failure_recovered_by_recovery_log(self) -> None:
+        run_text = """## Reading
+
+- zotero_key=HD7NP5I3 ingest=success read=failed:finalize_reading read_elapsed_sec=182.47 target_note_audit=not_run audit_json=-
+"""
+        recovery_text = """- status: success
+
+## Reading
+
+- zotero_key=HD7NP5I3 ingest=success read=success_done_already read_elapsed_sec=- target_note_audit=passed audit_json=projects/arxiv-daily/read-logs/2026-05-27/HD7NP5I3-target-note-audit.json
+"""
+
+        self.assertEqual(_failed_or_backlog_read_items(run_text, recovery_text, "success"), [])
+        self.assertEqual(len(_failed_or_backlog_read_items(run_text, recovery_text, "partial")), 1)
+
+    def test_agenda_extract_json_prefers_candidates_object_after_logs(self) -> None:
+        text = '{"event":"thinking"}\n```json\n{"candidates":[{"title":"candidate"}]}\n```'
+
+        payload = agenda_ideate._extract_json_object(text)
+
+        self.assertEqual(payload["candidates"][0]["title"], "candidate")
+
+    def test_agenda_extract_json_handles_trailing_prose(self) -> None:
+        text = 'Here is the JSON:\n{"candidates":[{"title":"candidate"}]}\nDone.'
+
+        payload = agenda_ideate._extract_json_object(text)
+
+        self.assertEqual(payload["candidates"][0]["title"], "candidate")
+
     def test_opencode_json_review_agent_disables_todowrite(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             config_path = opencode_cli_adapter._write_json_review_agent_config(tmp, "deepseek/deepseek-v4-pro")
             config = json.loads(Path(config_path).read_text(encoding="utf-8"))
 
         tools = config["agent"]["research-json-review"]["tools"]
+        self.assertEqual(config["agent"]["research-json-review"]["model"], "deepseek-v4-pro")
         self.assertIs(tools["todowrite"], False)
         self.assertIs(tools["todo_write"], False)
         self.assertIs(tools["webfetch"], False)
         self.assertIs(tools["web_search"], False)
         self.assertIn("todowrite", config["agent"]["research-json-review"]["prompt"])
         self.assertIn("webfetch", config["agent"]["research-json-review"]["prompt"])
+
+    def test_opencode_json_review_agent_preserves_global_provider_config(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "workspace"
+            workspace.mkdir()
+            global_cfg = Path(tmp) / "opencode-global.json"
+            global_cfg.write_text(
+                json.dumps(
+                    {
+                        "provider": {
+                            "abrdns": {
+                                "models": {"deepseek-v4-pro": {"id": "deepseek-v4-pro"}},
+                                "options": {"baseURL": "https://example.test/v1", "apiKey": "sk-test"},
+                            }
+                        },
+                        "model": "deepseek-v4-pro",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with patch.object(opencode_cli_adapter, "_global_opencode_config_paths", return_value=[global_cfg]):
+                config_path = opencode_cli_adapter._write_json_review_agent_config(str(workspace), "abrdns/deepseek-v4-pro")
+            config = json.loads(Path(config_path).read_text(encoding="utf-8"))
+
+        self.assertIn("provider", config)
+        self.assertIn("abrdns", config["provider"])
+        self.assertEqual(config["agent"]["research-json-review"]["model"], "deepseek-v4-pro")
+
+    def test_opencode_json_review_agent_normalizes_relative_plugin_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "workspace"
+            workspace.mkdir()
+            plugin_dir = Path(tmp) / "plugins"
+            plugin_dir.mkdir()
+            (plugin_dir / "session-id-header.mjs").write_text("export default {};\n", encoding="utf-8")
+            global_cfg = Path(tmp) / "opencode-global.json"
+            global_cfg.write_text(
+                json.dumps(
+                    {
+                        "plugin": ["./plugins/session-id-header.mjs", "./plugins/session-id-header.mjs"],
+                        "provider": {"abrdns": {"models": {"deepseek-v4-pro": {"id": "deepseek-v4-pro"}}}},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with patch.object(opencode_cli_adapter, "_global_opencode_config_paths", return_value=[global_cfg]):
+                config_path = opencode_cli_adapter._write_json_review_agent_config(str(workspace), "abrdns/deepseek-v4-pro")
+            config = json.loads(Path(config_path).read_text(encoding="utf-8"))
+
+        self.assertEqual(
+            config["plugin"],
+            [str((plugin_dir / "session-id-header.mjs").resolve())],
+        )
+
+    def test_run_opencode_cli_avoids_pure_mode_by_default(self) -> None:
+        captured: dict[str, object] = {}
+
+        class FakeProc:
+            returncode = 0
+
+            def __init__(self, command: list[str]) -> None:
+                captured["command"] = command
+                self.pid = 12345
+
+            def communicate(self, timeout: int | None = None) -> tuple[str, str]:
+                return ('{"type":"text","part":{"type":"text","text":"{\\"ok\\":true}"}}\n', "")
+
+        with tempfile.TemporaryDirectory() as tmp, patch.object(
+            opencode_cli_adapter,
+            "_resolve_opencode_path",
+            return_value="opencode.exe",
+        ), patch.object(
+            opencode_cli_adapter,
+            "_write_json_review_agent_config",
+            return_value=str(Path(tmp) / "opencode.json"),
+        ), patch.object(
+            opencode_cli_adapter.subprocess,
+            "Popen",
+            side_effect=lambda *args, **kwargs: FakeProc(args[0]),
+        ), patch.dict(
+            os.environ,
+            {"OPENCODE_JSON_REVIEW_PURE": ""},
+            clear=False,
+        ):
+            result = opencode_cli_adapter.run_opencode_cli('{"ok":true}', timeout_sec=5)
+
+        self.assertEqual(result["error"], "")
+        self.assertNotIn("--pure", captured["command"])
 
     def assert_legacy_formal_publish_disabled(self, result: dict[str, object]) -> None:
         self.assertEqual(result["status"], LEGACY_FORMAL_DISABLED_STATUS)
@@ -1277,6 +1398,7 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
         config = json.loads(Path(config_path).read_text(encoding="utf-8"))
         self.assertEqual(config["default_agent"], opencode_cli_adapter.JSON_REVIEW_AGENT_NAME)
         agent = config["agent"][opencode_cli_adapter.JSON_REVIEW_AGENT_NAME]
+        self.assertEqual(agent["model"], "deepseek-v4-pro")
         self.assertIn("RFC 8259 JSON only", agent["prompt"])
         self.assertTrue(agent["tools"])
         self.assertTrue(all(value is False for value in agent["tools"].values()))
@@ -1768,6 +1890,100 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
         self.assertEqual(payload["status"], "partial_provider_invalid")
         self.assertFalse(payload["provider_status"]["provider_backed"])
 
+    def test_deepseek_opencode_provider_event_error_fails_closed_as_unavailable(self) -> None:
+        with patch.object(
+            deepseek_review,
+            "run_opencode_cli",
+            return_value={
+                "exit_code": 0,
+                "timed_out": False,
+                "clean_output": "",
+                "effective_model": "abrdns/DeepSeek-V4-Pro-think",
+                "event_count": 1,
+                "error": "provider_event_error:APIError:Not Found:status=404",
+                "event_errors": ["provider_event_error:APIError:Not Found:status=404"],
+                "raw_stdout": '{"type":"error"}',
+                "raw_stderr": "",
+            },
+        ):
+            provider_payload = deepseek_review._opencode_provider_payload(
+                [self.candidate()],
+                run_date=RUN_DATE,
+                model="abrdns/DeepSeek-V4-Pro-think",
+                timeout_sec=5,
+                retries=0,
+            )
+        payload, exit_code = build_deepseek_payload([self.candidate()], run_date=RUN_DATE, provider_payload=provider_payload)
+        self.assertEqual(exit_code, 2)
+        self.assertEqual(payload["status"], "partial_provider_unavailable")
+        self.assertFalse(payload["provider_status"]["provider_backed"])
+        self.assertIn("provider_event_error:APIError:Not Found:status=404", payload["provider_status"]["provider_error"])
+
+    def test_deepseek_opencode_auth_error_falls_back_to_secondary_model(self) -> None:
+        calls: list[str] = []
+        output = {
+            "schema_version": "deepseek_review.v1",
+            "run_date": RUN_DATE,
+            "status": "success",
+            "reviews": [
+                {
+                    "candidate_id": "cand-alpha",
+                    "candidate_title": "Anchored Contact Failure Benchmark",
+                    "status": "success",
+                    "novelty_attack": "nearest work reviewed",
+                    "baseline_attack": "baseline checked",
+                    "mechanism_attack": "mechanism checked",
+                    "evaluation_attack": "evaluation checked",
+                    "scope_attack": "scope checked",
+                    "a_plus_b_risk": "low",
+                    "fatal_flaw": "",
+                    "rescue_mutation": "",
+                    "survivability_label": "survives",
+                    "allowed_next_stage": "novelty_scan",
+                }
+            ],
+        }
+
+        def fake_opencode(_prompt: str, **kwargs: object) -> dict[str, object]:
+            model = str(kwargs.get("model"))
+            calls.append(model)
+            if model == "abrdns/deepseek-v4-pro":
+                return {
+                    "exit_code": 0,
+                    "timed_out": False,
+                    "clean_output": "",
+                    "effective_model": model,
+                    "event_count": 1,
+                    "error": "provider_event_error:APIError:Invalid token:status=401",
+                    "event_errors": ["provider_event_error:APIError:Invalid token:status=401"],
+                    "raw_stdout": '{"type":"error"}',
+                    "raw_stderr": "",
+                }
+            return {
+                "exit_code": 0,
+                "timed_out": False,
+                "clean_output": json.dumps(output),
+                "effective_model": model,
+                "event_count": 1,
+            }
+
+        with patch.object(deepseek_review, "run_opencode_cli", side_effect=fake_opencode):
+            provider_payload = deepseek_review._opencode_provider_payload(
+                [self.candidate()],
+                run_date=RUN_DATE,
+                model="abrdns/deepseek-v4-pro",
+                timeout_sec=5,
+                retries=0,
+            )
+        payload, exit_code = build_deepseek_payload([self.candidate()], run_date=RUN_DATE, provider_payload=provider_payload)
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["status"], "success")
+        self.assertEqual(calls, ["abrdns/deepseek-v4-pro", "dwai/gpt-5.5"])
+        self.assertTrue(payload["provider_status"]["provider_backed"])
+        self.assertTrue(payload["provider_status"]["model_fallback_used"])
+        self.assertEqual(payload["provider_status"]["primary_requested_model"], "abrdns/deepseek-v4-pro")
+        self.assertEqual(payload["provider_status"]["requested_model"], "dwai/gpt-5.5")
+
     def test_deepseek_opencode_missing_candidate_review_fails_closed(self) -> None:
         output = {
             "schema_version": "deepseek_review.v1",
@@ -1842,6 +2058,40 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
         payload = read_json(artifact_dir(RUN_DATE) / "codex-execution-review.json")
         self.assertTrue(payload["provider_status"]["provider_backed"])
 
+    def test_codex_cli_provider_ignores_user_config_to_avoid_local_otel_hang(self) -> None:
+        self.write_review_artifacts()
+        output = {
+            "schema_version": "codex_execution_review.v1",
+            "run_date": RUN_DATE,
+            "status": "success",
+            "reviews": self.provider_codex_payload()["reviews"],
+        }
+        captured: dict[str, object] = {}
+
+        class FakeProc:
+            def __init__(self, command: list[str], **_kwargs: object) -> None:
+                captured["command"] = command
+                self.command = command
+                self.pid = 424242
+                self.returncode = 0
+
+            def communicate(self, _stdin: str | None = None, timeout: int | None = None) -> tuple[str, str]:
+                path = Path(self.command[self.command.index("--output-last-message") + 1])
+                path.write_text(json.dumps(output), encoding="utf-8")
+                return "", ""
+
+        with patch.object(codex_review.shutil, "which", return_value="codex"), patch.object(
+            codex_review.subprocess,
+            "Popen",
+            FakeProc,
+        ):
+            result = execution_review(RUN_DATE, dry_run=False, provider="codex-cli", timeout_sec=5)
+        self.assertEqual(result["status"], "success")
+        command = captured["command"]
+        self.assertIsInstance(command, list)
+        assert isinstance(command, list)
+        self.assertIn("--ignore-user-config", command)
+
     def test_codex_execution_review_hydrates_missing_status_from_substantive_provider_review(self) -> None:
         self.write_review_artifacts()
         provider = self.provider_codex_payload()
@@ -1855,6 +2105,20 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
         payload = read_json(artifact_dir(RUN_DATE) / "codex-execution-review.json")
         self.assertEqual(payload["reviews"][0]["status"], "success")
         self.assertTrue(payload["provider_status"]["review_status_hydrated_from_execution_fields"])
+
+    def test_codex_execution_review_coerces_string_false_field_presence_only(self) -> None:
+        self.write_review_artifacts()
+        provider = self.provider_codex_payload()
+        provider["reviews"][0]["field_presence_only"] = "false"  # type: ignore[index]
+        provider_path = Path(self.tmp.name) / "provider-codex-string-false.json"
+        self.write_bom_json(provider_path, provider)
+
+        result = execution_review(RUN_DATE, dry_run=False, provider_review_json=str(provider_path))
+
+        self.assertEqual(result["status"], "success")
+        payload = read_json(artifact_dir(RUN_DATE) / "codex-execution-review.json")
+        self.assertFalse(payload["reviews"][0]["field_presence_only"])
+        self.assertTrue(payload["provider_status"]["provider_backed"])
 
     def test_codex_execution_review_invalid_provider_review_writes_partial_artifact(self) -> None:
         self.write_review_artifacts()
@@ -3293,6 +3557,40 @@ def bad(source, recommended):
         self.assertFalse(decision["active_seed_allowed"])
         self.assertFalse(decision["legacy_active_seed_allowed"])
         self.assertTrue(decision["requires_human_governance"])
+
+    def test_candidate_only_governance_gaps_are_info_not_warn_in_daily_quality_audit(self) -> None:
+        self.write_review_artifacts()
+        survival = decide(run_date=RUN_DATE, allow_human_override=False)
+        write_run_artifact(RUN_DATE, "survival-decision.json", survival, state="survival_decided")
+        seed_dashboard.write_dashboard(RUN_DATE, latest=False, dry_run=False)
+
+        _summary, issues = _audit_v2_state_machine(RUN_DATE)
+        governance_codes = {
+            "manual_prior_art_review_missing",
+            "anchorless_core_evidence_risk",
+            "active_seed_without_pilot_plan",
+        }
+        matched = [issue for issue in issues if issue["code"] in governance_codes]
+        self.assertTrue(matched)
+        self.assertEqual({issue["level"] for issue in matched}, {"INFO"})
+
+    def test_audit_ignores_dashboard_multi_summary_row(self) -> None:
+        self.write_review_artifacts()
+        survival = decide(run_date=RUN_DATE, allow_human_override=False)
+        write_run_artifact(RUN_DATE, "survival-decision.json", survival, state="survival_decided")
+        dashboard = seed_dashboard.write_dashboard(RUN_DATE, latest=False, dry_run=False)
+        aggregate = {
+            **dashboard["rows"][0],
+            "candidate_id": "__multi__",
+            "title": "",
+            "risk_markers": [],
+            "blocking_reasons": [],
+        }
+        dashboard["rows"].insert(0, aggregate)
+        write_run_artifact(RUN_DATE, "active-seed-dashboard.json", dashboard, state="dashboard_rendered")
+
+        _summary, issues = _audit_v2_state_machine(RUN_DATE)
+        self.assertFalse(any(issue["code"] == "active_seed_dashboard_extra_row" for issue in issues))
 
     def test_publish_formal_parser_rejects_or_disabled_before_writes(self) -> None:
         result = subprocess.run(

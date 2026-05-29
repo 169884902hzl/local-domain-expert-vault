@@ -86,6 +86,11 @@ ACTIVE_SEED_FATAL_RISKS = {
     "speculative_tension_not_formal_seed_evidence",
     "active_seed_without_pilot_plan",
 }
+CANDIDATE_ONLY_EXPECTED_GOVERNANCE_RISKS = {
+    "manual_prior_art_review_missing",
+    "anchorless_core_evidence_risk",
+    "active_seed_without_pilot_plan",
+}
 
 
 def _read(path: Path) -> str:
@@ -172,6 +177,28 @@ def _reading_items(text: str) -> list[dict[str, Any]]:
             item["read_elapsed_sec"] = None
         items.append(item)
     return items
+
+
+def _successful_read_keys(text: str) -> set[str]:
+    return {
+        str(item.get("key", ""))
+        for item in _reading_items(text)
+        if str(item.get("read", "")).startswith("success")
+    } - {""}
+
+
+def _failed_or_backlog_read_items(
+    run_text: str,
+    recovery_text: str,
+    recovery_status: str,
+) -> list[dict[str, Any]]:
+    recovered_success_keys = _successful_read_keys(recovery_text) if recovery_status == "success" else set()
+    return [
+        item for item in _reading_items(run_text)
+        if not str(item.get("read", "")).startswith("success")
+        and item.get("read") != "skipped"
+        and item.get("key") not in recovered_success_keys
+    ]
 
 
 def _run_log(run_date: str) -> tuple[Path, str]:
@@ -275,6 +302,18 @@ def _classify_mandatory_battle(run_date: str, agenda_delta_text: str) -> dict[st
 
 def _issue(level: str, code: str, detail: str, evidence: str = "") -> dict[str, str]:
     return {"level": level, "code": code, "detail": detail, "evidence": evidence}
+
+
+def _survival_risk_issue_level(marker: str, decision: dict[str, Any], *, formal_context: bool) -> str:
+    if marker in ACTIVE_SEED_FATAL_RISKS and decision.get("active_seed_allowed") is True:
+        return "FAIL"
+    if (
+        not formal_context
+        and decision.get("active_seed_allowed") is not True
+        and marker in CANDIDATE_ONLY_EXPECTED_GOVERNANCE_RISKS
+    ):
+        return "INFO"
+    return "WARN"
 
 
 def _scan_for_direct_seed_writers() -> list[dict[str, str]]:
@@ -592,9 +631,7 @@ def _audit_v2_state_machine(run_date: str) -> tuple[dict[str, Any], list[dict[st
                     decision_risks.update(str(value) for value in values)
             for marker in sorted(decision_risks & V03_RISK_MARKERS):
                 risk_markers[marker] += 1
-                level = "WARN"
-                if marker in ACTIVE_SEED_FATAL_RISKS and decision.get("active_seed_allowed") is True:
-                    level = "FAIL"
+                level = _survival_risk_issue_level(marker, decision, formal_context=formal_context)
                 issues.append(_issue(level, marker, f"{cid}: {marker}", _rel(survival_path)))
             if decision.get("active_seed_allowed") is True and "manual_prior_art_review_missing" in decision_risks:
                 risk_markers["active_seed_without_manual_prior_art_review"] += 1
@@ -643,6 +680,8 @@ def _audit_v2_state_machine(run_date: str) -> tuple[dict[str, Any], list[dict[st
             if not isinstance(row, dict):
                 continue
             cid = str(row.get("candidate_id") or "unknown_candidate")
+            if cid == "__multi__":
+                continue
             decision = decisions_by_id.get(cid)
             if not decision:
                 issues.append(_issue("WARN", "active_seed_dashboard_extra_row", f"{cid}: dashboard row has no survival decision.", _rel(dashboard_path)))
@@ -804,10 +843,7 @@ def audit_run(
     import_attempts = _int_field(run_text, "import_attempts")
     resumed_backlog_imports = _int_field(run_text, "resumed_backlog_imports")
     readings = _reading_items(run_text)
-    failed_or_backlog_reads = [
-        item for item in readings
-        if not str(item.get("read", "")).startswith("success") and item.get("read") != "skipped"
-    ]
+    failed_or_backlog_reads = _failed_or_backlog_read_items(run_text, recovery_text, recovery_status)
     backlog = _backlog_path(run_date)
     agenda_delta = _agenda_delta_path(run_date)
     agenda_delta_text = _read(agenda_delta)

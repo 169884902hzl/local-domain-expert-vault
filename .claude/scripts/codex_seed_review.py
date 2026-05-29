@@ -2825,6 +2825,7 @@ def _run_codex_cli_provider(run_date: str, candidates: list[dict[str, Any]], *, 
     command = [
         codex_path,
         "exec",
+        "--ignore-user-config",
         "--skip-git-repo-check",
         "--ephemeral",
         "--cd",

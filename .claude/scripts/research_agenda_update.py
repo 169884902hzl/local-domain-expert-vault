@@ -780,7 +780,7 @@ def main() -> int:
     parser.add_argument("--idea-generator", choices=["template", "claude", "gemini-cli", "gemini-divergent", "none"], default="none")
     parser.add_argument("--idea-timeout", type=int, default=1200)
     parser.add_argument("--gemini-model", default="gemini-3.1-pro-preview")
-    parser.add_argument("--deepseek-model", default="deepseek/deepseek-v4-pro")
+    parser.add_argument("--deepseek-model", default="abrdns/deepseek-v4-pro")
     parser.add_argument("--deepseek-timeout", type=int, default=1200)
     parser.add_argument("--include-dynamic-ideas", dest="include_dynamic", action="store_true", help="Deprecated; only applies to curated mode.")
     parser.add_argument("--dry-run", action="store_true")

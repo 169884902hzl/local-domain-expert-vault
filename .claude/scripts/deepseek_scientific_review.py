@@ -31,6 +31,7 @@ ALLOWED_NEXT_STAGES = {"novelty_scan", "gemini_mutation", "parked", "rescue", "s
 A_PLUS_B_RISK = {"none", "low", "medium", "high", "fatal"}
 DEFAULT_OPENCODE_BATCH_SIZE = 1
 DEFAULT_OPENCODE_RETRIES = 2
+DEFAULT_OPENCODE_FALLBACK_MODELS = ("dwai/gpt-5.5",)
 PROVIDER_CANDIDATE_FIELDS = [
     "candidate_id",
     "title",
@@ -533,6 +534,38 @@ def _normalize_provider_payload_shape(payload: dict[str, Any]) -> dict[str, Any]
     return payload
 
 
+def _opencode_model_candidates(model: str) -> list[str]:
+    primary = str(model or "").strip()
+    env_value = str(os.environ.get("DEEPSEEK_OPENCODE_FALLBACK_MODELS", "")).strip()
+    fallback_models = [item.strip() for item in env_value.split(",") if item.strip()]
+    if not fallback_models and primary.startswith("abrdns/"):
+        fallback_models = list(DEFAULT_OPENCODE_FALLBACK_MODELS)
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for item in [primary, *fallback_models]:
+        if not item or item in seen:
+            continue
+        seen.add(item)
+        ordered.append(item)
+    return ordered or [primary]
+
+
+def _provider_auth_failure(error_text: str) -> bool:
+    text = str(error_text or "").strip().lower()
+    if not text:
+        return False
+    return any(
+        marker in text
+        for marker in (
+            "invalid token",
+            "status=401",
+            "bad response status code 401",
+            "token refresh failed: 401",
+            "apierror:401",
+        )
+    )
+
+
 def _opencode_provider_batch(
     selected: list[dict[str, Any]],
     *,
@@ -543,98 +576,127 @@ def _opencode_provider_batch(
     retries: int = DEFAULT_OPENCODE_RETRIES,
 ) -> dict[str, Any]:
     attempt_count = max(1, retries + 1)
+    model_candidates = _opencode_model_candidates(model)
     attempt_statuses: list[dict[str, Any]] = []
     last_error_payload: dict[str, Any] | None = None
-    retry_reason = ""
-    previous_output = ""
-    retry_details: list[str] = []
-    for attempt in range(1, attempt_count + 1):
-        result = run_opencode_cli(
-            _render_opencode_prompt(
-                selected,
-                run_date=run_date,
-                retry_reason=retry_reason,
-                previous_output=previous_output,
-                retry_details=retry_details,
-                retry_compact=True,
-            ),
-            model=model,
-            timeout_sec=timeout_sec,
-            title=f"{run_date}-v2-deepseek-scientific-review-batch-{batch_index}-attempt-{attempt}",
-        )
-        status = {
-            "mode": "opencode",
-            "requested_model": model,
-            "effective_model": result.get("effective_model") or model,
-            "exit_code": result.get("exit_code"),
-            "timed_out": bool(result.get("timed_out")),
-            "event_count": result.get("event_count", 0),
-            "batch_index": batch_index,
-            "batch_size": len(selected),
-            "batch_candidate_ids": [candidate_id(item) for item in selected],
-            "attempt": attempt,
-            "attempt_count": attempt_count,
-        }
-        attempt_statuses.append(dict(status))
-        if result.get("timed_out"):
-            status["attempt_statuses"] = attempt_statuses
-            last_error_payload = _provider_error_payload(f"opencode_timeout:{timeout_sec}s", status="partial_provider_unavailable", provider_status=status)
-            retry_reason = "opencode_timeout"
-            retry_details = [f"timeout:{timeout_sec}s"]
-            continue
-        if result.get("exit_code") != 0:
-            status["attempt_statuses"] = attempt_statuses
-            last_error_payload = _provider_error_payload(str(result.get("error") or f"opencode_nonzero_exit:{result.get('exit_code')}"), status="partial_provider_unavailable", provider_status=status)
-            retry_reason = "opencode_nonzero_exit"
-            retry_details = [str(result.get("error") or f"exit_code:{result.get('exit_code')}")]
-            continue
-        try:
-            payload = _extract_json_object(str(result.get("clean_output") or ""))
-        except Exception as exc:
-            previous_output = str(result.get("clean_output") or "")
-            status["attempt_statuses"] = attempt_statuses
-            status["clean_output_excerpt"] = previous_output[:500]
-            status["raw_stdout_excerpt"] = str(result.get("raw_stdout") or "")[:2000]
-            status["raw_stderr_excerpt"] = str(result.get("raw_stderr") or "")[:1000]
-            last_error_payload = _provider_error_payload(f"opencode_invalid_json:{type(exc).__name__}:{exc}", status="partial_provider_invalid", provider_status=status)
-            retry_reason = "opencode_invalid_json"
-            retry_details = [f"{type(exc).__name__}:{exc}"]
-            continue
-        payload = _normalize_provider_payload_shape(payload)
-        payload["schema_version"] = "deepseek_review.v1"
-        payload["run_date"] = run_date
-        payload["status"] = "success"
-        payload["provider_status"] = {
-            **dict(payload.get("provider_status", {})),
-            **status,
-            "provider": "deepseek",
-            "provider_backed": True,
-            "attempt_statuses": attempt_statuses,
-        }
-        _hydrate_provider_review_metadata(selected, payload)
-        validation_errors = _validate_provider_reviews(selected, payload)
-        if validation_errors:
-            previous_output = str(result.get("clean_output") or "")
-            status["attempt_statuses"] = attempt_statuses
-            status["validation_errors"] = validation_errors
-            status["clean_output_excerpt"] = previous_output[:500]
-            status["raw_stdout_excerpt"] = str(result.get("raw_stdout") or "")[:2000]
-            status["raw_stderr_excerpt"] = str(result.get("raw_stderr") or "")[:1000]
-            last_error_payload = _provider_error_payload(
-                f"opencode_invalid_review_payload:{';'.join(validation_errors)}",
-                status="partial_provider_invalid",
-                provider_status=status,
+    for model_index, attempt_model in enumerate(model_candidates, start=1):
+        retry_reason = ""
+        previous_output = ""
+        retry_details: list[str] = []
+        for model_attempt in range(1, attempt_count + 1):
+            overall_attempt = len(attempt_statuses) + 1
+            result = run_opencode_cli(
+                _render_opencode_prompt(
+                    selected,
+                    run_date=run_date,
+                    retry_reason=retry_reason,
+                    previous_output=previous_output,
+                    retry_details=retry_details,
+                    retry_compact=True,
+                ),
+                model=attempt_model,
+                timeout_sec=timeout_sec,
+                title=f"{run_date}-v2-deepseek-scientific-review-batch-{batch_index}-model-{model_index}-attempt-{model_attempt}",
             )
-            retry_reason = "opencode_invalid_review_payload"
-            retry_details = validation_errors
-            continue
-        return payload
+            status = {
+                "mode": "opencode",
+                "requested_model": attempt_model,
+                "primary_requested_model": model,
+                "effective_model": result.get("effective_model") or attempt_model,
+                "exit_code": result.get("exit_code"),
+                "timed_out": bool(result.get("timed_out")),
+                "event_count": result.get("event_count", 0),
+                "batch_index": batch_index,
+                "batch_size": len(selected),
+                "batch_candidate_ids": [candidate_id(item) for item in selected],
+                "attempt": overall_attempt,
+                "attempt_count": attempt_count * len(model_candidates),
+                "model_candidate_index": model_index,
+                "model_candidate_count": len(model_candidates),
+                "model_attempt": model_attempt,
+                "model_attempt_count": attempt_count,
+                "model_fallback_used": attempt_model != model,
+            }
+            attempt_statuses.append(dict(status))
+            if result.get("timed_out"):
+                status["attempt_statuses"] = attempt_statuses
+                last_error_payload = _provider_error_payload(f"opencode_timeout:{timeout_sec}s", status="partial_provider_unavailable", provider_status=status)
+                retry_reason = "opencode_timeout"
+                retry_details = [f"timeout:{timeout_sec}s"]
+                continue
+            if result.get("exit_code") != 0:
+                status["attempt_statuses"] = attempt_statuses
+                last_error_payload = _provider_error_payload(str(result.get("error") or f"opencode_nonzero_exit:{result.get('exit_code')}"), status="partial_provider_unavailable", provider_status=status)
+                retry_reason = "opencode_nonzero_exit"
+                retry_details = [str(result.get("error") or f"exit_code:{result.get('exit_code')}")]
+                continue
+            if result.get("error") and not str(result.get("clean_output") or "").strip():
+                provider_error = str(result.get("error"))
+                status["attempt_statuses"] = attempt_statuses
+                status["raw_stdout_excerpt"] = str(result.get("raw_stdout") or "")[:2000]
+                status["raw_stderr_excerpt"] = str(result.get("raw_stderr") or "")[:1000]
+                status["provider_event_errors"] = list(result.get("event_errors") or [])[:8]
+                last_error_payload = _provider_error_payload(
+                    provider_error,
+                    status="partial_provider_unavailable",
+                    provider_status=status,
+                )
+                if _provider_auth_failure(provider_error) and model_index < len(model_candidates):
+                    status["model_fallback_triggered"] = True
+                    status["fallback_next_model"] = model_candidates[model_index]
+                    break
+                retry_reason = "opencode_provider_error"
+                retry_details = [provider_error]
+                continue
+            try:
+                payload = _extract_json_object(str(result.get("clean_output") or ""))
+            except Exception as exc:
+                previous_output = str(result.get("clean_output") or "")
+                status["attempt_statuses"] = attempt_statuses
+                status["clean_output_excerpt"] = previous_output[:500]
+                status["raw_stdout_excerpt"] = str(result.get("raw_stdout") or "")[:2000]
+                status["raw_stderr_excerpt"] = str(result.get("raw_stderr") or "")[:1000]
+                last_error_payload = _provider_error_payload(f"opencode_invalid_json:{type(exc).__name__}:{exc}", status="partial_provider_invalid", provider_status=status)
+                retry_reason = "opencode_invalid_json"
+                retry_details = [f"{type(exc).__name__}:{exc}"]
+                continue
+            payload = _normalize_provider_payload_shape(payload)
+            payload["schema_version"] = "deepseek_review.v1"
+            payload["run_date"] = run_date
+            payload["status"] = "success"
+            payload["provider_status"] = {
+                **dict(payload.get("provider_status", {})),
+                **status,
+                "provider": "deepseek",
+                "provider_backed": True,
+                "attempt_statuses": attempt_statuses,
+                "model_candidates": model_candidates,
+            }
+            _hydrate_provider_review_metadata(selected, payload)
+            validation_errors = _validate_provider_reviews(selected, payload)
+            if validation_errors:
+                previous_output = str(result.get("clean_output") or "")
+                status["attempt_statuses"] = attempt_statuses
+                status["validation_errors"] = validation_errors
+                status["clean_output_excerpt"] = previous_output[:500]
+                status["raw_stdout_excerpt"] = str(result.get("raw_stdout") or "")[:2000]
+                status["raw_stderr_excerpt"] = str(result.get("raw_stderr") or "")[:1000]
+                last_error_payload = _provider_error_payload(
+                    f"opencode_invalid_review_payload:{';'.join(validation_errors)}",
+                    status="partial_provider_invalid",
+                    provider_status=status,
+                )
+                retry_reason = "opencode_invalid_review_payload"
+                retry_details = validation_errors
+                continue
+            return payload
     return last_error_payload or _provider_error_payload(
         "opencode_attempts_exhausted",
         status="partial_provider_unavailable",
         provider_status={
             "mode": "opencode",
             "requested_model": model,
+            "primary_requested_model": model,
             "effective_model": model,
             "exit_code": 1,
             "timed_out": False,
@@ -642,8 +704,9 @@ def _opencode_provider_batch(
             "batch_index": batch_index,
             "batch_size": len(selected),
             "batch_candidate_ids": [candidate_id(item) for item in selected],
-            "attempt_count": attempt_count,
+            "attempt_count": attempt_count * len(model_candidates),
             "attempt_statuses": attempt_statuses,
+            "model_candidates": model_candidates,
         },
     )
 

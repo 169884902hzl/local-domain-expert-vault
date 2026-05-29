@@ -1393,7 +1393,9 @@ def _final_analysis_has_required_sections(path: Path) -> tuple[bool, list[str]]:
     missing = [section for section in STAGED_REQUIRED_FINAL_SECTIONS if section not in text]
     structured_body = _section_body(text, ("结构化提取",))
     for field in STRUCTURED_EXTRACTION_REQUIRED_FIELDS:
-        if field not in structured_body:
+        field_name = field.rstrip(":")
+        field_pattern = re.compile(rf"(?m)^-\s+(?:\*\*)?{re.escape(field_name)}(?:\*\*)?:\s*\S")
+        if not field_pattern.search(structured_body):
             missing.append(f"structured_field:{field}")
     if len(text.strip()) < 2000:
         missing.append("final_analysis_too_short")
@@ -1982,7 +1984,11 @@ def _prior_stage_context(paths: list[Path]) -> str:
 
 
 def _sha256_text(text: str) -> str:
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+    return hashlib.sha256(_utf8_safe_text(text).encode("utf-8")).hexdigest()
+
+
+def _utf8_safe_text(text: str) -> str:
+    return text.encode("utf-8", errors="replace").decode("utf-8")
 
 
 def _controlled_fulltext_manifest(
@@ -2161,6 +2167,7 @@ def resolve_zotero_fulltext_for_controlled_read(
 ) -> tuple[str, dict[str, Any]]:
     errors: list[str] = []
     api_text, api_status = _fetch_zotero_fulltext_via_local_api(zotero_key, timeout=timeout)
+    api_text = _utf8_safe_text(api_text)
     if len(api_text) >= min_chars:
         return api_text, _controlled_fulltext_manifest(
             zotero_key=zotero_key,
@@ -2184,6 +2191,7 @@ def resolve_zotero_fulltext_for_controlled_read(
 
     cache_path = _attachment_cache_path(candidate.attachment_key, storage_root=storage_root)
     cache_text, cache_status = _read_cached_fulltext(cache_path)
+    cache_text = _utf8_safe_text(cache_text)
     if len(cache_text) >= min_chars:
         return cache_text, _controlled_fulltext_manifest(
             zotero_key=zotero_key,
@@ -2208,6 +2216,7 @@ def resolve_zotero_fulltext_for_controlled_read(
             attachment_key=candidate.attachment_key,
         )
     pdf_text, pdf_status = _extract_pdf_text_for_controlled_read(pdf_path)
+    pdf_text = _utf8_safe_text(pdf_text)
     if len(pdf_text) >= min_chars:
         return pdf_text, _controlled_fulltext_manifest(
             zotero_key=zotero_key,
@@ -4556,7 +4565,7 @@ def main() -> int:
     parser.add_argument("--idea-mode", choices=["claude", "gemini-cli", "gemini-divergent", "template"], default="gemini-divergent", help="Use Claude Code or Gemini CLI to synthesize final ideas, or keep deterministic template ideas.")
     parser.add_argument("--idea-timeout", type=int, default=1200)
     parser.add_argument("--gemini-model", default="gemini-3.1-pro-preview")
-    parser.add_argument("--deepseek-model", default="deepseek/deepseek-v4-pro")
+    parser.add_argument("--deepseek-model", default="abrdns/deepseek-v4-pro")
     parser.add_argument("--deepseek-timeout", type=int, default=1200)
     parser.add_argument("--deepseek-provider", choices=["json", "opencode", "none"], default="none")
     parser.add_argument("--deepseek-provider-json", default="")

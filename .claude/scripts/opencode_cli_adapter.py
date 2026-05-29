@@ -8,10 +8,12 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
+from pathlib import Path
 from typing import Any
 
 
-DEFAULT_OPENCODE_MODEL = "deepseek/deepseek-v4-pro(max)"
+DEFAULT_OPENCODE_MODEL = "abrdns/deepseek-v4-pro"
 DEFAULT_OPENCODE_TIMEOUT_SEC = 1200
 INLINE_PROMPT_CHAR_LIMIT = 2000
 JSON_REVIEW_AGENT_NAME = "research-json-review"
@@ -24,6 +26,7 @@ _DISABLED_OPENCODE_TOOLS = {
     "list": False,
     "patch": False,
     "read": False,
+    "skill": False,
     "task": False,
     "todo": False,
     "todo_write": False,
@@ -85,23 +88,29 @@ def run_opencode_cli(
         command_message = prompt
         file_args = []
     def command_for(output_format: str) -> list[str]:
-        return [
+        command = [
             opencode_path,
             "run",
             "-m",
             model,
-            "--pure",
-            "--format",
-            output_format,
-            "--agent",
-            JSON_REVIEW_AGENT_NAME,
-            "--title",
-            title,
-            "--dir",
-            workspace_path,
-            command_message,
-            *file_args,
         ]
+        if _json_review_pure_mode():
+            command.append("--pure")
+        command.extend(
+            [
+                "--format",
+                output_format,
+                "--agent",
+                JSON_REVIEW_AGENT_NAME,
+                "--title",
+                title,
+                "--dir",
+                workspace_path,
+                command_message,
+                *file_args,
+            ]
+        )
+        return command
 
     def cleanup_prompt_file() -> None:
         if prompt_path is None:
@@ -131,7 +140,7 @@ def run_opencode_cli(
     except FileNotFoundError:
         result["error"] = "opencode_cli_not_found"
         cleanup_prompt_file()
-        workspace.cleanup()
+        _cleanup_temporary_directory(workspace)
         return result
     except subprocess.TimeoutExpired:
         _kill_process_tree(proc.pid)
@@ -144,10 +153,11 @@ def run_opencode_cli(
         result["raw_stdout"] = _redact(stdout or "")[:16000]
         result["raw_stderr"] = _redact(stderr or "")[:4000]
         cleanup_prompt_file()
-        workspace.cleanup()
+        _cleanup_temporary_directory(workspace)
         return result
 
     text, event_count = _extract_text_events(stdout or "")
+    event_errors = _extract_error_events(stdout or "")
     file_output = _read_tool_json_output(workspace_path)
     result["event_count"] = event_count
     result["clean_output"] = ((file_output + "\n") if file_output else "") + text[:240000]
@@ -169,8 +179,12 @@ def run_opencode_cli(
     file_output = _read_tool_json_output(workspace_path)
     if file_output:
         result["clean_output"] = ((file_output + "\n") + result["clean_output"])[:240000]
+    if event_errors and not result["clean_output"].strip() and not result.get("error"):
+        result["error"] = event_errors[0]
+    if event_errors:
+        result["event_errors"] = event_errors[:8]
     cleanup_prompt_file()
-    workspace.cleanup()
+    _cleanup_temporary_directory(workspace)
     if result["exit_code"] != 0:
         result["error"] = f"nonzero_exit:{result['exit_code']}"
     elif not result["clean_output"].strip() and not result.get("error"):
@@ -242,13 +256,14 @@ def _write_json_review_agent_config(workspace_path: str, model: str) -> str:
         "Output RFC 8259 JSON only: every key and string value must use double quotes. "
         "Do not output JavaScript object literal syntax, markdown, prose, or code fences."
     )
-    config = {
+    config = _load_global_opencode_config()
+    config.update({
         "$schema": "https://opencode.ai/config.json",
         "agent": {
             JSON_REVIEW_AGENT_NAME: {
                 "description": "Return strict DeepSeek review JSON only; no tools.",
                 "mode": "primary",
-                "model": model.split("/", 1)[-1],
+                "model": _agent_model_name(model),
                 "tools": dict(_DISABLED_OPENCODE_TOOLS),
                 "temperature": 0.0,
                 "prompt": agent_prompt,
@@ -259,10 +274,89 @@ def _write_json_review_agent_config(workspace_path: str, model: str) -> str:
         "lsp": False,
         "mcp": {},
         "tools": dict(_DISABLED_OPENCODE_TOOLS),
-    }
+    })
     with open(path, "w", encoding="utf-8") as handle:
         json.dump(config, handle, ensure_ascii=False, indent=2, sort_keys=True)
     return path
+
+
+def _agent_model_name(model: str) -> str:
+    text = str(model or "").strip()
+    if "/" in text:
+        return text.split("/", 1)[1]
+    return text
+
+
+def _load_global_opencode_config() -> dict[str, Any]:
+    for candidate in _global_opencode_config_paths():
+        if not candidate.exists():
+            continue
+        try:
+            payload = json.loads(candidate.read_text(encoding="utf-8-sig"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        if isinstance(payload, dict):
+            return _normalize_global_opencode_config(dict(payload), candidate.parent)
+    return {}
+
+
+def _global_opencode_config_paths() -> list[Path]:
+    paths: list[Path] = []
+    home = Path.home()
+    paths.append(home / ".config" / "opencode" / "opencode.json")
+    paths.append(home / ".opencode" / "opencode.json")
+    paths.append(home / ".config" / "opencode.json")
+    return paths
+
+
+def _normalize_global_opencode_config(payload: dict[str, Any], config_dir: Path) -> dict[str, Any]:
+    normalized = dict(payload)
+    plugins = normalized.get("plugin")
+    if isinstance(plugins, list):
+        normalized["plugin"] = _normalize_plugin_entries(plugins, config_dir)
+    return normalized
+
+
+def _normalize_plugin_entries(plugins: list[Any], config_dir: Path) -> list[Any]:
+    normalized: list[Any] = []
+    seen: set[str] = set()
+    for plugin in plugins:
+        item = plugin
+        if isinstance(plugin, str):
+            item = _normalize_plugin_entry(plugin, config_dir)
+        marker = json.dumps(item, ensure_ascii=False, sort_keys=True) if not isinstance(item, str) else item
+        if marker in seen:
+            continue
+        seen.add(marker)
+        normalized.append(item)
+    return normalized
+
+
+def _normalize_plugin_entry(plugin: str, config_dir: Path) -> str:
+    text = str(plugin or "").strip()
+    if not text:
+        return text
+    if text.startswith("file://") or os.path.isabs(text) or "@" in text:
+        return text
+    if text.startswith("./") or text.startswith(".\\"):
+        return str((config_dir / text).resolve())
+    return text
+
+
+def _json_review_pure_mode() -> bool:
+    value = str(os.environ.get("OPENCODE_JSON_REVIEW_PURE", "")).strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
+def _cleanup_temporary_directory(workspace: tempfile.TemporaryDirectory[str], *, retries: int = 6, delay_sec: float = 0.25) -> None:
+    for attempt in range(retries):
+        try:
+            workspace.cleanup()
+            return
+        except (PermissionError, OSError):
+            if attempt == retries - 1:
+                return
+            time.sleep(delay_sec)
 
 
 def _read_tool_json_output(workspace_path: str) -> str:
@@ -355,6 +449,41 @@ def _extract_event_texts(value: Any) -> list[str]:
         if nested is not None:
             texts.extend(_extract_event_texts(nested))
     return texts
+
+
+def _extract_error_events(stdout: str) -> list[str]:
+    errors: list[str] = []
+    for raw_line in stdout.splitlines():
+        line = _strip_ansi(_redact(raw_line)).strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        if str(event.get("type") or "").lower() != "error":
+            continue
+        error = event.get("error")
+        if isinstance(error, dict):
+            name = str(error.get("name") or "ProviderError").strip()
+            data = error.get("data")
+            if isinstance(data, dict):
+                message = str(data.get("message") or error.get("message") or "").strip()
+                status = data.get("statusCode")
+                if message and status is not None:
+                    errors.append(f"provider_event_error:{name}:{message}:status={status}")
+                    continue
+                if message:
+                    errors.append(f"provider_event_error:{name}:{message}")
+                    continue
+            message = str(error.get("message") or "").strip()
+            if message:
+                errors.append(f"provider_event_error:{name}:{message}")
+                continue
+        errors.append("provider_event_error:unknown")
+    return errors
 
 
 def _redact(text: str) -> str:
