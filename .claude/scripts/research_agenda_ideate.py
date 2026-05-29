@@ -2103,14 +2103,23 @@ def _render_quality_rescue_prompt(
 
 
 def _extract_json_object(text: str) -> dict[str, Any] | None:
-    start = text.find("{")
-    end = text.rfind("}")
-    if start < 0 or end <= start:
-        return None
-    try:
-        return json.loads(text[start : end + 1])
-    except json.JSONDecodeError:
-        return None
+    stripped = text.strip()
+    decoder = json.JSONDecoder()
+    first_payload: dict[str, Any] | None = None
+    for index, char in enumerate(stripped):
+        if char != "{":
+            continue
+        try:
+            payload, _ = decoder.raw_decode(stripped[index:])
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        if first_payload is None:
+            first_payload = payload
+        if isinstance(payload.get("candidates"), list):
+            return payload
+    return first_payload
 
 
 def _refine_with_claude(
