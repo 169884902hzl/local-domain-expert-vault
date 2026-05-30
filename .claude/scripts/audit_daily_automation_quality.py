@@ -782,6 +782,18 @@ def _audit_v2_state_machine(run_date: str) -> tuple[dict[str, Any], list[dict[st
     )
 
 
+def _manual_v2_recovery_applied(run_date: str) -> bool:
+    publish_result = run_dir(run_date) / "publish" / "publish-result.json"
+    if not publish_result.exists():
+        return False
+    try:
+        publish_data = _json_read(publish_result)
+        validation = validate_v2_run(run_date, strict_publish=True)
+    except Exception:
+        return False
+    return publish_data.get("status") == "success" and validation.get("status") == "success"
+
+
 def _readiness_from_label(label: str) -> str:
     if label == "promoted_to_seed":
         return "seed_ready"
@@ -834,9 +846,12 @@ def audit_run(
         and status == "partial"
         and agenda_status not in {"success", "skipped_no_focus_keys"}
     )
+    manual_v2_recovery_applied = status == "partial" and _manual_v2_recovery_applied(run_date)
+    recovery_applied = recovery_applied or manual_v2_recovery_applied
     if recovery_applied:
         status = "success"
-        agenda_status = recovery_agenda_status
+        if recovery_agenda_status in {"success", "skipped_no_focus_keys"}:
+            agenda_status = recovery_agenda_status
     strict_kb = _field(run_text, "strict_kb_maintenance")
     successful_reads = _int_field(run_text, "new_imports_read_success")
     max_daily_reads = _int_field(run_text, "max_daily_reads")
@@ -857,6 +872,15 @@ def audit_run(
         issue_list.append(_issue("WARN", "daily_partial", "Daily run ended partial; inspect recoverability and quality impact.", _rel(run_path)))
     if recovery_applied:
         issue_list.append(_issue("INFO", "recovered_run_log_stale", "Main run log was partial, but backlog recovery completed successfully.", _rel(recovery_path)))
+    if manual_v2_recovery_applied:
+        issue_list.append(
+            _issue(
+                "INFO",
+                "manual_v2_recovery_applied",
+                "Main run log was partial, but v2 publish artifacts validate after manual recovery.",
+                _rel(run_dir(run_date) / "publish" / "publish-result.json"),
+            )
+        )
     if agenda_status not in {"success", "skipped_no_focus_keys"} and run_path.exists():
         issue_list.append(_issue("FAIL", "agenda_not_ready", f"Agenda update status is `{agenda_status or 'missing'}`.", _rel(run_path)))
     if strict_kb not in {"success", "not_run", ""}:

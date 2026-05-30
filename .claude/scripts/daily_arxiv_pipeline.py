@@ -972,7 +972,7 @@ def build_v2_review_stages(args: argparse.Namespace, run_date: str) -> list[tupl
     ]
     review_stages: list[tuple[str, list[str], int]] = [
         ("portfolio_select", [sys.executable, ".claude/scripts/candidate_portfolio_select.py", "--run-date", run_date], 180),
-        ("deepseek_review", deepseek_cmd, max(900, args.deepseek_timeout)),
+        ("deepseek_review", deepseek_cmd, max(1800, args.deepseek_timeout * 3)),
         ("gemini_rescue_mutation", [sys.executable, ".claude/scripts/gemini_rescue_mutation.py", "--run-date", run_date], max(600, args.idea_timeout)),
         ("novelty_scan", novelty_cmd, 600),
         ("codex_execution_review", codex_cmd, max(600, codex_timeout)),

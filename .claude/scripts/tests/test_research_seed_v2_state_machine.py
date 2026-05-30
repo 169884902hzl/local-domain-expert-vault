@@ -3277,12 +3277,15 @@ def bad(source, recommended):
         )
         stages = build_v2_review_stages(args, RUN_DATE)
         by_name = {name: command for name, command, _timeout in stages}
+        by_timeout = {name: timeout for name, _command, timeout in stages}
         self.assertIn("--provider", by_name["deepseek_review"])
         self.assertIn("opencode", by_name["deepseek_review"])
         self.assertIn("--model", by_name["deepseek_review"])
         self.assertIn("deepseek/test-model", by_name["deepseek_review"])
         self.assertIn("--timeout", by_name["deepseek_review"])
         self.assertIn("123", by_name["deepseek_review"])
+        self.assertGreater(by_timeout["deepseek_review"], 123)
+        self.assertGreaterEqual(by_timeout["deepseek_review"], 1800)
         self.assertIn("--provider", by_name["codex_execution_review"])
         self.assertIn("codex-cli", by_name["codex_execution_review"])
         self.assertIn("--target-policy", by_name["novelty_scan"])

@@ -303,7 +303,7 @@ def ledger_value(row: dict[str, str], *aliases: str) -> str:
 
 
 def normalize_token(value: str) -> str:
-    return re.sub(r"[^a-z0-9_]+", "_", value.lower()).strip("_")
+    return re.sub(r"[^\w]+", "_", value.lower(), flags=re.UNICODE).strip("_")
 
 
 def split_tokens(value: str) -> set[str]:
@@ -410,9 +410,15 @@ def non_negated_hits(text: str, tokens: list[str]) -> list[str]:
         "do not",
         "does not",
         "invalid",
+        "fail/kill condition",
+        "fail / kill condition",
+        "fail condition",
+        "kill condition",
         "prohibit",
         "forbid",
         "禁止",
+        "失败条件",
+        "失败",
         "不得",
         "不能",
         "无需",
@@ -425,6 +431,16 @@ def non_negated_hits(text: str, tokens: list[str]) -> list[str]:
         "不声称",
         "不评估",
         "不验证",
+        "无",
+        "没有",
+        "未",
+        "不含",
+        "不采集",
+        "不产生",
+        "不生成",
+        "不引入",
+        "不加入",
+        "不用",
     ]
     synthetic_context_markers = [
         "synthetic",
@@ -445,6 +461,41 @@ def non_negated_hits(text: str, tokens: list[str]) -> list[str]:
         "数组",
         "静态",
         "代理",
+    ]
+    gripper_proxy_markers = [
+        "binary",
+        "count",
+        "counts",
+        "coordination",
+        "definition",
+        "definitions",
+        "frequency",
+        "threshold",
+        "mismatch",
+        "smoothness",
+        "stability",
+        "sequence",
+        "sequences",
+        "timing",
+        "transition",
+        "transitions",
+        "pose",
+        "poses",
+        "state",
+        "states",
+        "feature",
+        "features",
+        "metric",
+        "metrics",
+        "retargeting",
+        "symbolic",
+        "二值",
+        "计数",
+        "协调",
+        "频率",
+        "平滑",
+        "序列",
+        "过渡",
     ]
     requirement_context_markers = [
         "real",
@@ -469,15 +520,20 @@ def non_negated_hits(text: str, tokens: list[str]) -> list[str]:
     for token in tokens:
         token_lower = token.lower()
         for match in re.finditer(re.escape(token_lower), lowered):
-            start = max(0, match.start() - 36)
+            context_start = max(0, match.start() - 96)
+            window_start = max(0, match.start() - 36)
             end = min(len(lowered), match.end() + 36)
-            window = lowered[start:end]
-            context = lowered[start : match.start()]
+            window = lowered[window_start:end]
+            context = lowered[context_start : match.start()]
+            surrounding = lowered[context_start:end]
             clause_context = re.split(r"[.;。；\n]", context)[-1]
             if any(negator in clause_context for negator in negators):
                 continue
-            if any(marker in window for marker in synthetic_context_markers) and not any(
-                marker in window for marker in requirement_context_markers
+            context_markers = synthetic_context_markers
+            if token_lower in {"gripper", "夹爪"}:
+                context_markers = synthetic_context_markers + gripper_proxy_markers
+            if any(marker in surrounding for marker in context_markers) and not any(
+                marker in window or marker in clause_context for marker in requirement_context_markers
             ):
                 continue
             hits.append(token)
@@ -519,7 +575,7 @@ def claim_id_references(value: str) -> list[str]:
             continue
         if normalized.startswith("if_"):
             continue
-        if token[:1].upper() == "C" and any(char.isdigit() for char in token):
+        if re.fullmatch(r"C(?:\d+|-[A-Za-z0-9][A-Za-z0-9_-]*)", token):
             refs.append(token)
     return refs
 
@@ -591,6 +647,8 @@ def validate_idea_fuel(section: str, evidence_ledger: str) -> list[str]:
         for label in IDEA_FUEL_FIELD_ALIASES:
             value = values.get(label, "")
             if label in {"Evidence anchor", "Evidence class"} and normalize_token(value) == "not_evidenced":
+                continue
+            if label == "Transfer distance to DLO" and normalize_token(value) == "none":
                 continue
             if blank_or_placeholder(value):
                 issues.append(f"idea_fuel_packet_missing:{packet_id}:{label}")
@@ -828,7 +886,6 @@ def validate_no_hardware_micro_test(section: str) -> list[str]:
         "robot arm",
         "gripper",
         "real cabinet",
-        "cabinet",
         "real environment",
         "real scene",
         "physical hardware",
@@ -848,7 +905,6 @@ def validate_no_hardware_micro_test(section: str) -> list[str]:
         "机械臂",
         "夹爪",
         "真实柜子",
-        "柜门",
         "硬件",
         "触觉传感器",
         "深度相机",

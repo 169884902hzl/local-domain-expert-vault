@@ -29,6 +29,7 @@ from research_seed_v2_common import (
     read_json,
     write_run_artifact,
 )
+from validate_research_run import validate_run as validate_v2_run
 
 
 MAX_SNIPPET_CHARS = 1800
@@ -489,6 +490,21 @@ def _file_mtime(path: Path) -> datetime | None:
     return datetime.fromtimestamp(path.stat().st_mtime)
 
 
+def _v2_manual_recovery_success(run_date: str, latest_start: datetime | None = None) -> bool:
+    publish_result = vault_path("projects", "research-agenda", "runs", run_date, "publish", "publish-result.json")
+    if not publish_result.exists():
+        return False
+    publish_mtime = _file_mtime(publish_result)
+    if latest_start is not None and publish_mtime is not None and publish_mtime < latest_start:
+        return False
+    try:
+        publish_data = read_json(publish_result)
+        validation = validate_v2_run(run_date, strict_publish=True)
+    except Exception:
+        return False
+    return publish_data.get("status") == "success" and validation.get("status") == "success"
+
+
 def check_daily_readiness(run_date: str) -> dict[str, str]:
     run_log = vault_path("projects", "arxiv-daily", f"{run_date}-run.md")
     recovery_log = vault_path("projects", "arxiv-daily", f"{run_date}-backlog-recovery.md")
@@ -510,6 +526,7 @@ def check_daily_readiness(run_date: str) -> dict[str, str]:
         and battle_only_errors
     )
     latest_start, latest_end, latest_exit = _parse_daily_run_completion(run_date)
+    manual_v2_recovery_success = _v2_manual_recovery_success(run_date, latest_start)
     manual_success = run_log.exists() and (run_status == "success" or battle_partial) and (agenda_status in {"success", "skipped_no_focus_keys"} or battle_partial) and agenda_delta.exists()
     recovery_success = (
         recovery_log.exists()
@@ -520,19 +537,19 @@ def check_daily_readiness(run_date: str) -> dict[str, str]:
 
     if not run_log.exists():
         reasons.append("missing_daily_run_log")
-    elif run_status != "success" and not recovery_success and not battle_partial:
+    elif run_status != "success" and not recovery_success and not battle_partial and not manual_v2_recovery_success:
         reasons.append(f"daily_run_not_success:{run_status or 'missing'}")
-    if run_log.exists() and agenda_status not in {"success", "skipped_no_focus_keys"} and not recovery_success and not battle_partial:
+    if run_log.exists() and agenda_status not in {"success", "skipped_no_focus_keys"} and not recovery_success and not battle_partial and not manual_v2_recovery_success:
         reasons.append(f"agenda_update_not_ready:{agenda_status or 'missing'}")
     if not agenda_delta.exists():
         reasons.append("missing_agenda_delta")
     if latest_end is None:
-        if not manual_success and not recovery_success:
+        if not manual_success and not recovery_success and not manual_v2_recovery_success:
             reasons.append("missing_successful_wrapper_end")
-    elif latest_exit != 0 and not manual_success and not recovery_success and not battle_partial:
+    elif latest_exit != 0 and not manual_success and not recovery_success and not battle_partial and not manual_v2_recovery_success:
         reasons.append(f"latest_wrapper_exit_nonzero:{latest_exit}")
     agenda_mtime = _file_mtime(agenda_delta)
-    if latest_start is not None and agenda_mtime is not None and agenda_mtime < latest_start and not recovery_success:
+    if latest_start is not None and agenda_mtime is not None and agenda_mtime < latest_start and not recovery_success and not manual_v2_recovery_success:
         reasons.append("agenda_delta_older_than_latest_daily_start")
 
     return {
@@ -548,6 +565,7 @@ def check_daily_readiness(run_date: str) -> dict[str, str]:
         "battle_partial_review_allowed": str(battle_partial).lower(),
         "recovery_status": recovery_status,
         "recovery_agenda_update_status": recovery_agenda_status,
+        "manual_v2_recovery_success": str(manual_v2_recovery_success).lower(),
         "latest_daily_start": latest_start.isoformat() if latest_start else "",
         "latest_daily_end": latest_end.isoformat() if latest_end else "",
         "latest_daily_exit_code": "" if latest_exit is None else str(latest_exit),

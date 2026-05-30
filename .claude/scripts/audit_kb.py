@@ -263,6 +263,8 @@ def target_payload(
         )
         target_zkey = zkey or requested_key
         issues.extend(note_issues)
+        if args.strict_reading and _status != "done":
+            issues.append(f"strict_target_not_done:{_status or 'missing'}")
         if requested_key and zkey and requested_key.upper() != zkey.upper():
             issues.append("target_note_mismatch:zotero_key_field_differs")
     payload = {

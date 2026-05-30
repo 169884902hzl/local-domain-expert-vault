@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -368,6 +369,14 @@ class FinalizeStrictContractTest(unittest.TestCase):
     def test_valid_if_packets_pass(self) -> None:
         validate_analysis(extract_sections(strict_analysis(top_idea=GOOD_IDEA)), load_schema())
 
+    def test_chinese_only_if_packet_values_are_not_treated_as_blank(self) -> None:
+        chinese_idea = GOOD_IDEA.replace(
+            "- Negative transfer risk: Direct copying may optimize visual plausibility while damaging control robustness.",
+            "- Negative transfer risk: 安全约束过强会阻止必要接触，导致任务无法完成。",
+            1,
+        )
+        validate_analysis(extract_sections(strict_analysis(top_idea=chinese_idea)), load_schema())
+
     def test_if_packet_combined_evidence_class_fails(self) -> None:
         bad_idea = GOOD_IDEA.replace("- Evidence class: pdf_verified", "- Evidence class: pdf_verified + table_verified", 1)
         with self.assertRaisesRegex(ValueError, "idea_fuel_packet_bad_evidence_class:IF-1"):
@@ -416,6 +425,71 @@ class FinalizeStrictContractTest(unittest.TestCase):
 - Threshold: precision above 0.8.
 - Pass condition: synthetic DLO tokens are selected.
 - Fail/kill condition: synthetic gripper token dominates the proxy.
+- Compute/data cap: CPU-only synthetic arrays.
+- No-hardware confirmation: no robot; no real scene; no new data collection."""
+        self.assertNotIn("no_hardware_micro_test_invalid_hardware_requirement", "\n".join(validate_no_hardware_micro_test(section)))
+
+    def test_no_hardware_synthetic_cabinet_simulation_is_not_requirement(self) -> None:
+        section = """- Explicit exclusions: no robot; no real scene; no new data collection.
+- Test artifact: synthetic cabinet simulation table and static trajectory arrays only.
+- Input: fixed paper cabinet benchmark values and toy trajectory arrays.
+- Protocol:
+  1. Build synthetic cabinet clearance masks from table values.
+  2. Compute static collision and jerk proxy metrics.
+  3. Report proxy pass/fail.
+- Metric: static collision-free proxy and jerk proxy.
+- Threshold: collision proxy passes and jerk stays below table baseline.
+- Pass condition: synthetic proxy improves over the table baseline.
+- Fail/kill condition: any real cabinet, robot, or new scene is required.
+- Compute/data cap: CPU-only synthetic arrays and paper table values.
+- No-hardware confirmation: no robot; no real scene; no new data collection."""
+        self.assertNotIn("no_hardware_micro_test_invalid_hardware_requirement", "\n".join(validate_no_hardware_micro_test(section)))
+
+    def test_no_hardware_gripper_metric_proxy_is_not_requirement(self) -> None:
+        section = """- Explicit exclusions: no robot; no real scene; no new data collection.
+- Test artifact: Section 3.5 trajectory-stability and gripper-stability definitions plus table values.
+- Input: Synthetic end-effector position sequence, velocity sequence, and binary gripper sequence.
+- Protocol:
+  1. Generate a smooth trajectory and a jerky trajectory with the same start and end points.
+  2. Compute coefficient-of-variation based smoothness proxies for velocity, acceleration, and jerk.
+  3. Compute abrupt gripper transition count and coordination timing proxy.
+  4. Compare metric ordering against the intended TS and GS interpretation.
+- Metric: TS proxy ordering and GS proxy ordering.
+- Threshold: Smooth synthetic trajectory must score higher than jerky trajectory on both proxies.
+- Pass condition: Metrics penalize jerk and abrupt gripper transitions in the expected direction.
+- Fail/kill condition: Jerky trajectory scores equal or higher than smooth trajectory.
+- Compute/data cap: synthetic arrays under 1000 timesteps.
+- No-hardware confirmation: no robot; no real scene; no new data collection."""
+        self.assertNotIn("no_hardware_micro_test_invalid_hardware_requirement", "\n".join(validate_no_hardware_micro_test(section)))
+
+    def test_no_hardware_chinese_no_new_data_is_not_requirement(self) -> None:
+        section = """- Explicit exclusions: no robot; no real scene; no new data collection.
+- Test artifact: supplied fulltext table only.
+- Input: fixed paper table values.
+- Protocol:
+  1. Extract fixed paper table values.
+  2. Compute static checklist scores.
+  3. Report proxy pass/fail.
+- Metric: static evidence coverage.
+- Threshold: coverage above 0.5.
+- Pass condition: evidence anchors cover the claim.
+- Fail/kill condition: missing anchors.
+- Compute/data cap: 只使用 supplied fulltext；无训练、无仿真、无新数据。
+- No-hardware confirmation: no robot; no real scene; no new data collection."""
+        self.assertNotIn("no_hardware_micro_test_invalid_hardware_requirement", "\n".join(validate_no_hardware_micro_test(section)))
+
+    def test_no_hardware_fail_condition_can_name_hardware_as_kill_boundary(self) -> None:
+        section = """- Explicit exclusions: no robot; no real scene; no new data collection.
+- Test artifact: synthetic arrays only.
+- Input: fixed synthetic values.
+- Protocol:
+  1. Build fixed arrays.
+  2. Compute static metrics.
+  3. Report pass/fail.
+- Metric: static metric.
+- Threshold: score above 0.5.
+- Pass condition: score passes with synthetic arrays.
+- Fail/kill condition: test needs any physical hardware, new scene, or new data collection.
 - Compute/data cap: CPU-only synthetic arrays.
 - No-hardware confirmation: no robot; no real scene; no new data collection."""
         self.assertNotIn("no_hardware_micro_test_invalid_hardware_requirement", "\n".join(validate_no_hardware_micro_test(section)))
@@ -513,6 +587,23 @@ No related sections yet.
         )
         self.assertFalse(ok)
         self.assertIn("strict_missing_strict_section:Evidence Ledger", payload["target_note"]["issues"])
+
+    def test_target_mode_fails_on_stub_even_if_global_strict_ignores_it(self) -> None:
+        stub_note = re.sub(r"status:\s*\"?done\"?", "status: stub", finalized_strict_note(), count=1)
+        self.write_topic("stub.md", stub_note)
+        schema = load_schema()
+        topic_issues, _status_counts, tag_counts = audit_kb.audit_topics(schema, strict_reading=True)
+        payload, ok = audit_kb.target_payload(
+            schema=schema,
+            args=argparse.Namespace(zotero_key="TESTKEY", note="", strict_reading=True),
+            topic_issues=topic_issues,
+            concept_issues=[],
+            entity_issues=[],
+            tags_missing=sorted(set(tag_counts) - set(schema["literature"]["tag_taxonomy"])),
+        )
+        self.assertFalse(any("strict_target_not_done" in ",".join(item["issues"]) for item in topic_issues))
+        self.assertFalse(ok)
+        self.assertIn("strict_target_not_done:stub", payload["target_note"]["issues"])
 
     def test_global_audit_keeps_old_exit_behavior(self) -> None:
         old_global_note = finalized_strict_note()
