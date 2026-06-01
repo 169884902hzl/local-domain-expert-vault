@@ -807,8 +807,15 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
         candidates = [(item, item.decision, item.decision) for item in ranked]
         triage = build_triage([item.to_dict() for item in ranked], run_date=RUN_DATE, target_deep_read=3, max_deep_read=4)
         filtered = _filter_import_candidates_by_v2_triage(candidates, triage)
-        self.assertEqual(len(filtered), 3)
-        self.assertEqual([item.paper.arxiv_id for item, _selection, _original in filtered], [row["arxiv_id"] for row in triage["selected_for_deep_read"]])
+        self.assertEqual(len(filtered), len(candidates))
+        self.assertEqual(
+            [item.paper.arxiv_id for item, _selection, _original in filtered[:3]],
+            [row["arxiv_id"] for row in triage["selected_for_deep_read"]],
+        )
+        self.assertEqual(
+            [item.paper.arxiv_id for item, _selection, _original in filtered[3:]],
+            [item.paper.arxiv_id for item in ranked if item.paper.arxiv_id not in {row["arxiv_id"] for row in triage["selected_for_deep_read"]}],
+        )
 
     def test_backfill_ingest_only_stops_before_candidates_and_seed(self) -> None:
         candidates = Path(self.tmp.name) / "candidates.jsonl"

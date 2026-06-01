@@ -713,6 +713,15 @@ def line_has_numeric_result_claim(line: str) -> bool:
     stripped = line.strip()
     if not stripped or stripped.startswith("|") or stripped.startswith("#"):
         return False
+    metadata_prefixes = (
+        "- Fulltext Quality:",
+        "- Evidence Coverage:",
+        "- Confidence:",
+        "- Anchor Coverage:",
+        "- Evidence Boundary:",
+    )
+    if any(stripped.startswith(prefix) for prefix in metadata_prefixes):
+        return False
     if re.match(r"^\*{0,2}\s*(step|步骤|阶段)\s*\d+", stripped, flags=re.IGNORECASE):
         return False
     text_without_ids = re.sub(r"\b[A-Za-z]+-[A-Za-z0-9_-]*\b", "", stripped)
@@ -729,7 +738,7 @@ def line_has_claim_id_or_anchor(line: str, known_claim_ids: set[str]) -> bool:
         return True
     return bool(
         re.search(
-            r"\b(table|figure|fig\.?|result_row|section|appendix|page|p\.)\s*(?:[a-z]?\d+|[ivxlcdm]+)\b",
+            r"\b(tables?|figures?|figs?\.?|result_rows?|sections?|appendices|appendix|pages?|p\.)\s*(?:[a-z]?\d+(?:\s*[-–]\s*[a-z]?\d+)?|[ivxlcdm]+)\b",
             line,
             flags=re.IGNORECASE,
         )

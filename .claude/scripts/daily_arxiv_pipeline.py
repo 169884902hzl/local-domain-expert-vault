@@ -701,6 +701,12 @@ def _filter_import_candidates_by_v2_triage(
     selected: list[tuple[RankedPaper, str, str]],
     triage: dict[str, Any],
 ) -> list[tuple[RankedPaper, str, str]]:
+    """Prioritize v2 deep-read choices while retaining fallback candidates.
+
+    The daily loop stops once ``max_read`` successful reads are reached. Keeping
+    fallback candidates here lets the run replace a selected paper whose PDF
+    import or strict read fails without broadening normal successful days.
+    """
     selected_rows = triage.get("selected_for_deep_read", [])
     if not isinstance(selected_rows, list):
         return selected
@@ -709,7 +715,14 @@ def _filter_import_candidates_by_v2_triage(
     if not selected_ids:
         return []
     by_id = {item.paper.arxiv_id: (item, selection, original) for item, selection, original in selected}
-    return [by_id[arxiv_id] for arxiv_id in selected_ids if arxiv_id in by_id]
+    prioritized = [by_id[arxiv_id] for arxiv_id in selected_ids if arxiv_id in by_id]
+    selected_id_set = set(selected_ids)
+    fallbacks = [
+        (item, selection, original)
+        for item, selection, original in selected
+        if item.paper.arxiv_id not in selected_id_set
+    ]
+    return prioritized + fallbacks
 
 
 def _non_robotics_rejected_sample(ranked: list[RankedPaper], *, limit: int = 8) -> list[RankedPaper]:

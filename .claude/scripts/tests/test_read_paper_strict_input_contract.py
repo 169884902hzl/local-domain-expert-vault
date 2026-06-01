@@ -222,6 +222,28 @@ def finalized_strict_note() -> str:
 
 
 class FinalizeStrictContractTest(unittest.TestCase):
+    def test_evidence_metadata_coverage_numbers_do_not_require_claim_id(self) -> None:
+        analysis = strict_analysis().replace(
+            "- Evidence Coverage: tables, figures, and sections checked",
+            "- Evidence Coverage: covers Section 1, Table 2, Appendix A.1-A.5, and 17 inspected tasks",
+        )
+        validate_analysis(extract_sections(analysis), load_schema())
+
+    def test_evidence_metadata_summary_numeric_claim_still_requires_anchor(self) -> None:
+        analysis = strict_analysis().replace(
+            "- Summary: Anchored fixture reading with strict evidence ledger.",
+            "- Summary: The model reaches 95% success without an evidence claim reference.",
+        )
+        with self.assertRaisesRegex(ValueError, "numeric_claim_missing_claim_id_or_anchor"):
+            validate_analysis(extract_sections(analysis), load_schema())
+
+    def test_plural_table_range_counts_as_numeric_anchor(self) -> None:
+        analysis = strict_analysis().replace(
+            "- [C-L1] No verified physical closed-loop DLO control evidence.",
+            "- Unconfirmed result rows: None for supplied Tables 1-3 because rows are verified in the paper.",
+        )
+        validate_analysis(extract_sections(analysis), load_schema())
+
     def test_top_level_idea_fuel_is_preserved(self) -> None:
         output = finalized_strict_note()
         self.assertIn("## Idea Fuel", output)
