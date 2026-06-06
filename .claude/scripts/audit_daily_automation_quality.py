@@ -192,13 +192,25 @@ def _failed_or_backlog_read_items(
     recovery_text: str,
     recovery_status: str,
 ) -> list[dict[str, Any]]:
-    recovered_success_keys = _successful_read_keys(recovery_text) if recovery_status == "success" else set()
+    recovered_success_keys = _successful_read_keys(recovery_text)
     return [
         item for item in _reading_items(run_text)
         if not str(item.get("read", "")).startswith("success")
         and item.get("read") != "skipped"
         and item.get("key") not in recovered_success_keys
     ]
+
+
+def _source_unavailable_replacement_applied(recovery_text: str, recovery_status: str) -> bool:
+    return (
+        recovery_status == "success"
+        and "unavailable_arxiv_replaced" in recovery_text
+        and bool(_successful_read_keys(recovery_text))
+    )
+
+
+def _daily_read_target_satisfied(successful_reads: int, max_daily_reads: int, failed_or_backlog_reads: list[dict[str, Any]]) -> bool:
+    return max_daily_reads > 0 and successful_reads >= max_daily_reads and not failed_or_backlog_reads
 
 
 def _run_log(run_date: str) -> tuple[Path, str]:
@@ -416,6 +428,10 @@ def _provider_candidate_level_fail_closed(data: dict[str, Any], *, expected_mode
     )
 
 
+def _scheduled_provider_artifacts_expected(*, greenhouse_exists: bool, raw_candidate_count: int) -> bool:
+    return greenhouse_exists and raw_candidate_count > 0
+
+
 def _v2_deepseek_review_covers_battle(data: dict[str, Any]) -> bool:
     provider = data.get("provider_status", {})
     if not isinstance(provider, dict):
@@ -424,6 +440,7 @@ def _v2_deepseek_review_covers_battle(data: dict[str, Any]) -> bool:
         data.get("status") == "success"
         and provider.get("provider_backed") is True
         or _provider_candidate_level_fail_closed(data, expected_mode="opencode")
+        or _provider_candidate_level_fail_closed(data, expected_mode="openai-compatible")
     )
 
 
@@ -914,6 +931,24 @@ def audit_run(
                     repair_report,
                 )
             )
+        elif set(pdf_sync_hits) <= {"stored_pdf_required_failed"} and _source_unavailable_replacement_applied(recovery_text, recovery_status):
+            issue_list.append(
+                _issue(
+                    "INFO",
+                    "zotero_pdf_source_unavailable_replaced",
+                    "A run item failed because the source PDF was unavailable, and the recovery log records a successful replacement read.",
+                    _rel(recovery_path),
+                )
+            )
+        elif set(pdf_sync_hits) <= {"stored_pdf_required_failed"} and _daily_read_target_satisfied(successful_reads, max_daily_reads, failed_or_backlog_reads):
+            issue_list.append(
+                _issue(
+                    "INFO",
+                    "zotero_pdf_optional_import_failures_after_target_met",
+                    "Some optional import attempts failed because source PDFs were unavailable, but the daily read target was met and no read backlog remains.",
+                    _rel(run_path),
+                )
+            )
         else:
             issue_list.append(
                 _issue(
@@ -1023,11 +1058,15 @@ def audit_run(
         )
     )
 
-    if scheduled_deepseek_provider == "opencode":
+    scheduled_provider_artifacts_expected = _scheduled_provider_artifacts_expected(
+        greenhouse_exists=greenhouse_path.exists(),
+        raw_candidate_count=len(raw_candidates),
+    )
+    if scheduled_provider_artifacts_expected and scheduled_deepseek_provider in {"opencode", "openai-compatible"}:
         issue = _provider_backed_artifact_issue(
             run_date=run_date,
             artifact_name="deepseek-review.json",
-            expected_mode="opencode",
+            expected_mode=scheduled_deepseek_provider,
             code="scheduled_deepseek_provider_not_provider_backed",
             allow_candidate_fail_closed=True,
         )
@@ -1035,7 +1074,7 @@ def audit_run(
             issue_list.append(issue)
 
     codex = _classify_codex_state(run_date)
-    if scheduled_codex_execution_provider == "codex-cli":
+    if scheduled_provider_artifacts_expected and scheduled_codex_execution_provider == "codex-cli":
         issue = _provider_backed_artifact_issue(
             run_date=run_date,
             artifact_name="codex-execution-review.json",
@@ -1298,7 +1337,7 @@ def main() -> int:
     parser.add_argument("--run-date", default=date.today().isoformat())
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--json", action="store_true")
-    parser.add_argument("--scheduled-deepseek-provider", choices=["none", "opencode"], default="none")
+    parser.add_argument("--scheduled-deepseek-provider", choices=["none", "opencode", "openai-compatible"], default="none")
     parser.add_argument("--scheduled-codex-execution-provider", choices=["none", "codex-cli"], default="none")
     args = parser.parse_args()
 

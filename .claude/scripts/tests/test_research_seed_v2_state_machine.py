@@ -109,7 +109,7 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
 """
 
         self.assertEqual(_failed_or_backlog_read_items(run_text, recovery_text, "success"), [])
-        self.assertEqual(len(_failed_or_backlog_read_items(run_text, recovery_text, "partial")), 1)
+        self.assertEqual(_failed_or_backlog_read_items(run_text, recovery_text, "partial"), [])
 
     def test_agenda_extract_json_prefers_candidates_object_after_logs(self) -> None:
         text = '{"event":"thinking"}\n```json\n{"candidates":[{"title":"candidate"}]}\n```'
