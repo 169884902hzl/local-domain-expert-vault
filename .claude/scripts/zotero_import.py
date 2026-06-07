@@ -45,7 +45,49 @@ def _env(name: str, default: str = "") -> str:
     return default
 
 
-LOCAL_API = _env("ZOTERO_LOCAL_API", "http://localhost:23119/api/users/0")
+def _decode_pref_string(raw: str) -> str:
+    try:
+        return str(json.loads(f'"{raw}"'))
+    except json.JSONDecodeError:
+        return raw.replace("\\\\", "\\")
+
+
+def _zotero_profile_dirs() -> list[Path]:
+    appdata = os.environ.get("APPDATA", "").strip()
+    if not appdata:
+        return []
+    profiles_root = Path(appdata) / "Zotero" / "Zotero" / "Profiles"
+    if not profiles_root.exists():
+        return []
+    profiles = [path for path in profiles_root.iterdir() if path.is_dir()]
+    return sorted(
+        profiles,
+        key=lambda path: (path / "prefs.js").stat().st_mtime if (path / "prefs.js").exists() else 0,
+        reverse=True,
+    )
+
+
+def _zotero_data_dir_from_profile() -> Path | None:
+    data_dir_re = re.compile(r'user_pref\("extensions\.zotero\.dataDir",\s*"(?P<value>(?:\\.|[^"])*)"\);')
+    use_data_dir_re = re.compile(r'user_pref\("extensions\.zotero\.useDataDir",\s*(?P<value>true|false)\);')
+    for profile_dir in _zotero_profile_dirs():
+        prefs_path = profile_dir / "prefs.js"
+        if not prefs_path.exists():
+            continue
+        text = prefs_path.read_text(encoding="utf-8", errors="replace")
+        use_match = use_data_dir_re.search(text)
+        if use_match and use_match.group("value") != "true":
+            continue
+        data_match = data_dir_re.search(text)
+        if not data_match:
+            continue
+        candidate = Path(_decode_pref_string(data_match.group("value")))
+        if candidate.exists():
+            return candidate
+    return None
+
+
+LOCAL_API = _env("ZOTERO_LOCAL_API", "http://127.0.0.1:23119/api/users/0")
 LOCAL_CONNECTOR_API = _env("ZOTERO_CONNECTOR_API", "http://127.0.0.1:23119")
 WEB_API = _env("ZOTERO_WEB_API", "https://api.zotero.org")
 DEFAULT_COLLECTION_KEY = _env("ZOTERO_COLLECTION_KEY", "")
@@ -367,22 +409,87 @@ def pdf_filename_from_ranked(ranked: RankedPaper) -> str:
     return f"arxiv-{arxiv_id}.pdf"
 
 
-def _download_pdf_bytes(ranked: RankedPaper, timeout: int = 120) -> bytes:
+def pdf_download_urls(ranked: RankedPaper) -> list[str]:
     paper = ranked.paper
-    pdf_url = paper.pdf_url or (f"https://arxiv.org/pdf/{paper.arxiv_id}" if paper.arxiv_id else "")
-    if not pdf_url:
+    candidates: list[str] = []
+    if paper.pdf_url:
+        candidates.append(paper.pdf_url)
+        if paper.pdf_url.startswith("http://"):
+            candidates.append("https://" + paper.pdf_url.removeprefix("http://"))
+    if paper.arxiv_id:
+        arxiv_id = paper.arxiv_id
+        candidates.extend(
+            [
+                f"https://arxiv.org/pdf/{arxiv_id}",
+                f"https://arxiv.org/pdf/{arxiv_id}.pdf",
+                f"https://export.arxiv.org/pdf/{arxiv_id}",
+                f"https://export.arxiv.org/pdf/{arxiv_id}.pdf",
+            ]
+        )
+    seen: set[str] = set()
+    unique: list[str] = []
+    for url in candidates:
+        if url and url not in seen:
+            seen.add(url)
+            unique.append(url)
+    return unique
+
+
+def _download_pdf_bytes(ranked: RankedPaper, timeout: int = 120) -> bytes:
+    urls = pdf_download_urls(ranked)
+    if not urls:
         raise ZoteroError("no PDF URL available")
-    req = urllib.request.Request(
-        pdf_url,
-        headers={
-            "Accept": "application/pdf,*/*",
-            "User-Agent": "daily-arxiv-zotero-import/1.0",
-        },
-    )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        data = resp.read()
-    if not data.startswith(b"%PDF"):
-        raise ZoteroError(f"downloaded file is not a PDF from {pdf_url}")
+    errors: list[str] = []
+    for pdf_url in urls:
+        for attempt in range(1, 4):
+            req = urllib.request.Request(
+                pdf_url,
+                headers={
+                    "Accept": "application/pdf,*/*",
+                    "User-Agent": "daily-arxiv-zotero-import/1.0",
+                },
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=timeout) as resp:
+                    data = resp.read()
+                if data.startswith(b"%PDF"):
+                    return data
+                errors.append(f"{pdf_url}:not_pdf")
+                break
+            except urllib.error.HTTPError as exc:
+                errors.append(f"{pdf_url}:HTTP_{exc.code}")
+                if not _is_transient_http_status(exc.code) or attempt >= 3:
+                    break
+                time.sleep(_retry_delay_seconds(attempt, exc))
+            except Exception as exc:
+                errors.append(f"{pdf_url}:{type(exc).__name__}:{str(exc)[:80]}")
+                if not _is_transient_network_error(exc) or attempt >= 3:
+                    break
+                time.sleep(_retry_delay_seconds(attempt, exc))
+    raise ZoteroError("pdf_download_failed:" + " | ".join(errors)[-500:])
+
+
+def cached_pdf_path(ranked: RankedPaper, local_dir: Path = DEFAULT_LOCAL_PDF_CACHE) -> Path | None:
+    path = local_dir / pdf_filename_from_ranked(ranked)
+    if path.exists() and path.stat().st_size > 1000:
+        return path
+    return None
+
+
+def read_pdf_bytes_from_cache_or_download(
+    ranked: RankedPaper,
+    local_dir: Path = DEFAULT_LOCAL_PDF_CACHE,
+    *,
+    timeout: int = 45,
+) -> bytes:
+    cached = cached_pdf_path(ranked, local_dir)
+    if cached:
+        data = cached.read_bytes()
+        if data.startswith(b"%PDF"):
+            return data
+    data = _download_pdf_bytes(ranked, timeout=timeout)
+    local_dir.mkdir(parents=True, exist_ok=True)
+    (local_dir / pdf_filename_from_ranked(ranked)).write_bytes(data)
     return data
 
 
@@ -391,7 +498,7 @@ def download_pdf_to_local_cache(ranked: RankedPaper, local_dir: Path = DEFAULT_L
     path = local_dir / pdf_filename_from_ranked(ranked)
     if path.exists() and path.stat().st_size > 1000:
         return path
-    data = _download_pdf_bytes(ranked, timeout=180)
+    data = _download_pdf_bytes(ranked, timeout=45)
     path.write_bytes(data)
     return path
 
@@ -523,7 +630,7 @@ def create_linked_pdf_attachment_web(
 
 def upload_pdf_file_web(ranked: RankedPaper, attachment_key: str, *, user_id: str, api_key: str) -> str:
     try:
-        pdf_bytes = _download_pdf_bytes(ranked)
+        pdf_bytes = read_pdf_bytes_from_cache_or_download(ranked)
     except Exception as exc:
         return f"pdf_file_upload_failed:download:{type(exc).__name__}:{str(exc)[:120]}"
     filename = pdf_filename_from_ranked(ranked)
@@ -651,6 +758,12 @@ def zotero_data_dir() -> Path:
     explicit = _env("ZOTERO_DATA_DIR")
     if explicit:
         return Path(explicit)
+    profile_data_dir = _zotero_data_dir_from_profile()
+    if profile_data_dir:
+        return profile_data_dir
+    preferred = Path("H:/zotero")
+    if preferred.exists():
+        return preferred
     return Path.home() / "Zotero"
 
 
@@ -730,20 +843,6 @@ def create_item_local_connector(ranked: RankedPaper, collection_key: str = DEFAU
     session_id = f"{connector_id}-{uuid.uuid4().hex[:12]}"
     uri = paper.url or paper.pdf_url or (f"https://arxiv.org/abs/{paper.arxiv_id}" if paper.arxiv_id else "")
     pdf_url = paper.pdf_url or (f"https://arxiv.org/pdf/{paper.arxiv_id}" if paper.arxiv_id else "")
-    if not pdf_url:
-        return ImportResult(
-            status="failed",
-            message="stored_pdf_required_failed:no_pdf_url",
-            mode="local_connector",
-        )
-    try:
-        pdf_bytes = _download_pdf_bytes(ranked, timeout=180)
-    except Exception as exc:
-        return ImportResult(
-            status="failed",
-            message=f"stored_pdf_required_failed:download:{type(exc).__name__}:{str(exc)[:180]}",
-            mode="local_connector",
-        )
     item = zotero_connector_item_from_ranked(ranked, connector_id)
     try:
         status, _, _ = _post_connector_json(
@@ -764,6 +863,27 @@ def create_item_local_connector(ranked: RankedPaper, collection_key: str = DEFAU
         raise ZoteroError(f"Zotero local connector updateSession failed HTTP {exc.code}: {detail[:300]}") from exc
     if status != 200:
         raise ZoteroError(f"Zotero local connector updateSession returned status {status}: {data}")
+
+    if not pdf_url:
+        existing = wait_for_existing_paper(paper, collection_key, timeout_seconds=90)
+        key = existing.zotero_key if existing else ""
+        return ImportResult(
+            status="pdf_pending",
+            zotero_key=key,
+            message="created via Zotero local connector; stored_pdf_required_failed:no_pdf_url",
+            mode="local_connector",
+        )
+    try:
+        pdf_bytes = read_pdf_bytes_from_cache_or_download(ranked)
+    except Exception as exc:
+        existing = wait_for_existing_paper(paper, collection_key, timeout_seconds=90)
+        key = existing.zotero_key if existing else ""
+        return ImportResult(
+            status="pdf_pending",
+            zotero_key=key,
+            message=f"created via Zotero local connector; stored_pdf_required_failed:download:{type(exc).__name__}:{str(exc)[:180]}",
+            mode="local_connector",
+        )
 
     try:
         attachment_title = f"PDF - {paper.title[:180]}"

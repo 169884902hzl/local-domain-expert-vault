@@ -47,7 +47,7 @@ def env_value(name: str, default: str = "") -> str:
 
 
 def fetch_item(zotero_key: str) -> dict[str, Any]:
-    url = f"http://localhost:23119/api/users/0/items/{zotero_key}?format=json"
+    url = f"http://127.0.0.1:23119/api/users/0/items/{zotero_key}?format=json"
     try:
         with urllib.request.urlopen(urllib.request.Request(url), timeout=30) as resp:
             return json.loads(resp.read().decode("utf-8"))
@@ -57,7 +57,7 @@ def fetch_item(zotero_key: str) -> dict[str, Any]:
     if item:
         safe_print(f"FETCHED_FROM_ZOTERO_WEB_API: {zotero_key}")
         return item
-    safe_print(f"ERROR: Cannot fetch Zotero item {zotero_key} from localhost:23119 or Zotero Web API.")
+    safe_print(f"ERROR: Cannot fetch Zotero item {zotero_key} from 127.0.0.1:23119 or Zotero Web API.")
     safe_print("  Make sure Zotero is running and synced, or set ZOTERO_API_KEY and ZOTERO_USER_ID.")
     safe_print(f"  Local detail: {local_error}")
     raise SystemExit(1) from local_error

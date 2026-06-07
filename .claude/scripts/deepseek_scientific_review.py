@@ -5,6 +5,10 @@ import argparse
 import json
 import os
 import re
+import socket
+import urllib.error
+import urllib.parse
+import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -30,8 +34,9 @@ SURVIVABILITY_LABELS = {"survives", "survives_if_mutated", "park_for_unknown", "
 ALLOWED_NEXT_STAGES = {"novelty_scan", "gemini_mutation", "parked", "rescue", "stop"}
 A_PLUS_B_RISK = {"none", "low", "medium", "high", "fatal"}
 DEFAULT_OPENCODE_BATCH_SIZE = 1
-DEFAULT_OPENCODE_RETRIES = 2
-DEFAULT_OPENCODE_FALLBACK_MODELS = ("dwai/gpt-5.5",)
+DEFAULT_OPENCODE_RETRIES = 0
+DEFAULT_OPENCODE_FALLBACK_MODELS: tuple[str, ...] = ()
+DEFAULT_OPENAI_COMPATIBLE_MAX_TOKENS = 8192
 PROVIDER_CANDIDATE_FIELDS = [
     "candidate_id",
     "title",
@@ -538,7 +543,7 @@ def _opencode_model_candidates(model: str) -> list[str]:
     primary = str(model or "").strip()
     env_value = str(os.environ.get("DEEPSEEK_OPENCODE_FALLBACK_MODELS", "")).strip()
     fallback_models = [item.strip() for item in env_value.split(",") if item.strip()]
-    if not fallback_models and primary.startswith("abrdns/"):
+    if not fallback_models:
         fallback_models = list(DEFAULT_OPENCODE_FALLBACK_MODELS)
     ordered: list[str] = []
     seen: set[str] = set()
@@ -563,6 +568,266 @@ def _provider_auth_failure(error_text: str) -> bool:
             "token refresh failed: 401",
             "apierror:401",
         )
+    )
+
+
+def _redact_secret_text(text: str) -> str:
+    return re.sub(r"(?i)(sk-[A-Za-z0-9_\-]{8,}|Bearer\s+\S+|api[_-]?key[=:]\s*\S+)", "[REDACTED]", str(text or ""))
+
+
+def _global_opencode_config_paths() -> list[Path]:
+    home = Path.home()
+    return [
+        home / ".config" / "opencode" / "opencode.json",
+        home / ".opencode" / "opencode.json",
+        home / ".config" / "opencode.json",
+    ]
+
+
+def _load_global_opencode_config() -> dict[str, Any]:
+    for path in _global_opencode_config_paths():
+        if not path.exists():
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8-sig"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        if isinstance(payload, dict):
+            return payload
+    return {}
+
+
+def _openai_compatible_config(model: str) -> dict[str, str]:
+    requested_model = str(model or DEFAULT_OPENCODE_MODEL).strip() or DEFAULT_OPENCODE_MODEL
+    provider_id, model_key = (requested_model.split("/", 1) + [""])[:2] if "/" in requested_model else ("abrdns", requested_model)
+    config = _load_global_opencode_config()
+    provider = config.get("provider", {}).get(provider_id, {}) if isinstance(config.get("provider"), dict) else {}
+    provider_options = provider.get("options", {}) if isinstance(provider, dict) else {}
+    model_config = provider.get("models", {}).get(model_key, {}) if isinstance(provider.get("models"), dict) else {}
+    base_url = str(os.environ.get("DEEPSEEK_OPENAI_BASE_URL") or provider_options.get("baseURL") or "").strip()
+    api_key = str(os.environ.get("DEEPSEEK_OPENAI_API_KEY") or provider_options.get("apiKey") or "").strip()
+    api_model = str(os.environ.get("DEEPSEEK_OPENAI_MODEL") or model_config.get("id") or model_key or requested_model).strip()
+    return {
+        "provider_id": provider_id,
+        "requested_model": requested_model,
+        "api_model": api_model,
+        "base_url": base_url,
+        "api_key": api_key,
+    }
+
+
+def _base_url_origin(base_url: str) -> str:
+    parsed = urllib.parse.urlparse(base_url)
+    if not parsed.scheme or not parsed.netloc:
+        return ""
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
+def _openai_compatible_chat_completion(prompt: str, *, model: str, timeout_sec: int) -> dict[str, Any]:
+    config = _openai_compatible_config(model)
+    result: dict[str, Any] = {
+        "mode": "openai-compatible",
+        "requested_model": config["requested_model"],
+        "effective_model": config["api_model"],
+        "base_url_origin": _base_url_origin(config["base_url"]),
+        "exit_code": None,
+        "timed_out": False,
+        "clean_output": "",
+        "raw_response_excerpt": "",
+        "error": "",
+    }
+    if not config["base_url"]:
+        result["error"] = "openai_compatible_config_missing_base_url"
+        result["exit_code"] = 1
+        return result
+    if not config["api_key"]:
+        result["error"] = "openai_compatible_config_missing_api_key"
+        result["exit_code"] = 1
+        return result
+    url = config["base_url"].rstrip("/") + "/chat/completions"
+    body = {
+        "model": config["api_model"],
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "You are a strict JSON-only scientific reviewer. Return exactly one RFC 8259 JSON object. "
+                    "Do not return markdown, prose, code fences, or tool calls."
+                ),
+            },
+            {"role": "user", "content": prompt},
+        ],
+        "temperature": 0,
+        "stream": False,
+        "max_tokens": int(os.environ.get("DEEPSEEK_OPENAI_MAX_TOKENS") or DEFAULT_OPENAI_COMPATIBLE_MAX_TOKENS),
+    }
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {config['api_key']}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout_sec) as response:
+            raw = response.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as exc:
+        error_body = ""
+        try:
+            error_body = exc.read().decode("utf-8", errors="replace")
+        except Exception:
+            error_body = ""
+        result["exit_code"] = 1
+        result["error"] = _redact_secret_text(f"openai_compatible_http_error:{exc.code}:{error_body[:500]}")
+        return result
+    except (urllib.error.URLError, TimeoutError, socket.timeout) as exc:
+        result["exit_code"] = 1
+        result["timed_out"] = isinstance(exc, (TimeoutError, socket.timeout))
+        result["error"] = _redact_secret_text(f"openai_compatible_request_error:{type(exc).__name__}:{exc}")
+        return result
+    except Exception as exc:
+        result["exit_code"] = 1
+        result["error"] = _redact_secret_text(f"openai_compatible_unexpected_error:{type(exc).__name__}:{exc}")
+        return result
+    result["exit_code"] = 0
+    result["raw_response_excerpt"] = _redact_secret_text(raw[:2000])
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        result["exit_code"] = 1
+        result["error"] = f"openai_compatible_invalid_response_json:{type(exc).__name__}:{exc}"
+        return result
+    result["response_model"] = payload.get("model")
+    result["usage"] = payload.get("usage")
+    choices = payload.get("choices")
+    if not isinstance(choices, list) or not choices:
+        result["error"] = "openai_compatible_response_missing_choices"
+        return result
+    message = choices[0].get("message", {}) if isinstance(choices[0], dict) else {}
+    content = message.get("content") if isinstance(message, dict) else ""
+    if not isinstance(content, str) or not content.strip():
+        result["error"] = "openai_compatible_empty_message_content"
+        return result
+    result["clean_output"] = content.strip()
+    return result
+
+
+def _openai_compatible_provider_batch(
+    selected: list[dict[str, Any]],
+    *,
+    run_date: str,
+    model: str,
+    timeout_sec: int,
+    batch_index: int,
+    retries: int = DEFAULT_OPENCODE_RETRIES,
+) -> dict[str, Any]:
+    attempt_count = max(1, retries + 1)
+    attempt_statuses: list[dict[str, Any]] = []
+    retry_reason = ""
+    previous_output = ""
+    retry_details: list[str] = []
+    last_error_payload: dict[str, Any] | None = None
+    for model_attempt in range(1, attempt_count + 1):
+        result = _openai_compatible_chat_completion(
+            _render_opencode_prompt(
+                selected,
+                run_date=run_date,
+                retry_reason=retry_reason,
+                previous_output=previous_output,
+                retry_details=retry_details,
+                retry_compact=True,
+            ),
+            model=model,
+            timeout_sec=timeout_sec,
+        )
+        status = {
+            "mode": "openai-compatible",
+            "requested_model": model,
+            "effective_model": result.get("effective_model") or model,
+            "response_model": result.get("response_model"),
+            "base_url_origin": result.get("base_url_origin"),
+            "exit_code": result.get("exit_code"),
+            "timed_out": bool(result.get("timed_out")),
+            "batch_index": batch_index,
+            "batch_size": len(selected),
+            "batch_candidate_ids": [candidate_id(item) for item in selected],
+            "attempt": model_attempt,
+            "attempt_count": attempt_count,
+            "usage": result.get("usage"),
+        }
+        attempt_statuses.append(dict(status))
+        if result.get("exit_code") != 0 or result.get("error") and not str(result.get("clean_output") or "").strip():
+            provider_error = str(result.get("error") or f"openai_compatible_nonzero_exit:{result.get('exit_code')}")
+            status["attempt_statuses"] = attempt_statuses
+            status["raw_response_excerpt"] = str(result.get("raw_response_excerpt") or "")[:2000]
+            last_error_payload = _provider_error_payload(
+                provider_error,
+                status="partial_provider_unavailable",
+                provider_status=status,
+            )
+            retry_reason = "openai_compatible_provider_error"
+            retry_details = [provider_error]
+            continue
+        try:
+            payload = _extract_json_object(str(result.get("clean_output") or ""))
+        except Exception as exc:
+            previous_output = str(result.get("clean_output") or "")
+            status["attempt_statuses"] = attempt_statuses
+            status["clean_output_excerpt"] = previous_output[:500]
+            status["raw_response_excerpt"] = str(result.get("raw_response_excerpt") or "")[:2000]
+            last_error_payload = _provider_error_payload(
+                f"openai_compatible_invalid_json:{type(exc).__name__}:{exc}",
+                status="partial_provider_invalid",
+                provider_status=status,
+            )
+            retry_reason = "openai_compatible_invalid_json"
+            retry_details = [f"{type(exc).__name__}:{exc}"]
+            continue
+        payload = _normalize_provider_payload_shape(payload)
+        payload["schema_version"] = "deepseek_review.v1"
+        payload["run_date"] = run_date
+        payload["status"] = "success"
+        payload["provider_status"] = {
+            **dict(payload.get("provider_status", {})),
+            **status,
+            "provider": "deepseek",
+            "provider_backed": True,
+            "attempt_statuses": attempt_statuses,
+        }
+        _hydrate_provider_review_metadata(selected, payload)
+        validation_errors = _validate_provider_reviews(selected, payload)
+        if validation_errors:
+            previous_output = str(result.get("clean_output") or "")
+            status["attempt_statuses"] = attempt_statuses
+            status["validation_errors"] = validation_errors
+            status["clean_output_excerpt"] = previous_output[:500]
+            last_error_payload = _provider_error_payload(
+                f"openai_compatible_invalid_review_payload:{';'.join(validation_errors)}",
+                status="partial_provider_invalid",
+                provider_status=status,
+            )
+            retry_reason = "openai_compatible_invalid_review_payload"
+            retry_details = validation_errors
+            continue
+        return payload
+    return last_error_payload or _provider_error_payload(
+        "openai_compatible_attempts_exhausted",
+        status="partial_provider_unavailable",
+        provider_status={
+            "mode": "openai-compatible",
+            "requested_model": model,
+            "effective_model": model,
+            "exit_code": 1,
+            "timed_out": False,
+            "batch_index": batch_index,
+            "batch_size": len(selected),
+            "batch_candidate_ids": [candidate_id(item) for item in selected],
+            "attempt_count": attempt_count,
+            "attempt_statuses": attempt_statuses,
+        },
     )
 
 
@@ -718,6 +983,7 @@ def _merge_opencode_provider_batches(
     model: str,
     batch_payloads: list[dict[str, Any]],
     batch_size: int,
+    mode: str = "opencode",
 ) -> dict[str, Any]:
     batch_statuses = [dict(payload.get("_provider_status") or payload.get("provider_status") or {}) for payload in batch_payloads]
     failures = [payload for payload in batch_payloads if payload.get("_provider_error")]
@@ -745,7 +1011,7 @@ def _merge_opencode_provider_batches(
         ]
         provider_status = {
             "provider": "deepseek",
-            "mode": "opencode",
+            "mode": mode,
             "requested_model": model,
             "effective_model": model,
             "exit_code": 1,
@@ -777,7 +1043,7 @@ def _merge_opencode_provider_batches(
         "provider_status": {
             "provider": "deepseek",
             "provider_backed": True,
-            "mode": "opencode",
+            "mode": mode,
             "requested_model": model,
             "effective_model": model,
             "exit_code": 0,
@@ -836,7 +1102,13 @@ def _opencode_provider_payload(
         if not payload.get("_provider_error"):
             _write_opencode_batch_cache(payload, run_date=run_date, batch_index=index)
         payloads.append(payload)
-    if len(payloads) == 1:
+        if payload.get("_provider_error"):
+            status = payload.setdefault("_provider_status", payload.get("provider_status") or {})
+            if isinstance(status, dict):
+                status["batch_fail_fast_after_provider_failure"] = True
+                status["unattempted_batch_count"] = max(0, len(batches) - index)
+            break
+    if len(payloads) == 1 and len(batches) == 1:
         payloads[0].setdefault("provider_status", {})
         payloads[0]["provider_status"].setdefault("batch_count", 1)
         payloads[0]["provider_status"].setdefault("batch_size", max(1, batch_size))
@@ -847,6 +1119,65 @@ def _opencode_provider_payload(
         model=model,
         batch_payloads=payloads,
         batch_size=max(1, batch_size),
+    )
+
+
+def _openai_compatible_provider_payload(
+    selected: list[dict[str, Any]],
+    *,
+    run_date: str,
+    model: str,
+    timeout_sec: int,
+    batch_size: int = DEFAULT_OPENCODE_BATCH_SIZE,
+    retries: int = DEFAULT_OPENCODE_RETRIES,
+) -> dict[str, Any]:
+    if not selected:
+        return {
+            "schema_version": "deepseek_review.v1",
+            "run_date": run_date,
+            "status": "success",
+            "provider_status": {
+                "provider": "deepseek",
+                "provider_backed": True,
+                "mode": "openai-compatible",
+                "requested_model": model,
+                "effective_model": model,
+                "exit_code": 0,
+                "batch_count": 0,
+                "batch_size": max(1, batch_size),
+            },
+            "reviews": [],
+        }
+    batches = _chunks(selected, batch_size)
+    payloads: list[dict[str, Any]] = []
+    for index, batch in enumerate(batches, start=1):
+        payload = _openai_compatible_provider_batch(
+            batch,
+            run_date=run_date,
+            model=model,
+            timeout_sec=timeout_sec,
+            batch_index=index,
+            retries=retries,
+        )
+        payloads.append(payload)
+        if payload.get("_provider_error"):
+            status = payload.setdefault("_provider_status", payload.get("provider_status") or {})
+            if isinstance(status, dict):
+                status["batch_fail_fast_after_provider_failure"] = True
+                status["unattempted_batch_count"] = max(0, len(batches) - index)
+            break
+    if len(payloads) == 1 and len(batches) == 1:
+        payloads[0].setdefault("provider_status", {})
+        payloads[0]["provider_status"].setdefault("batch_count", 1)
+        payloads[0]["provider_status"].setdefault("batch_size", max(1, batch_size))
+        return payloads[0]
+    return _merge_opencode_provider_batches(
+        selected,
+        run_date=run_date,
+        model=model,
+        batch_payloads=payloads,
+        batch_size=max(1, batch_size),
+        mode="openai-compatible",
     )
 
 
@@ -994,7 +1325,7 @@ def build_payload(selected: list[dict[str, Any]], *, run_date: str, provider_pay
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run-date", required=True)
-    parser.add_argument("--provider", choices=["json", "opencode", "none"], default="json")
+    parser.add_argument("--provider", choices=["json", "opencode", "openai-compatible", "none"], default="json")
     parser.add_argument("--provider-review-json", default=os.environ.get("DEEPSEEK_REVIEW_JSON", ""))
     parser.add_argument("--model", default=DEFAULT_OPENCODE_MODEL)
     parser.add_argument("--timeout", type=int, default=1200)
@@ -1007,6 +1338,15 @@ def main() -> int:
     selected = read_json(artifact_dir(args.run_date) / "selected-candidates.json").get("selected", [])
     if args.provider == "opencode":
         provider_payload = _opencode_provider_payload(
+            selected,
+            run_date=args.run_date,
+            model=args.model,
+            timeout_sec=args.timeout,
+            batch_size=args.provider_batch_size,
+            retries=args.provider_retries,
+        )
+    elif args.provider == "openai-compatible":
+        provider_payload = _openai_compatible_provider_payload(
             selected,
             run_date=args.run_date,
             model=args.model,

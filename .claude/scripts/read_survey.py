@@ -55,7 +55,7 @@ def _save_meta(zotero_key: str, meta: dict, *, dry_run: bool, backup: bool) -> N
 
 
 def fetch_fulltext(zotero_key: str) -> str:
-    url = f"http://localhost:23119/api/users/0/items/{zotero_key}/fulltext"
+    url = f"http://127.0.0.1:23119/api/users/0/items/{zotero_key}/fulltext"
     try:
         with urllib.request.urlopen(url, timeout=30) as resp:
             data = json.loads(resp.read().decode("utf-8"))

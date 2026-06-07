@@ -15,7 +15,7 @@ from kb_common import extract_frontmatter, parse_frontmatter_map, safe_print, sa
 
 WORKBENCH_DIR = vault_path("projects", "reading-workbench")
 TRANSLATION_DIR = vault_path("projects", "translations")
-ZOTERO_LOCAL_API = "http://localhost:23119/api/users/0"
+ZOTERO_LOCAL_API = "http://127.0.0.1:23119/api/users/0"
 
 
 def split_keys(value: str) -> list[str]:

@@ -23,8 +23,9 @@ from kb_common import extract_frontmatter, parse_frontmatter_map, safe_print, sa
 
 
 MAX_TRANSLATION_CONCURRENCY = 5
+DEFAULT_MAX_SOURCE_CHARS = 200000
 TRANSLATION_DIR = vault_path("projects", "translations")
-ZOTERO_LOCAL_API = "http://localhost:23119/api/users/0"
+ZOTERO_LOCAL_API = "http://127.0.0.1:23119/api/users/0"
 
 
 @dataclass(frozen=True)
@@ -243,7 +244,7 @@ def main() -> int:
     parser.add_argument("--max-concurrency", type=int, default=MAX_TRANSLATION_CONCURRENCY)
     parser.add_argument("--timeout", type=int, default=DEFAULT_GEMINI_TIMEOUT_SEC)
     parser.add_argument("--model", default=DEFAULT_GEMINI_MODEL)
-    parser.add_argument("--max-source-chars", type=int, default=60000)
+    parser.add_argument("--max-source-chars", type=int, default=DEFAULT_MAX_SOURCE_CHARS)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 

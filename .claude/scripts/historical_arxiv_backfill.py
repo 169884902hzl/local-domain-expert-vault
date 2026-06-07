@@ -22,7 +22,7 @@ from zotero_import import DEFAULT_COLLECTION_KEY, ImportResult, import_ranked_pa
 
 
 BACKFILL_SELECTIONS = ("top1_candidate", "venue_auto_import", FOCUS_REVIEW_DECISION, "review_queue")
-NEW_IMPORT_STATUSES = {"created", "sync_pending"}
+NEW_IMPORT_STATUSES = {"created", "sync_pending", "pdf_pending"}
 
 
 def select_backfill_candidates(ranked: list[RankedPaper], *, limit: int) -> list[tuple[RankedPaper, str, str]]:

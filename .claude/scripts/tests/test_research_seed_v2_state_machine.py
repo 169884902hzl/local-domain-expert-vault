@@ -48,9 +48,11 @@ from weekly_strategy_review import sanitize_overrides
 from audit_daily_automation_quality import (
     CONTRACT_DIR,
     _audit_v2_state_machine,
+    _daily_read_target_satisfied,
     _failed_or_backlog_read_items,
     _moved_to_v2_missing_artifact_issues,
     _provider_backed_artifact_issue,
+    _scheduled_provider_artifacts_expected,
     _scan_text_for_seed_writer,
     _v2_deepseek_review_covers_battle,
 )
@@ -110,6 +112,11 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
 
         self.assertEqual(_failed_or_backlog_read_items(run_text, recovery_text, "success"), [])
         self.assertEqual(_failed_or_backlog_read_items(run_text, recovery_text, "partial"), [])
+
+    def test_quality_audit_read_target_satisfied_allows_optional_import_failures(self) -> None:
+        self.assertTrue(_daily_read_target_satisfied(4, 4, []))
+        self.assertFalse(_daily_read_target_satisfied(3, 4, []))
+        self.assertFalse(_daily_read_target_satisfied(4, 4, [{"key": "A", "read": "failed"}]))
 
     def test_agenda_extract_json_prefers_candidates_object_after_logs(self) -> None:
         text = '{"event":"thinking"}\n```json\n{"candidates":[{"title":"candidate"}]}\n```'
@@ -1247,6 +1254,7 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
         self.assertEqual(payload["reviews"], [])
         self.assertFalse(payload["provider_status"]["provider_backed"])
         self.assertEqual(payload["provider_status"]["mode"], "no_selection")
+        self.assertEqual(validate_payload(payload, "deepseek_review.v1"), [])
 
     def test_deepseek_opencode_provider_success_with_mocked_cli(self) -> None:
         output = {
@@ -1265,6 +1273,45 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertEqual(payload["status"], "success")
         self.assertTrue(payload["provider_status"]["provider_backed"])
+
+    def test_deepseek_openai_compatible_provider_success_with_mocked_api(self) -> None:
+        output = {
+            "schema_version": "deepseek_review.v1",
+            "run_date": RUN_DATE,
+            "status": "success",
+            "reviews": self.provider_deepseek_payload()["reviews"],
+        }
+        with patch.object(
+            deepseek_review,
+            "_openai_compatible_chat_completion",
+            return_value={
+                "exit_code": 0,
+                "timed_out": False,
+                "clean_output": json.dumps(output),
+                "effective_model": "deepseek/deepseek-v4-pro",
+                "base_url_origin": "https://example.test",
+                "response_model": "deepseek/deepseek-v4-pro",
+                "usage": {"prompt_tokens": 10, "completion_tokens": 20},
+            },
+        ):
+            provider_payload = deepseek_review._openai_compatible_provider_payload([self.candidate()], run_date=RUN_DATE, model="abrdns/deepseek-v4-pro", timeout_sec=5)
+        payload, exit_code = build_deepseek_payload([self.candidate()], run_date=RUN_DATE, provider_payload=provider_payload)
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["status"], "success")
+        self.assertTrue(payload["provider_status"]["provider_backed"])
+        self.assertEqual(payload["provider_status"]["mode"], "openai-compatible")
+        self.assertEqual(payload["provider_status"]["response_model"], "deepseek/deepseek-v4-pro")
+
+    def test_deepseek_openai_compatible_missing_config_fails_closed(self) -> None:
+        with patch.dict(os.environ, {"DEEPSEEK_OPENAI_BASE_URL": "", "DEEPSEEK_OPENAI_API_KEY": ""}, clear=False), patch.object(
+            deepseek_review,
+            "_global_opencode_config_paths",
+            return_value=[],
+        ):
+            result = deepseek_review._openai_compatible_chat_completion("{}", model="abrdns/deepseek-v4-pro", timeout_sec=5)
+
+        self.assertEqual(result["exit_code"], 1)
+        self.assertIn("openai_compatible_config_missing", result["error"])
 
     def test_deepseek_opencode_single_review_object_is_wrapped(self) -> None:
         output = dict(self.provider_deepseek_payload()["reviews"][0])
@@ -1760,12 +1807,14 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
                 retries=0,
             )
         payload, exit_code = build_deepseek_payload(candidates, run_date=RUN_DATE, provider_payload=provider_payload)
-        self.assertEqual(calls, 2)
+        self.assertEqual(calls, 1)
         self.assertEqual(exit_code, 0)
         self.assertEqual(payload["status"], "partial_provider_unavailable")
         self.assertTrue(payload["provider_status"]["candidate_level_fail_closed"])
         self.assertEqual(payload["provider_status"]["provider_backed_success_count"], 0)
         self.assertEqual(payload["provider_status"]["provider_fallback_count"], 2)
+        self.assertTrue(payload["provider_status"]["batch_statuses"][0]["batch_fail_fast_after_provider_failure"])
+        self.assertEqual(payload["provider_status"]["batch_statuses"][0]["unattempted_batch_count"], 1)
         self.assertEqual({review["status"] for review in payload["reviews"]}, {"failed_fallback_only"})
         self.assertEqual({review["allowed_next_stage"] for review in payload["reviews"]}, {"stop"})
 
@@ -1926,7 +1975,7 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
         self.assertFalse(payload["provider_status"]["provider_backed"])
         self.assertIn("provider_event_error:APIError:Not Found:status=404", payload["provider_status"]["provider_error"])
 
-    def test_deepseek_opencode_auth_error_falls_back_to_secondary_model(self) -> None:
+    def test_deepseek_opencode_auth_error_can_use_explicit_fallback_model(self) -> None:
         calls: list[str] = []
         output = {
             "schema_version": "deepseek_review.v1",
@@ -1974,7 +2023,7 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
                 "event_count": 1,
             }
 
-        with patch.object(deepseek_review, "run_opencode_cli", side_effect=fake_opencode):
+        with patch.dict(os.environ, {"DEEPSEEK_OPENCODE_FALLBACK_MODELS": "dwai/gpt-5.5"}), patch.object(deepseek_review, "run_opencode_cli", side_effect=fake_opencode):
             provider_payload = deepseek_review._opencode_provider_payload(
                 [self.candidate()],
                 run_date=RUN_DATE,
@@ -1990,6 +2039,38 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
         self.assertTrue(payload["provider_status"]["model_fallback_used"])
         self.assertEqual(payload["provider_status"]["primary_requested_model"], "abrdns/deepseek-v4-pro")
         self.assertEqual(payload["provider_status"]["requested_model"], "dwai/gpt-5.5")
+
+    def test_deepseek_opencode_auth_error_does_not_fallback_by_default(self) -> None:
+        calls: list[str] = []
+
+        def fake_opencode(_prompt: str, **kwargs: object) -> dict[str, object]:
+            model = str(kwargs.get("model"))
+            calls.append(model)
+            return {
+                "exit_code": 0,
+                "timed_out": False,
+                "clean_output": "",
+                "effective_model": model,
+                "event_count": 1,
+                "error": "provider_event_error:APIError:Invalid token:status=401",
+                "event_errors": ["provider_event_error:APIError:Invalid token:status=401"],
+                "raw_stdout": '{"type":"error"}',
+                "raw_stderr": "",
+            }
+
+        with patch.dict(os.environ, {"DEEPSEEK_OPENCODE_FALLBACK_MODELS": ""}), patch.object(deepseek_review, "run_opencode_cli", side_effect=fake_opencode):
+            provider_payload = deepseek_review._opencode_provider_payload(
+                [self.candidate()],
+                run_date=RUN_DATE,
+                model="abrdns/deepseek-v4-pro",
+                timeout_sec=5,
+                retries=0,
+            )
+        payload, exit_code = build_deepseek_payload([self.candidate()], run_date=RUN_DATE, provider_payload=provider_payload)
+        self.assertEqual(exit_code, 2)
+        self.assertEqual(payload["status"], "partial_provider_unavailable")
+        self.assertEqual(calls, ["abrdns/deepseek-v4-pro"])
+        self.assertFalse(payload["provider_status"]["provider_backed"])
 
     def test_deepseek_opencode_missing_candidate_review_fails_closed(self) -> None:
         output = {
@@ -3094,6 +3175,19 @@ def bad(source, recommended):
         self.assertNotIn("--allow-test-provider-for-formal", text)
         self.assertNotIn("--commit-active-seed", text)
 
+    def test_register_daily_openai_compatible_provider_dry_run_is_safe(self) -> None:
+        text = self.register_daily_arxiv_dry_run(
+            "-DeepSeekProvider",
+            "openai-compatible",
+            "-CodexExecutionProvider",
+            "codex-cli",
+        )
+        self.assertIn("-DeepSeekProvider openai-compatible", text)
+        self.assertIn("-CodexExecutionProvider codex-cli", text)
+        self.assertNotIn("--v2-publish-policy formal", text)
+        self.assertNotIn("--allow-formal-seed-publish", text)
+        self.assertNotIn("--commit-active-seed", text)
+
     def test_registered_action_handles_non_ascii_vault_path(self) -> None:
         vault_root = Path(self.tmp.name) / "胡至伦 vault"
         script_dir = vault_root / ".claude" / "scripts"
@@ -3137,14 +3231,13 @@ def bad(source, recommended):
         self.assertNotIn('"--deepseek-provider", "none"', text)
         self.assertNotIn('"--codex-execution-provider", "none"', text)
 
-    def test_run_daily_wrapper_uses_codex_controlled_read_without_whole_paper_retry(self) -> None:
+    def test_run_daily_wrapper_uses_codex_controlled_read_with_one_network_retry(self) -> None:
         wrapper = SCRIPTS_DIR / "run_daily_arxiv_task.ps1"
         text = wrapper.read_text(encoding="utf-8")
         self.assertIn('"--read-mode"', text)
         self.assertIn('"codex-controlled"', text)
         self.assertIn('"--read-retries"', text)
-        self.assertIn('"0"', text)
-        self.assertNotIn('"--read-retries",\n    "1"', text)
+        self.assertIn('"--read-retries",\n    "1"', text)
         self.assertNotIn('"--allow-dangerous-claude"', text)
 
     def test_jsonschema_draft202012_validator_path_is_active(self) -> None:
@@ -3305,6 +3398,12 @@ def bad(source, recommended):
         self.assertEqual(cmd.count("--provider"), 1)
         self.assertEqual(cmd[cmd.index("--provider") + 1], "opencode")
 
+    def test_build_v2_review_stages_deepseek_openai_compatible_has_exactly_one_provider(self) -> None:
+        cmd = self.review_stage_commands(deepseek_provider="openai-compatible")["deepseek_review"]
+        self.assertEqual(cmd.count("--provider"), 1)
+        self.assertEqual(cmd[cmd.index("--provider") + 1], "openai-compatible")
+        self.assertIn("--model", cmd)
+
     def test_build_v2_review_stages_codex_cli_has_exactly_one_provider(self) -> None:
         cmd = self.review_stage_commands(codex_execution_provider="codex-cli")["codex_execution_review"]
         self.assertEqual(cmd.count("--provider"), 1)
@@ -3340,6 +3439,15 @@ def bad(source, recommended):
         append_provider_args(cmd, provider="opencode", model="deepseek/test-model", timeout=123)
         self.assertEqual(cmd.count("--provider"), 1)
         self.assertIn("opencode", cmd)
+        self.assertNotIn("none", cmd)
+        self.assertIn("--model", cmd)
+        self.assertIn("--timeout", cmd)
+
+    def test_pipeline_provider_args_single_provider_deepseek_openai_compatible(self) -> None:
+        cmd = ["python", "deepseek_scientific_review.py"]
+        append_provider_args(cmd, provider="openai-compatible", model="abrdns/deepseek-v4-pro", timeout=123)
+        self.assertEqual(cmd.count("--provider"), 1)
+        self.assertIn("openai-compatible", cmd)
         self.assertNotIn("none", cmd)
         self.assertIn("--model", cmd)
         self.assertIn("--timeout", cmd)
@@ -3435,6 +3543,11 @@ def bad(source, recommended):
         issue = _provider_backed_artifact_issue(run_date=RUN_DATE, artifact_name="deepseek-review.json", expected_mode="opencode", code="scheduled_deepseek_provider_not_provider_backed")
         self.assertIsNotNone(issue)
         self.assertEqual(issue["level"], "FAIL")
+
+    def test_scheduled_provider_artifacts_not_expected_without_raw_candidates(self) -> None:
+        self.assertFalse(_scheduled_provider_artifacts_expected(greenhouse_exists=False, raw_candidate_count=0))
+        self.assertFalse(_scheduled_provider_artifacts_expected(greenhouse_exists=True, raw_candidate_count=0))
+        self.assertTrue(_scheduled_provider_artifacts_expected(greenhouse_exists=True, raw_candidate_count=1))
 
     def test_audit_fails_when_scheduled_deepseek_provider_not_provider_backed(self) -> None:
         write_run_artifact(
@@ -3535,6 +3648,23 @@ def bad(source, recommended):
             state="attacked_by_deepseek",
         )
         issue = _provider_backed_artifact_issue(run_date=RUN_DATE, artifact_name="deepseek-review.json", expected_mode="opencode", code="scheduled_deepseek_provider_not_provider_backed")
+        self.assertIsNone(issue)
+
+    def test_audit_accepts_scheduled_deepseek_openai_compatible_provider_backed(self) -> None:
+        write_run_artifact(
+            RUN_DATE,
+            "deepseek-review.json",
+            {
+                "schema_version": "deepseek_review.v1",
+                "run_date": RUN_DATE,
+                "status": "success",
+                "provider_status": {"provider": "deepseek", "provider_backed": True, "mode": "openai-compatible", "status": "success"},
+                "reviews": [],
+                "artifact_hashes": {},
+            },
+            state="attacked_by_deepseek",
+        )
+        issue = _provider_backed_artifact_issue(run_date=RUN_DATE, artifact_name="deepseek-review.json", expected_mode="openai-compatible", code="scheduled_deepseek_provider_not_provider_backed")
         self.assertIsNone(issue)
 
     def test_workflow_contracts_still_read_from_repo_root(self) -> None:

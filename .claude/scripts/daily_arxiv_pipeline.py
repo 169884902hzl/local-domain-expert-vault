@@ -47,6 +47,7 @@ from zotero_import import (
     import_ranked_paper,
     iter_local_items,
     preflight,
+    zotero_data_dir,
 )
 
 
@@ -60,15 +61,15 @@ CLAUDE_BIN_CANDIDATES = [
     Path.home() / ".bun" / "bin" / "claude.exe",
 ]
 CODEX_CONTROLLED_READ_VERSION = 1
-ZOTERO_LOCAL_API = "http://localhost:23119/api/users/0"
+ZOTERO_LOCAL_API = "http://127.0.0.1:23119/api/users/0"
 MIN_CONTROLLED_FULLTEXT_CHARS = 2000
 ZOTERO_DB_ENV = "LOCAL_FIRST_VAULT_ZOTERO_DB"
 ZOTERO_STORAGE_ENV = "LOCAL_FIRST_VAULT_ZOTERO_STORAGE"
 ATOM = {"atom": "http://www.w3.org/2005/Atom", "arxiv": "http://arxiv.org/schemas/atom"}
 AUTO_IMPORT_FILL_DECISION = "auto_import_fill"
-NEW_IMPORT_STATUSES = {"created", "sync_pending"}
+NEW_IMPORT_STATUSES = {"created", "sync_pending", "pdf_pending"}
 FOCUS_READY_STATUSES = NEW_IMPORT_STATUSES | {"backlog"}
-INGEST_READY_STATUSES = {"created", "exists", "sync_pending", "backlog"}
+INGEST_READY_STATUSES = {"created", "exists", "sync_pending", "pdf_pending", "backlog"}
 LOW_PRIORITY_DECISIONS = {BELOW_REVIEW_DECISION, LEGACY_REJECT_DECISION}
 DEFAULT_FETCH_TIMEOUT = 12
 DEFAULT_FETCH_RETRIES = 0
@@ -928,9 +929,9 @@ def append_provider_args(
         cmd.extend(["--provider", "json", "--provider-review-json", provider_json])
         return
 
-    if provider in {"opencode", "codex-cli"}:
+    if provider in {"opencode", "openai-compatible", "codex-cli"}:
         cmd.extend(["--provider", provider])
-        if provider == "opencode" and model:
+        if provider in {"opencode", "openai-compatible"} and model:
             cmd.extend(["--model", model])
         if timeout is not None:
             cmd.extend(["--timeout", str(timeout)])
@@ -985,7 +986,7 @@ def build_v2_review_stages(args: argparse.Namespace, run_date: str) -> list[tupl
     ]
     review_stages: list[tuple[str, list[str], int]] = [
         ("portfolio_select", [sys.executable, ".claude/scripts/candidate_portfolio_select.py", "--run-date", run_date], 180),
-        ("deepseek_review", deepseek_cmd, max(1800, args.deepseek_timeout * 3)),
+        ("deepseek_review", deepseek_cmd, max(1800, args.deepseek_timeout + 120)),
         ("gemini_rescue_mutation", [sys.executable, ".claude/scripts/gemini_rescue_mutation.py", "--run-date", run_date], max(600, args.idea_timeout)),
         ("novelty_scan", novelty_cmd, 600),
         ("codex_execution_review", codex_cmd, max(600, codex_timeout)),
@@ -2030,12 +2031,12 @@ def _controlled_fulltext_manifest(
 
 def _zotero_db_path() -> Path:
     configured = os.environ.get(ZOTERO_DB_ENV, "").strip()
-    return Path(configured) if configured else Path.home() / "Zotero" / "zotero.sqlite"
+    return Path(configured) if configured else zotero_data_dir() / "zotero.sqlite"
 
 
 def _zotero_storage_root() -> Path:
     configured = os.environ.get(ZOTERO_STORAGE_ENV, "").strip()
-    return Path(configured) if configured else Path.home() / "Zotero" / "storage"
+    return Path(configured) if configured else zotero_data_dir() / "storage"
 
 
 def _fetch_zotero_fulltext_via_local_api(zotero_key: str, *, timeout: int = 45) -> tuple[str, str]:
@@ -3383,7 +3384,7 @@ def read_zotero_key_timed(
     outputs: list[str] = []
     logs: list[dict[str, Any]] = []
     status = "failed:not_started"
-    effective_attempts = 1 if read_mode in {"staged", "codex-controlled"} else max(1, max_attempts)
+    effective_attempts = 1 if read_mode == "staged" else max(1, max_attempts)
     for attempt in range(1, effective_attempts + 1):
         if read_mode == "staged":
             read_func = read_zotero_key_staged
@@ -4580,7 +4581,7 @@ def main() -> int:
     parser.add_argument("--gemini-model", default="gemini-3.1-pro-preview")
     parser.add_argument("--deepseek-model", default="abrdns/deepseek-v4-pro")
     parser.add_argument("--deepseek-timeout", type=int, default=1200)
-    parser.add_argument("--deepseek-provider", choices=["json", "opencode", "none"], default="none")
+    parser.add_argument("--deepseek-provider", choices=["json", "opencode", "openai-compatible", "none"], default="none")
     parser.add_argument("--deepseek-provider-json", default="")
     parser.add_argument("--codex-execution-provider", choices=["json", "codex-cli", "none"], default="none")
     parser.add_argument("--codex-execution-provider-json", default="")

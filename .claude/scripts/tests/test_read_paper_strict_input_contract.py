@@ -516,6 +516,22 @@ class FinalizeStrictContractTest(unittest.TestCase):
 - No-hardware confirmation: no robot; no real scene; no new data collection."""
         self.assertNotIn("no_hardware_micro_test_invalid_hardware_requirement", "\n".join(validate_no_hardware_micro_test(section)))
 
+    def test_no_hardware_missing_hardware_measurement_is_evidence_gap_not_requirement(self) -> None:
+        section = """- Explicit exclusions: no robot; no real scene; no new data collection.
+- Test artifact: supplied paper tables only.
+- Input: fixed reported SR and EC values.
+- Protocol:
+  1. Extract fixed table values.
+  2. Compute static ratios.
+  3. Flag any claim that needs unavailable parameter counts, hardware measurement, or public code execution.
+- Metric: static ratio and unavailable-field count.
+- Threshold: ratio within tolerance.
+- Pass condition: static table values are internally consistent.
+- Fail/kill condition: unavailable hardware measurement is needed for deployment-readiness claims.
+- Compute/data cap: table-only arithmetic.
+- No-hardware confirmation: no robot; no real scene; no new data collection."""
+        self.assertNotIn("no_hardware_micro_test_invalid_hardware_requirement", "\n".join(validate_no_hardware_micro_test(section)))
+
     def test_figure_approximation_is_allowed_only_as_weak_human_check_evidence(self) -> None:
         ledger = GOOD_LEDGER + "\n| C-F1 | result | Figure-estimated success is approximately 62%. | figure_approximation | figure | Figure 3 | p6 Figure 3 | low | requires_human_check |"
         validate_analysis(extract_sections(strict_analysis(ledger=ledger)), load_schema())

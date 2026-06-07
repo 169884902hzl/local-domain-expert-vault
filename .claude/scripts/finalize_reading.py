@@ -516,6 +516,20 @@ def non_negated_hits(text: str, tokens: list[str]) -> list[str]:
         "需要",
         "物理",
     ]
+    absence_context_markers = [
+        "missing",
+        "unavailable",
+        "unverified",
+        "not provided",
+        "not verified",
+        "not evidenced",
+        "not available",
+        "缺失",
+        "不可用",
+        "未验证",
+        "未提供",
+        "无证据",
+    ]
     hits = []
     for token in tokens:
         token_lower = token.lower()
@@ -528,6 +542,8 @@ def non_negated_hits(text: str, tokens: list[str]) -> list[str]:
             surrounding = lowered[context_start:end]
             clause_context = re.split(r"[.;。；\n]", context)[-1]
             if any(negator in clause_context for negator in negators):
+                continue
+            if any(marker in surrounding for marker in absence_context_markers):
                 continue
             context_markers = synthetic_context_markers
             if token_lower in {"gripper", "夹爪"}:

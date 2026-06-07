@@ -65,7 +65,7 @@ def load_config() -> dict[str, Any]:
 
 def fetch_items(collection_key: str, limit: int) -> list[dict[str, Any]]:
     url = (
-        "http://localhost:23119/api/users/0/collections/"
+        "http://127.0.0.1:23119/api/users/0/collections/"
         f"{collection_key}/items?limit={limit}&format=json&start=0"
     )
     req = urllib.request.Request(url)
@@ -73,7 +73,7 @@ def fetch_items(collection_key: str, limit: int) -> list[dict[str, Any]]:
         with urllib.request.urlopen(req, timeout=30) as resp:
             data = json.loads(resp.read().decode("utf-8"))
     except Exception as exc:
-        safe_print("ERROR: Cannot connect to Zotero on localhost:23119.")
+        safe_print("ERROR: Cannot connect to Zotero on 127.0.0.1:23119.")
         safe_print("  Make sure Zotero is running and the built-in API is enabled.")
         safe_print(f"  Detail: {exc}")
         sys.exit(1)

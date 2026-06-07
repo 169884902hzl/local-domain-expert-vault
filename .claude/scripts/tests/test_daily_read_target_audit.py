@@ -549,3 +549,28 @@ class DailyReadTargetAuditTest(unittest.TestCase):
         self.assertIn("stage timed out", output)
         self.assertEqual(len(logs), 1)
         self.assertEqual(len(calls), 1)
+
+    def test_codex_controlled_timed_read_retries_whole_paper_for_transient_failures(self) -> None:
+        calls: list[int] = []
+
+        def codex_fail_then_success(*_args, **_kwargs):
+            calls.append(1)
+            if len(calls) == 1:
+                return "failed:codex_exit_1", "stream disconnected before completion", {"attempt": "1"}
+            return "success_done", "finalized", {"attempt": "2"}
+
+        with patch.object(pipeline, "read_zotero_key_codex_controlled", side_effect=codex_fail_then_success):
+            status, output, _elapsed, logs = pipeline.read_zotero_key_timed(
+                "AUDITKEY",
+                timeout=4200,
+                run_date=RUN_DATE,
+                max_attempts=2,
+                retry_delay_sec=0,
+                read_mode="codex-controlled",
+            )
+
+        self.assertEqual(status, "success_done")
+        self.assertIn("READ_ATTEMPT 1/2: mode=codex-controlled status=failed:codex_exit_1", output)
+        self.assertIn("READ_ATTEMPT 2/2: mode=codex-controlled status=success_done", output)
+        self.assertEqual(len(logs), 2)
+        self.assertEqual(len(calls), 2)

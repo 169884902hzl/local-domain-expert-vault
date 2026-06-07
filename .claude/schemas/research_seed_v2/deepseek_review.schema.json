@@ -6,7 +6,7 @@
   "properties": {
     "schema_version": {"type": "string", "const": "deepseek_review.v1"},
     "run_date": {"type": "string"},
-    "status": {"type": "string", "enum": ["success", "partial_provider_invalid", "partial_provider_unavailable", "partial_empty_selection"]},
+    "status": {"type": "string", "enum": ["success", "success_empty_selection", "partial_provider_invalid", "partial_provider_unavailable", "partial_empty_selection"]},
     "reviews": {
       "type": "array",
       "items": {

@@ -1,5 +1,5 @@
 param(
-  [ValidateSet("none", "opencode")]
+  [ValidateSet("none", "opencode", "openai-compatible")]
   [string]$DeepSeekProvider = "none",
 
   [ValidateSet("none", "codex-cli")]
@@ -137,6 +137,22 @@ foreach ($Name in @("ZOTERO_API_KEY", "ZOTERO_USER_ID")) {
   }
 }
 
+$VaultDrive = [System.IO.Path]::GetPathRoot((Get-Location).Path)
+$PreferredZoteroDataDir = Join-Path $VaultDrive "zotero"
+$PreferredZoteroDb = Join-Path $PreferredZoteroDataDir "zotero.sqlite"
+$PreferredZoteroStorage = Join-Path $PreferredZoteroDataDir "storage"
+if ($VaultDrive -and (Test-Path -LiteralPath $PreferredZoteroDb) -and (Test-Path -LiteralPath $PreferredZoteroStorage)) {
+  if (-not [Environment]::GetEnvironmentVariable("ZOTERO_DATA_DIR", "Process")) {
+    [Environment]::SetEnvironmentVariable("ZOTERO_DATA_DIR", $PreferredZoteroDataDir, "Process")
+  }
+  if (-not [Environment]::GetEnvironmentVariable("LOCAL_FIRST_VAULT_ZOTERO_DB", "Process")) {
+    [Environment]::SetEnvironmentVariable("LOCAL_FIRST_VAULT_ZOTERO_DB", $PreferredZoteroDb, "Process")
+  }
+  if (-not [Environment]::GetEnvironmentVariable("LOCAL_FIRST_VAULT_ZOTERO_STORAGE", "Process")) {
+    [Environment]::SetEnvironmentVariable("LOCAL_FIRST_VAULT_ZOTERO_STORAGE", $PreferredZoteroStorage, "Process")
+  }
+}
+
 $Python = (Get-Command python).Source
 $SyncTimeoutSeconds = 900
 $WrapperTestMode = [Environment]::GetEnvironmentVariable("DAILY_ARXIV_WRAPPER_TEST_MODE", "Process") -eq "1"
@@ -205,7 +221,7 @@ try {
     "--read-mode",
     "codex-controlled",
     "--read-retries",
-    "0",
+    "1",
     "--read-retry-delay",
     "90"
   )
