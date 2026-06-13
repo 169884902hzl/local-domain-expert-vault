@@ -1,6 +1,7 @@
 param(
   [switch]$DryRun,
   [switch]$ShowLocalPaths,
+  [switch]$IgnorePauseGuard,
   [string]$TaskName = "WeeklyResearchAgendaReview",
   [string]$DayOfWeek = "Sunday",
   [string]$Time = "20:00"
@@ -40,6 +41,11 @@ if ($DryRun) {
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 if (-not (Test-Path -LiteralPath $WrapperPath)) {
   throw "Missing task wrapper: $WrapperPath"
+}
+. (Join-Path $ScriptPath "automation_pause_guard.ps1")
+$LogPath = Join-Path $LogDir "weekly-agenda-review-task.log"
+if (-not $IgnorePauseGuard -and (Test-VaultAutomationPaused -VaultRoot $VaultRoot -TaskName $TaskName -LogPath $LogPath)) {
+  throw "scheduled_task_pause_active_refusing_register:$TaskName"
 }
 
 try {

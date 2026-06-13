@@ -12,6 +12,7 @@ import json
 from collections import Counter
 from datetime import date
 from pathlib import Path
+import re
 from typing import Any
 
 from gemini_cli_adapter import run_gemini_cli
@@ -138,6 +139,20 @@ def _read_text(path: Path, limit: int = 8000) -> str:
     if not path.exists():
         return ""
     return path.read_text(encoding="utf-8", errors="replace")[:limit]
+
+
+def _output_stamp(source: dict[str, Any], input_packet: Path) -> str:
+    candidates = [
+        str(source.get("run_date", "")),
+        str(source.get("selected_run_date", "")),
+        str(source.get("requested_run_date", "")),
+        input_packet.name,
+    ]
+    for candidate in candidates:
+        match = re.search(r"\d{4}-\d{2}-\d{2}", candidate)
+        if match:
+            return match.group(0)
+    return date.today().isoformat()
 
 
 def render_prompt(items: list[dict[str, Any]], *, codex_report_excerpt: str = "") -> str:
@@ -314,10 +329,16 @@ def run_refinement(
     dry_run: bool,
     codex_report: Path | None = None,
 ) -> dict[str, Any]:
+    if not input_packet.is_absolute():
+        input_packet = vault_path(*input_packet.parts)
+    if not output_root.is_absolute():
+        output_root = vault_path(*output_root.parts)
+    if codex_report and not codex_report.is_absolute():
+        codex_report = vault_path(*codex_report.parts)
     source = _read_json(input_packet)
     items = select_items(load_review_items(source), actions=actions, max_items=max_items)
     output_root.mkdir(parents=True, exist_ok=True)
-    stamp = date.today().isoformat()
+    stamp = _output_stamp(source, input_packet)
     prompt = render_prompt(items)
     prompt_path = output_root / f"{stamp}-post-codex-gemini-refine-prompt.json"
     packet_path = output_root / f"{stamp}-post-codex-gemini-refine-packet.json"

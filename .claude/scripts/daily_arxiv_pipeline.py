@@ -37,6 +37,7 @@ from arxiv_ranker import (
 from generate_gemini_idea_prompt import render_prompt as render_gemini_prompt
 from arxiv_metadata_sync import DEFAULT_DB as ARXIV_METADATA_DB
 from arxiv_metadata_sync import query_mirror, mirror_status_path
+from canonical_baseline_backfill import build_baseline_backfill_report, write_baseline_backfill_report
 from kb_common import extract_frontmatter, parse_frontmatter_map, safe_print, safe_write, today_iso, vault_path
 from paper_intake_triage import build_triage
 from research_seed_v2_common import DEFAULT_V2_PUBLISH_POLICY
@@ -3424,6 +3425,7 @@ def render_run_log(
     errors: list[str],
     import_policy: dict[str, Any],
     existing_candidates: list[dict[str, Any]],
+    baseline_backfill: dict[str, Any] | None = None,
 ) -> str:
     top = [item for item in ranked if item.decision == "top1_candidate"]
     venue_auto = [item for item in ranked if item.decision == "venue_auto_import"]
@@ -3435,6 +3437,7 @@ def render_run_log(
     fill_imports = sum(1 for item in imports if item.get("selection_decision") == AUTO_IMPORT_FILL_DECISION)
     focus_imports = sum(1 for item in imports if item.get("selection_decision") == FOCUS_REVIEW_DECISION)
     quota_summary = import_policy.get("selection_quota_summary", {})
+    baseline_backfill = baseline_backfill or {}
     read_by_key = {str(item.get("zotero_key", "")): item for item in reads}
     new_read_success = [
         item
@@ -3476,6 +3479,9 @@ def render_run_log(
         f"- fill_import_threshold: {import_policy.get('fill_import_threshold')}",
         f"- existing_prefilter: {import_policy.get('existing_prefilter', 'not_run')}",
         f"- existing_candidates_excluded: {len(existing_candidates)}",
+        f"- baseline_backfill_queued: {baseline_backfill.get('queued_total', 0)}",
+        f"- baseline_backfill_json: `{baseline_backfill.get('json_path', '')}`",
+        f"- baseline_backfill_md: `{baseline_backfill.get('md_path', '')}`",
         f"- import_attempts: {len(imports)}",
         f"- new_imports_created: {new_imports}",
         f"- resumed_backlog_imports: {resumed_backlog}",
@@ -3529,6 +3535,18 @@ def render_run_log(
             f"decision={item.get('decision')} zotero_key={item.get('zotero_key', '')} "
             f"title={item.get('title', '')}"
         )
+    lines.extend(["", "## Canonical Baseline Backfill", ""])
+    queued_baselines = [item for item in baseline_backfill.get("entries", []) if item.get("status") == "queued"]
+    if not queued_baselines:
+        lines.append("- none")
+    else:
+        lines.append("- boundary: queue only; these entries do not consume today's deep-read quota and do not write seeds.")
+        for item in queued_baselines[:10]:
+            lines.append(
+                f"- {item.get('label')} priority={item.get('priority_score')} "
+                f"source_notes={item.get('source_note_count')} mentions={item.get('mention_count')} "
+                f"query={item.get('search_query')}"
+            )
     lines.extend(["", "## Imports", ""])
     if not imports:
         lines.append("- No Zotero imports attempted.")
@@ -4111,6 +4129,15 @@ def run_pipeline(args: argparse.Namespace) -> int:
         "existing_prefilter": existing_prefilter,
         "existing_candidates_excluded": len(existing_candidates),
     }
+    baseline_backfill_report: dict[str, Any] = {}
+    if not args.skip_baseline_backfill:
+        baseline_backfill_report = build_baseline_backfill_report(
+            run_date=run_date,
+            min_mentions=max(1, args.baseline_backfill_min_mentions),
+            limit=max(0, args.baseline_backfill_limit),
+        )
+        import_policy["baseline_backfill_queued"] = baseline_backfill_report.get("queued_total", 0)
+        import_policy["baseline_backfill_entry_total"] = baseline_backfill_report.get("entry_total", 0)
     selected_import_candidates = select_import_candidates(
         selection_pool,
         max_attempts=args.max_auto_import,
@@ -4138,6 +4165,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
             f"focus_review={sum(1 for item in ranked if item.decision == FOCUS_REVIEW_DECISION)} "
             f"review={sum(1 for item in ranked if item.decision == 'review_queue')} "
             f"existing_excluded={len(existing_candidates)} "
+            f"baseline_backfill_queued={baseline_backfill_report.get('queued_total', 0)} "
             f"import_attempts={len(selected_import_candidates)} "
             f"primary_imports={primary_count} "
             f"focus_imports={focus_count} "
@@ -4160,12 +4188,26 @@ def run_pipeline(args: argparse.Namespace) -> int:
             safe_print("REJECTED_NON_ROBOTICS_SAMPLE")
             for item in rejected_sample:
                 safe_print(f"{item.quality_score:3d} {'/'.join(item.penalties):24s} {item.paper.arxiv_id} {item.paper.title}")
+        if baseline_backfill_report:
+            queued = [item for item in baseline_backfill_report.get("entries", []) if item.get("status") == "queued"]
+            if queued:
+                safe_print("BASELINE_BACKFILL_SAMPLE")
+                for item in queued[:8]:
+                    safe_print(
+                        f"{item.get('priority_score', 0):>3} source_notes={item.get('source_note_count')} "
+                        f"mentions={item.get('mention_count')} {item.get('label')} query={item.get('search_query')}"
+                    )
         for error in errors:
             safe_print(f"WARN: {error}")
         return 0
 
     write_jsonl(candidates_path, records, dry_run=False)
     safe_write(review_path, render_review_queue(ranked, run_date), dry_run=False, backup=True)
+    if baseline_backfill_report:
+        baseline_json_path, baseline_md_path = write_baseline_backfill_report(baseline_backfill_report, dry_run=False, backup=True)
+        baseline_backfill_report = dict(baseline_backfill_report)
+        baseline_backfill_report["json_path"] = str(baseline_json_path.relative_to(vault_path())).replace("\\", "/")
+        baseline_backfill_report["md_path"] = str(baseline_md_path.relative_to(vault_path())).replace("\\", "/")
 
     imports: list[dict[str, Any]] = []
     reads: list[dict[str, Any]] = []
@@ -4187,6 +4229,13 @@ def run_pipeline(args: argparse.Namespace) -> int:
             if args.skip_read and new_import_count >= args.min_new_imports:
                 break
             if not args.skip_read and args.max_read > 0 and successful_read_count >= args.max_read:
+                break
+            if (
+                not args.skip_read
+                and args.max_read > 0
+                and read_attempts >= max_read_candidate_attempts
+                and successful_read_count < args.max_read
+            ):
                 break
             paper = ranked_item.paper
             existing_note = existing_note_titles.get(normalize_title(paper.title))
@@ -4525,6 +4574,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
             errors=errors,
             import_policy=import_policy,
             existing_candidates=existing_candidates,
+            baseline_backfill=baseline_backfill_report,
         ),
         dry_run=False,
         backup=True,
@@ -4532,6 +4582,8 @@ def run_pipeline(args: argparse.Namespace) -> int:
     safe_print(f"RUN_LOG: {run_log_path.relative_to(vault_path())}")
     safe_print(f"CANDIDATES: {candidates_path.relative_to(vault_path())}")
     safe_print(f"REVIEW_QUEUE: {review_path.relative_to(vault_path())}")
+    if baseline_backfill_report:
+        safe_print(f"BASELINE_BACKFILL: {baseline_backfill_report.get('md_path', '')}")
     safe_print(f"AGENDA_DELTA: {agenda_delta_path.relative_to(vault_path())}")
     safe_print(f"LEGACY_IDEA_POINTER: {idea_path.relative_to(vault_path())}")
     safe_print(f"GEMINI_PROMPT_PATH: {gemini_prompt_path.relative_to(vault_path())}")
@@ -4571,6 +4623,9 @@ def main() -> int:
     parser.add_argument("--read-retries", type=int, default=0, help="Retry failed one-shot Claudian reads this many extra times. Staged and codex-controlled reads do not whole-paper retry.")
     parser.add_argument("--read-retry-delay", type=int, default=90, help="Seconds to wait between failed Claudian read attempts.")
     parser.add_argument("--read-failure-backfill", type=int, default=5, help="Extra candidate read slots used to replace failed Claudian reads before ending the daily run.")
+    parser.add_argument("--skip-baseline-backfill", action="store_true", help="Skip canonical baseline backfill queue generation.")
+    parser.add_argument("--baseline-backfill-min-mentions", type=int, default=2, help="Minimum distinct done notes mentioning a baseline before it enters the canonical backfill queue.")
+    parser.add_argument("--baseline-backfill-limit", type=int, default=50, help="Maximum baseline backfill entries to report.")
     parser.add_argument(
         "--allow-dangerous-claude",
         action="store_true",

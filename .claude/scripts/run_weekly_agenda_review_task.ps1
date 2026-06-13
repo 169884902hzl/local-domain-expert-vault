@@ -1,4 +1,6 @@
-param()
+param(
+  [switch]$IgnorePauseGuard
+)
 
 $ErrorActionPreference = "Stop"
 
@@ -20,6 +22,17 @@ $RunMd = Join-Path $ReviewDir "$RunDate-weekly-agenda-review.md"
 $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 
 "[$StartedAt] START WeeklyResearchAgendaReview" | Out-File -FilePath $LogPath -Append -Encoding utf8
+
+. (Join-Path $ScriptPath "automation_pause_guard.ps1")
+if (-not $IgnorePauseGuard -and (Test-VaultAutomationPaused -VaultRoot $VaultRoot -TaskName "WeeklyResearchAgendaReview" -LogPath $LogPath)) {
+  $FinishedAt = Get-Date -Format "yyyy-MM-dd HH:mm:ss zzz"
+  "[$FinishedAt] END exit_code=0 status=paused_by_pause_guard" | Out-File -FilePath $LogPath -Append -Encoding utf8
+  exit 0
+}
+if ($IgnorePauseGuard) {
+  "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss zzz")] PAUSE_GUARD ignored_by_switch task=WeeklyResearchAgendaReview" |
+    Out-File -FilePath $LogPath -Append -Encoding utf8
+}
 
 try {
   $ReviewOutput = & $Python ".claude/scripts/research_agenda_review.py" --json 2>&1

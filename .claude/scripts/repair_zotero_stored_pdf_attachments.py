@@ -24,6 +24,7 @@ import urllib.request
 from typing import Any
 
 from kb_common import safe_print, vault_path
+from zotero_import import zotero_data_dir
 
 
 RUN_RE = re.compile(
@@ -40,7 +41,8 @@ ARXIV_URL_RE = re.compile(r"arxiv\.org/(?:abs|pdf)/(\d{4}\.\d{4,5})(?:v\d+)?", r
 
 
 def zotero_dir() -> Path:
-    return Path(os.environ.get("ZOTERO_DATA_DIR", str(Path.home() / "Zotero")))
+    explicit = os.environ.get("ZOTERO_DATA_DIR", "").strip()
+    return Path(explicit) if explicit else zotero_data_dir()
 
 
 def db_path() -> Path:

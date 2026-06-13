@@ -61,6 +61,81 @@ def _expected_tasks() -> list[ExpectedTask]:
     ]
 
 
+def _parse_iso_datetime(value: str) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _pause_superseded(pause_path: Path, paused_at: datetime, resume_payloads: list[dict[str, Any]]) -> bool:
+    pause_leaf = pause_path.name
+    for payload in resume_payloads:
+        prior = str(payload.get("prior_pause_record") or "")
+        if prior != str(pause_path) and not prior.endswith(pause_leaf):
+            continue
+        resumed_at = _parse_iso_datetime(str(payload.get("resumed_at") or ""))
+        if resumed_at and resumed_at > paused_at:
+            return True
+    return False
+
+
+def _load_pause_payloads() -> tuple[list[tuple[Path, dict[str, Any]]], list[dict[str, Any]]]:
+    pause_dir = vault_path("projects/arxiv-daily/pauses")
+    if not pause_dir.exists():
+        return [], []
+    pauses: list[tuple[Path, dict[str, Any]]] = []
+    resumes: list[dict[str, Any]] = []
+    for path in sorted(pause_dir.glob("pause-*.json"), key=lambda item: item.stat().st_mtime, reverse=True):
+        try:
+            pauses.append((path, json.loads(path.read_text(encoding="utf-8"))))
+        except Exception:
+            continue
+    for path in sorted(pause_dir.glob("resume-*.json"), key=lambda item: item.stat().st_mtime, reverse=True):
+        try:
+            resumes.append(json.loads(path.read_text(encoding="utf-8")))
+        except Exception:
+            continue
+    return pauses, resumes
+
+
+def active_pause_records(now: datetime | None = None) -> list[dict[str, Any]]:
+    current = now or datetime.now().astimezone()
+    today = current.strftime("%Y-%m-%d")
+    pauses, resumes = _load_pause_payloads()
+    active: list[dict[str, Any]] = []
+    for path, payload in pauses:
+        if payload.get("schema_version") != "vault_automation_pause.v1":
+            continue
+        paused_at = _parse_iso_datetime(str(payload.get("paused_at") or ""))
+        if not paused_at:
+            continue
+        if _pause_superseded(path, paused_at, resumes):
+            continue
+        paused_dates = {str(item) for item in payload.get("paused_dates") or []}
+        resume_not_before = _parse_iso_datetime(str(payload.get("intended_resume_not_before") or ""))
+        date_active = today in paused_dates
+        time_active = bool(resume_not_before and current < resume_not_before)
+        if not (date_active or time_active):
+            continue
+        active.append(
+            {
+                "path": str(path),
+                "pause_reason": payload.get("pause_reason", ""),
+                "disabled_tasks": [str(item) for item in payload.get("disabled_tasks") or []],
+                "paused_dates": sorted(paused_dates),
+                "intended_resume_not_before": payload.get("intended_resume_not_before", ""),
+            }
+        )
+    return active
+
+
+def _pause_records_for_task(task_name: str, records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [record for record in records if task_name in set(record.get("disabled_tasks") or [])]
+
+
 def _text(node: ET.Element | None) -> str:
     return "" if node is None or node.text is None else node.text.strip()
 
@@ -252,11 +327,13 @@ def _local_start(root: ET.Element) -> str:
     return value.strftime("%H:%M")
 
 
-def audit_task(expected: ExpectedTask) -> dict[str, Any]:
+def audit_task(expected: ExpectedTask, active_pauses: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     errors: list[str] = []
     warnings: list[str] = []
     notes: list[str] = []
     business_warnings: list[str] = []
+    task_pauses = _pause_records_for_task(expected.name, active_pauses or [])
+    pause_active = bool(task_pauses)
     task_path = _system_task_path(expected.name)
     xml_root = _task_xml(task_path) if task_path.exists() else None
     xml_info: dict[str, Any] = {"path": str(task_path), "exists": task_path.exists()}
@@ -280,7 +357,11 @@ def audit_task(expected: ExpectedTask) -> dict[str, Any]:
                 "daily_interval": daily_interval,
             }
         )
-        if enabled != "true":
+        if enabled == "true" and pause_active:
+            errors.append("task_enabled_during_active_pause")
+        elif enabled != "true" and pause_active:
+            notes.append("task_disabled_by_active_pause")
+        elif enabled != "true":
             errors.append("task_disabled")
         if str(expected.script) not in action:
             errors.append("action_does_not_point_to_expected_wrapper")
@@ -295,6 +376,10 @@ def audit_task(expected: ExpectedTask) -> dict[str, Any]:
 
     if not expected.script.exists():
         errors.append("missing_wrapper_script")
+    else:
+        script_text = expected.script.read_text(encoding="utf-8", errors="replace")
+        if "automation_pause_guard.ps1" not in script_text or "Test-VaultAutomationPaused" not in script_text:
+            errors.append("missing_wrapper_pause_guard")
 
     query = _run_query(expected.name)
     if not query.get("ok"):
@@ -305,10 +390,20 @@ def audit_task(expected: ExpectedTask) -> dict[str, Any]:
         scheduled_state = runtime.get("scheduled_task_state", "").lower()
         last_result = runtime.get("last_result", "")
         last_run_time = runtime.get("last_run_time", "")
-        if runtime_status and runtime_status not in {"ready", "running"}:
-            warnings.append(f"unexpected_runtime_status:{runtime_status}")
-        if scheduled_state and scheduled_state != "enabled":
-            errors.append(f"scheduled_task_state_not_enabled:{scheduled_state}")
+        if runtime_status and pause_active and runtime_status in {"ready", "running"}:
+            errors.append(f"runtime_status_not_disabled_during_active_pause:{runtime_status}")
+        elif runtime_status and runtime_status not in {"ready", "running"}:
+            if pause_active and runtime_status == "disabled":
+                notes.append("runtime_status_disabled_by_active_pause")
+            else:
+                warnings.append(f"unexpected_runtime_status:{runtime_status}")
+        if scheduled_state and pause_active and scheduled_state == "enabled":
+            errors.append("scheduled_task_state_enabled_during_active_pause")
+        elif scheduled_state and scheduled_state != "enabled":
+            if pause_active and scheduled_state == "disabled":
+                notes.append("scheduled_task_state_disabled_by_active_pause")
+            else:
+                errors.append(f"scheduled_task_state_not_enabled:{scheduled_state}")
         if last_result and last_result != "0":
             if runtime_status == "running" and last_result == "267009":
                 notes.append(f"scheduler_task_running:last_result:{last_result}")
@@ -359,6 +454,7 @@ def audit_task(expected: ExpectedTask) -> dict[str, Any]:
             "log_path": str(expected.log_path),
         },
         "xml": xml_info,
+        "active_pause_records": task_pauses,
         "schtasks_query": query,
         "log": log,
         "errors": errors,
@@ -369,18 +465,25 @@ def audit_task(expected: ExpectedTask) -> dict[str, Any]:
 
 
 def audit() -> dict[str, Any]:
-    tasks = [audit_task(item) for item in _expected_tasks()]
+    pauses = active_pause_records()
+    tasks = [audit_task(item, pauses) for item in _expected_tasks()]
     errors = [f"{item['task']}:{error}" for item in tasks for error in item["errors"]]
     warnings = [f"{item['task']}:{warning}" for item in tasks for warning in item["warnings"]]
     business_warnings = [
         f"{item['task']}:{warning}" for item in tasks for warning in item.get("business_warnings", [])
     ]
     quality_audit = _latest_quality_audit()
+    pause_notes: list[str] = []
+    daily_paused = bool(_pause_records_for_task("DailyArxivEmbodiedAIScout", pauses))
     if quality_audit.get("exists") and quality_audit.get("quality_readiness") not in {"", "ready"}:
-        business_warnings.append(
+        quality_note = (
             f"DailyArxivEmbodiedAIScout:latest_quality_readiness:{quality_audit.get('quality_readiness')}:"
             f"run_date:{quality_audit.get('run_date')}"
         )
+        if daily_paused:
+            pause_notes.append(f"paused_prior_business_warning:{quality_note}")
+        else:
+            business_warnings.append(quality_note)
     status = "FAIL" if errors else ("WARN" if warnings else "PASS")
     latest_run_status = "WARN" if business_warnings else "PASS"
     return {
@@ -392,6 +495,8 @@ def audit() -> dict[str, Any]:
         "warnings": warnings,
         "business_warnings": business_warnings,
         "latest_quality_audit": quality_audit,
+        "active_pause_records": pauses,
+        "pause_notes": pause_notes,
     }
 
 
@@ -413,6 +518,8 @@ def main() -> int:
             safe_print(f"WARN: {warning}")
         for warning in result.get("business_warnings", []):
             safe_print(f"INFO: previous_business_run_not_success:{warning}")
+        for note in result.get("pause_notes", []):
+            safe_print(f"INFO: {note}")
         for item in result["tasks"]:
             for note in item.get("notes", []):
                 safe_print(f"INFO: {item['task']}:{note}")

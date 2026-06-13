@@ -1,16 +1,38 @@
-Read all daily notes from the past 7 days in the daily/ directory. Generate a weekly summary that includes:
+Run a weekly research synthesis for the literature vault.
 
-1. Main topics I worked on (grouped by project)
-2. Papers read and key insights
-3. Ideas worth remembering
-4. Action items for next week
-5. New concepts that should be added to wiki/
+Scope:
+- Read the past 7 days of `daily/YYYY-MM-DD.md`.
+- Read `output/recall-queue.md`.
+- Use local retrieval only when needed:
+  ```powershell
+  python .claude/scripts/kb_search.py "$ARGUMENTS" --limit 20
+  ```
 
-Save the summary to output/weekly/YYYY-WXX.md (use the ISO week number).
+Output:
+- Save one synthesis page to `output/YYYY-WXX-synthesis.md` using the ISO week number.
+- Use `templates/weekly-synthesis.md` as the structure.
 
-Also scan daily notes for any mentions of papers, concepts, or researchers that don't have wiki pages yet, and create stubs for them.
+Interaction rule:
+- First select 3-5 high-value recall questions and ask the user to answer from memory.
+- Do not inspect local notes before the user provides answers, unless the user explicitly requests a non-interactive synthesis.
+- After the user answers, check local notes and fill Evidence / Inference / Open Question.
+- If the user requests a non-interactive run, mark recall status as `not-tested` instead of `yes`, `partial`, or `no`.
 
-Use local retrieval only unless the user explicitly asks for web search:
-```powershell
-python .claude/scripts/kb_search.py "$ARGUMENTS" --limit 20
-```
+Template variable handling:
+- Replace `{{date:YYYY-MM-DD}}` with today's local date.
+- Replace `{{date:GGGG-[W]WW}}` with the ISO week label, e.g. `2026-W22`.
+- Do not leave raw `{{date:...}}` placeholders in the output file.
+
+Required content:
+1. Answer 3-5 high-value recall questions from `output/recall-queue.md` or recent daily notes.
+2. Record whether each answer was `yes`, `partial`, `no`, or `not-tested`.
+3. Identify 1-3 mechanisms that genuinely became clearer this week.
+4. Keep Evidence / Inference / Open Question separated.
+5. Recommend at most 1-3 promotions to `wiki/concepts/`, `wiki/topics/`, paper/system cards, or `projects/`.
+6. Pick exactly one priority research question for next week.
+
+Do not:
+- Do not summarize every daily note.
+- Do not create wiki/entity stubs automatically.
+- Do not promote AI-generated text as Evidence unless it is anchored in local notes or cited source material.
+- Do not use web search unless the user explicitly asks.

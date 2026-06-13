@@ -172,6 +172,16 @@ def _post_connector_json(path: str, payload: Any, timeout: int = 30) -> tuple[in
         return resp.status, parsed, raw
 
 
+def _get_connector(path: str, timeout: int = 30) -> tuple[int, bytes]:
+    headers = {
+        "Accept": "*/*",
+        "X-Zotero-Connector-API-Version": "3",
+    }
+    req = urllib.request.Request(_connector_url(path), headers=headers, method="GET")
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return resp.status, resp.read()
+
+
 def _post_connector_bytes(path: str, body: bytes, metadata: dict[str, Any], timeout: int = 240) -> tuple[int, bytes]:
     headers = {
         **_connector_headers("application/pdf"),
@@ -795,9 +805,8 @@ def connector_preflight(collection_key: str = DEFAULT_COLLECTION_KEY) -> dict[st
         "errors": [],
     }
     try:
-        status, data, _ = _post_connector_json("/connector/ping", {}, timeout=10)
+        status, _ = _get_connector("/connector/ping", timeout=10)
         result["reachable"] = status == 200
-        result["ping"] = data
     except Exception as exc:
         result["errors"].append(f"connector_ping_failed:{type(exc).__name__}:{str(exc)[:160]}")
         return result

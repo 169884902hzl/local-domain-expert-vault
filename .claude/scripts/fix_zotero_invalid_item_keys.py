@@ -18,14 +18,11 @@ import subprocess
 from typing import Any
 
 from kb_common import safe_print, vault_path
+from zotero_import import zotero_data_dir
 
 
 VALID_KEY_RE = re.compile(r"^[23456789ABCDEFGHIJKLMNPQRSTUVWXYZ]{8}$")
 VALID_KEY_ALPHABET = "23456789ABCDEFGHIJKLMNPQRSTUVWXYZ"
-
-
-def zotero_data_dir() -> Path:
-    return Path.home() / "Zotero"
 
 
 def db_path() -> Path:

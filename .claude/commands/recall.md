@@ -1,11 +1,26 @@
-Run a local spaced-review check for the literature vault.
+Run a local active-recall session for the literature vault.
 
-Argument: $ARGUMENTS (optional focus, e.g. diffusion, DLO, VLM)
+Argument: `$ARGUMENTS` is optional focus text, for example `DLO`, `diffusion policy`, `VLA`, or a recall question ID such as `R003`.
 
-Steps:
-1. Search local notes with `python .claude/scripts/kb_search.py "$ARGUMENTS" --type literature --limit 20`
-2. Prefer `status: done` notes; if there are none, use high-priority `stub` notes and label them as not yet deeply read.
-3. Generate 5-10 recall prompts from local notes only.
-4. Save durable review output to `output/recall/YYYY-MM-DD.md` if the user asks to persist it.
+Primary source:
+- Start from `output/recall-queue.md`.
+- If the queue is empty or the user gives a focus, search local notes only:
+  ```powershell
+  python .claude/scripts/kb_search.py "$ARGUMENTS" --limit 20
+  ```
 
-Do not use web search for recall.
+Session rules:
+1. Select 1-5 high-value research questions, not bare concept names.
+2. Ask the user to answer from memory first when interaction is possible.
+3. Then check local notes and separate:
+   - Evidence: supported by local notes or source material.
+   - Inference: reasoned but not directly proven.
+   - Open Question: still unresolved.
+4. Update the `Answer Log` in `output/recall-queue.md` when the user asks to persist the session.
+5. Recommend one result per question: keep, promote to `wiki/concepts/`, promote to `wiki/topics/`, move to `projects/`, or discard.
+
+Do not:
+- Do not use web search for recall.
+- Do not generate long summaries.
+- Do not add more than 0-2 new questions to the queue from a daily note.
+- Do not treat AI-generated recall answers as Evidence without local/source support.

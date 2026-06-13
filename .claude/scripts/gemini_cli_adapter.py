@@ -27,6 +27,28 @@ _SHORT_INSTRUCTION = (
 )
 
 
+def _resolve_gemini_path() -> str:
+    candidates: list[str | None] = []
+    if os.name == "nt":
+        candidates.append(shutil.which("gemini.cmd"))
+    candidates.append(shutil.which("gemini"))
+    if os.name == "nt":
+        candidates.extend(
+            [
+                str(Path)
+                for Path in [
+                    os.path.expandvars(r"%APPDATA%\npm\gemini.cmd"),
+                    os.path.expandvars(r"%ProgramFiles%\nodejs\gemini.cmd"),
+                    r"C:\nvm4w\nodejs\gemini.cmd",
+                ]
+            ]
+        )
+    for candidate in candidates:
+        if candidate and os.path.exists(candidate):
+            return candidate
+    return ""
+
+
 def run_gemini_cli(
     prompt: str,
     *,
@@ -50,7 +72,7 @@ def run_gemini_cli(
         "effective_fallback": False,
     }
     env = {**os.environ, "GEMINI_CLI_NO_RELAUNCH": "1"}
-    gemini_path = shutil.which("gemini")
+    gemini_path = _resolve_gemini_path()
     if not gemini_path:
         result["error"] = "gemini_cli_not_found"
         return result
