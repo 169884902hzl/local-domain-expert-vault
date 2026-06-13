@@ -73,7 +73,7 @@ class AutomationPauseGuardTest(unittest.TestCase):
 <Task xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <Triggers>
     <CalendarTrigger>
-      <StartBoundary>2026-05-21T04:00:00Z</StartBoundary>
+      <StartBoundary>2026-05-21T12:00:00</StartBoundary>
       <ScheduleByDay><DaysInterval>1</DaysInterval></ScheduleByDay>
     </CalendarTrigger>
   </Triggers>
