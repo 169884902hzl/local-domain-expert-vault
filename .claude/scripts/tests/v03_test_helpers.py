@@ -416,6 +416,82 @@ class V03TempAgendaTest(unittest.TestCase):
             state="baseline_table_built",
         )
 
+    def write_multi_baseline_table(self, *, candidate_ids: tuple[str, str] = ("cand-alpha", "cand-beta")) -> None:
+        tables = []
+        for cid in candidate_ids:
+            tables.append(
+                {
+                    "schema_version": "baseline_table.v1",
+                    "run_date": RUN_DATE,
+                    "candidate_id": cid,
+                    "baselines": [
+                        {
+                            "baseline_id": f"{cid}-baseline",
+                            "name": f"{cid} strongest baseline",
+                            "source": "manual_prior_art_review",
+                            "baseline_role": "manual_strongest_baseline",
+                            "kill_condition": "Reject if matched.",
+                            "metric": "success_rate",
+                            "confidence": "high",
+                        }
+                    ],
+                    "strongest_baseline_id": f"{cid}-baseline",
+                    "strongest_baseline_final": {
+                        "status": "known",
+                        "baseline_id": f"{cid}-baseline",
+                        "name": f"{cid} strongest baseline",
+                        "source": "manual_prior_art_review",
+                        "kill_condition": "Reject if matched.",
+                        "metric_or_task": "success_rate",
+                    },
+                    "baseline_verification_status": "verified",
+                    "baseline_execution_readiness": {
+                        "status": "ready",
+                        "source": "manual_prior_art_review",
+                        "implementation_path": f"baselines/{cid}",
+                        "dataset_or_sim": "public sim",
+                        "compute_budget": "one GPU day",
+                        "metric_automation": "pytest evaluator",
+                        "not_applicable_reason": "",
+                        "blocking_issues": [],
+                    },
+                }
+            )
+        write_run_artifact(
+            RUN_DATE,
+            "baseline-table.json",
+            {
+                "schema_version": "baseline_table.v1",
+                "run_date": RUN_DATE,
+                "candidate_id": "__multi__",
+                "baselines": [],
+                "strongest_baseline_id": "",
+                "strongest_baseline_final": {
+                    "status": "unknown",
+                    "baseline_id": "",
+                    "name": "",
+                    "source": "",
+                    "kill_condition": "",
+                    "metric_or_task": "",
+                },
+                "baseline_verification_status": "partial",
+                "baseline_execution_readiness": {
+                    "status": "unknown",
+                    "source": "baseline_table",
+                    "implementation_path": "",
+                    "dataset_or_sim": "",
+                    "compute_budget": "",
+                    "metric_automation": "",
+                    "not_applicable_reason": "",
+                    "blocking_issues": ["multi_candidate_wrapper"],
+                },
+                "tables": tables,
+                "artifact_hashes": {},
+                "boundary": "Multi-candidate wrapper; inspect tables for per-candidate strongest baseline status.",
+            },
+            state="baseline_table_built",
+        )
+
     def write_pilot_plan(self, *, executable: bool = True) -> None:
         path = Path(self.tmp.name) / "pilots" / "anchored-contact-failure-benchmark" / "pilot-plan.json"
         write_json(

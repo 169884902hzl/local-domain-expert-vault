@@ -67,9 +67,8 @@ def _queue_item(candidate_id: str, reason: str, source: str) -> dict[str, str]:
     return {"candidate_id": candidate_id, "reason": reason, "source": source}
 
 
-def build_resurrection_review(run_date: str) -> dict[str, Any]:
-    run_artifacts = agenda_v2_path("runs", run_date, "artifacts")
-    queues = {
+def _empty_queues() -> dict[str, list[dict[str, str]]]:
+    return {
         "external_novelty_unknown": [],
         "anchorless_evidence": [],
         "codex_rewrite_or_reject": [],
@@ -81,35 +80,72 @@ def build_resurrection_review(run_date: str) -> dict[str, Any]:
         "active_seed_qa_queue": [],
         "result_row_confirmation_queue": [],
         "cross_paper_edge_audit_queue": [],
+        "pilot_candidate_queue": [],
     }
+
+
+def _append_queue(queues: dict[str, list[dict[str, str]]], queue: str, candidate_id: str, reason: str, source: str) -> None:
+    if source.startswith("accepted:"):
+        queues[queue] = [item for item in queues[queue] if item.get("candidate_id") != candidate_id]
+    elif any(item.get("candidate_id") == candidate_id for item in queues[queue]):
+        return
+    queues[queue].append(_queue_item(candidate_id, reason, source))
+
+
+def route_decision(item: dict[str, Any], source_label: str, queues: dict[str, list[dict[str, str]]]) -> None:
+    cid = str(item.get("candidate_id"))
+    risks = {str(risk) for risk in item.get("risks", [])}
+    blocks = {str(block) for block in item.get("blocks", [])}
+    if "unknown_novelty_without_human_override" in blocks or item.get("novelty_classification") == "unknown":
+        _append_queue(queues, "external_novelty_unknown", cid, "external novelty unknown", source_label)
+    if "anchorless_core_evidence_risk" in risks:
+        _append_queue(queues, "anchorless_evidence", cid, "anchorless core evidence", source_label)
+        _append_queue(queues, "pdf_evidence_queue", cid, "needs deeper PDF/table evidence extraction", source_label)
+    if str(item.get("codex_action", "")).startswith(("rewrite", "reject", "park")):
+        _append_queue(queues, "codex_rewrite_or_reject", cid, "Codex requested rewrite/reject/park", source_label)
+    if "manual_prior_art_review_missing" in risks:
+        _append_queue(queues, "manual_prior_art_queue", cid, "needs manual prior-art review", source_label)
+    if "manual_prior_art_quality_incomplete" in risks or "manual_prior_art_query_log_missing" in risks:
+        _append_queue(queues, "active_seed_qa_queue", cid, "needs manual prior-art quality completion", source_label)
+        _append_queue(queues, "manual_prior_art_queue", cid, "needs manual prior-art QA checklist/query log", source_label)
+    if "strongest_baseline_unknown" in risks or "baseline_table_missing" in risks:
+        _append_queue(queues, "baseline_table_queue", cid, "needs baseline table or strongest baseline judgment", source_label)
+    if "baseline_execution_not_ready" in risks:
+        _append_queue(queues, "baseline_execution_queue", cid, "needs baseline execution readiness", source_label)
+    if "result_row_unconfirmed" in risks:
+        _append_queue(queues, "result_row_confirmation_queue", cid, "needs manual result-row confirmation", source_label)
+    if "cross_paper_edge_requires_human_check" in risks:
+        _append_queue(queues, "cross_paper_edge_audit_queue", cid, "needs cross-paper edge audit", source_label)
+    if item.get("decision") == "accept_for_user_review" or "active_seed_without_pilot_plan" in risks:
+        _append_queue(queues, "pilot_candidate_queue", cid, "accepted candidate needs experiment or pilot draft triage", source_label)
+
+
+def iter_accepted_decisions() -> list[tuple[dict[str, Any], str]]:
+    accepted_root = agenda_v2_path("seed-candidates", "accepted")
+    if not accepted_root.exists():
+        return []
+    items: list[tuple[dict[str, Any], str]] = []
+    for path in sorted(accepted_root.rglob("*.json")):
+        payload = read_json(path)
+        decision = payload.get("survival_decision", {})
+        if not isinstance(decision, dict) or not decision.get("candidate_id"):
+            continue
+        source = "accepted:" + str(path.relative_to(agenda_v2_path())).replace("\\", "/")
+        items.append((decision, source))
+    return items
+
+
+def build_resurrection_review(run_date: str) -> dict[str, Any]:
+    run_artifacts = agenda_v2_path("runs", run_date, "artifacts")
+    queues = _empty_queues()
     survival_path = run_artifacts / "survival-decision.json"
     if survival_path.exists():
         for item in read_json(survival_path).get("decisions", []):
             if not isinstance(item, dict):
                 continue
-            cid = str(item.get("candidate_id"))
-            risks = {str(risk) for risk in item.get("risks", [])}
-            blocks = {str(block) for block in item.get("blocks", [])}
-            if "unknown_novelty_without_human_override" in blocks or item.get("novelty_classification") == "unknown":
-                queues["external_novelty_unknown"].append(_queue_item(cid, "external novelty unknown", "survival-decision.json"))
-            if "anchorless_core_evidence_risk" in risks:
-                queues["anchorless_evidence"].append(_queue_item(cid, "anchorless core evidence", "survival-decision.json"))
-                queues["pdf_evidence_queue"].append(_queue_item(cid, "needs deeper PDF/table evidence extraction", "survival-decision.json"))
-            if str(item.get("codex_action", "")).startswith(("rewrite", "reject", "park")):
-                queues["codex_rewrite_or_reject"].append(_queue_item(cid, "Codex requested rewrite/reject/park", "survival-decision.json"))
-            if "manual_prior_art_review_missing" in risks:
-                queues["manual_prior_art_queue"].append(_queue_item(cid, "needs manual prior-art review", "survival-decision.json"))
-            if "manual_prior_art_quality_incomplete" in risks or "manual_prior_art_query_log_missing" in risks:
-                queues["active_seed_qa_queue"].append(_queue_item(cid, "needs manual prior-art quality completion", "survival-decision.json"))
-                queues["manual_prior_art_queue"].append(_queue_item(cid, "needs manual prior-art QA checklist/query log", "survival-decision.json"))
-            if "strongest_baseline_unknown" in risks or "baseline_table_missing" in risks:
-                queues["baseline_table_queue"].append(_queue_item(cid, "needs baseline table or strongest baseline judgment", "survival-decision.json"))
-            if "baseline_execution_not_ready" in risks:
-                queues["baseline_execution_queue"].append(_queue_item(cid, "needs baseline execution readiness", "survival-decision.json"))
-            if "result_row_unconfirmed" in risks:
-                queues["result_row_confirmation_queue"].append(_queue_item(cid, "needs manual result-row confirmation", "survival-decision.json"))
-            if "cross_paper_edge_requires_human_check" in risks:
-                queues["cross_paper_edge_audit_queue"].append(_queue_item(cid, "needs cross-paper edge audit", "survival-decision.json"))
+            route_decision(item, "survival-decision.json", queues)
+    for item, source in iter_accepted_decisions():
+        route_decision(item, source, queues)
     selected_path = run_artifacts / "selected-candidates.json"
     if selected_path.exists():
         for item in read_json(selected_path).get("selected", []):
@@ -142,6 +178,7 @@ def main() -> int:
         "active_seed_qa_queue": review["queues"]["active_seed_qa_queue"],
         "result_row_confirmation_queue": review["queues"]["result_row_confirmation_queue"],
         "cross_paper_edge_audit_queue": review["queues"]["cross_paper_edge_audit_queue"],
+        "pilot_candidate_queue": review["queues"]["pilot_candidate_queue"],
     }
     safe, errors = sanitize_overrides(payload)
     safe["run_date"] = args.run_date

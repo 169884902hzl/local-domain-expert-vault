@@ -591,7 +591,7 @@ def claim_id_references(value: str) -> list[str]:
             continue
         if normalized.startswith("if_"):
             continue
-        if re.fullmatch(r"C(?:\d+|-[A-Za-z0-9][A-Za-z0-9_-]*)", token):
+        if re.fullmatch(r"C(?:-[A-Za-z]+)?\d+[A-Za-z]?", token):
             refs.append(token)
     return refs
 
@@ -1102,6 +1102,19 @@ def finalize_content(content: str, analysis: str, schema: dict) -> str:
     return frontmatter + body.lstrip()
 
 
+def _refresh_embedding_index() -> None:
+    """Incrementally update the semantic index after a reading is finalized, so a
+    freshly-done paper becomes searchable immediately. Best-effort by design: an
+    index hiccup must never break the finalize that already succeeded."""
+    try:
+        import kb_embed
+
+        stats = kb_embed.build_index()
+        safe_print(f"EMBED_INDEX_REFRESHED: {stats}")
+    except Exception as exc:  # secondary task; never block a successful finalize
+        safe_print(f"EMBED_INDEX_SKIPPED: {exc}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("zotero_key", help="Zotero item key for the target literature note.")
@@ -1126,6 +1139,8 @@ def main() -> int:
         return 1
     safe_write(target, new_content, dry_run=args.dry_run, backup=not args.no_backup)
     safe_print(f"FINALIZED: {target.relative_to(vault_path())}")
+    if not args.dry_run:
+        _refresh_embedding_index()
     return 0
 
 

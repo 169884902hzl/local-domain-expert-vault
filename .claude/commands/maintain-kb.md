@@ -18,9 +18,9 @@ python .claude/scripts/audit_kb.py --strict-reading --strict-concepts
 ```
 3. Run local search smoke tests:
 ```powershell
-python .claude/scripts/kb_search.py "diffusion policy bimanual manipulation" --limit 8
-python .claude/scripts/kb_search.py "DLO manipulation VLM tactile" --limit 8
-python .claude/scripts/kb_search.py "Action Chunking Transformer ALOHA" --limit 8
+python .claude/scripts/kb_search.py "diffusion policy bimanual manipulation" --semantic --limit 8
+python .claude/scripts/kb_search.py "DLO manipulation VLM tactile" --semantic --limit 8
+python .claude/scripts/kb_search.py "Action Chunking Transformer ALOHA" --semantic --limit 8
 ```
 4. Check for empty local citation sections in `wiki/topics/*.md`.
 

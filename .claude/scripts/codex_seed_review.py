@@ -18,6 +18,7 @@ import tempfile
 from typing import Any
 
 from kb_common import extract_frontmatter, parse_frontmatter_map, safe_print, safe_write, vault_path
+from llm_structured import extract_json
 from research_agenda_common import DAILY_DIR, REVIEWS_DIR, rel, render_frontmatter, strip_quotes
 from research_agenda_common import agenda_path
 from research_agenda_review import iter_idea_folders, review_folder
@@ -2732,25 +2733,7 @@ def _load_execution_provider_payload(path_value: str) -> dict[str, Any]:
 
 
 def _extract_json_object(text: str) -> dict[str, Any]:
-    stripped = text.strip()
-    if stripped.startswith("```"):
-        lines = stripped.splitlines()
-        if lines and lines[0].strip().startswith("```"):
-            lines = lines[1:]
-        if lines and lines[-1].strip() == "```":
-            lines = lines[:-1]
-        stripped = "\n".join(lines).strip()
-    decoder = json.JSONDecoder()
-    for index, char in enumerate(stripped):
-        if char != "{":
-            continue
-        try:
-            payload, _ = decoder.raw_decode(stripped[index:])
-        except json.JSONDecodeError:
-            continue
-        if isinstance(payload, dict):
-            return payload
-    raise ValueError("provider_output_json_object_not_found")
+    return extract_json(text)
 
 
 def _render_codex_execution_prompt(run_date: str, candidates: list[dict[str, Any]]) -> str:

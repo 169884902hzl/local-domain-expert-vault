@@ -3,6 +3,9 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import re
+import sys
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +14,17 @@ from research_seed_v2_common import agenda_v2_path, artifact_dir, artifact_hashe
 
 
 PDF_VERIFIED_ANCHOR_SOURCES = {"pdf_text", "pdf_table", "pdf_figure_caption", "manual_pdf_locator", "result_row"}
+
+SECTION_PATTERNS: list[tuple[str, list[str]]] = [
+    ("Abstract", [r"abstract"]),
+    ("Introduction", [r"(?:\d+|i)\.?\s+introduction", r"introduction"]),
+    ("Method", [
+        r"(?:\d+|ii|iii|iv)\.?\s+(?!related|background|preliminar|dataset|experiment|evaluation|result)(method|methodology|approach|framework|model|system)",
+        r"(?!related|background|preliminar|dataset|experiment|evaluation|result)(method|methodology|approach|proposed method|framework)",
+    ]),
+    ("Experiments", [r"(?:\d+|iv|v)\.?\s+(experiments?|evaluation|results?)", r"experiments?", r"evaluation", r"results?"]),
+    ("Conclusion", [r"(?:\d+|v|vi)\.?\s+(conclusion|discussion)", r"conclusion", r"discussion"]),
+]
 
 
 def _anchor_id(paper_id: str, anchor_type: str, text: str) -> str:
@@ -103,31 +117,171 @@ def _pdf_text_anchors(paper_id: str, source_pdf: str) -> list[dict[str, Any]]:
     if not source_pdf or not path.exists() or path.suffix.lower() != ".pdf":
         return []
     try:
+        anchors = _fitz_text_anchors(paper_id, path)
+    except (ImportError, ModuleNotFoundError):
+        anchors = []
+    except Exception as exc:
+        _pdf_extract_warning("pymupdf_text", exc)
+        anchors = []
+    if anchors:
+        anchors.extend(_pdfplumber_table_anchors(paper_id, path))
+        return anchors
+    return _pdfplumber_text_and_table_anchors(paper_id, path)
+
+
+def _pdf_extract_warning(stage: str, exc: Exception) -> None:
+    print(f"PDF_EXTRACT_DEGRADED:{stage}:{type(exc).__name__}:{exc}", file=sys.stderr)
+
+
+def _normalize_line(text: str) -> str:
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _noise_key(text: str) -> str:
+    return re.sub(r"\d+", "#", _normalize_line(text).lower())
+
+
+def _fitz_blocks(path: Path) -> tuple[list[dict[str, Any]], int]:
+    import fitz  # type: ignore[import-not-found]
+
+    blocks: list[dict[str, Any]] = []
+    with fitz.open(str(path)) as doc:
+        page_count = len(doc)
+        for page_index, page in enumerate(doc, start=1):
+            data = page.get_text("dict")
+            for block in data.get("blocks", []):
+                if block.get("type") != 0:
+                    continue
+                for line in block.get("lines", []):
+                    spans = line.get("spans", [])
+                    text = _normalize_line(" ".join(str(span.get("text", "")) for span in spans))
+                    if not text:
+                        continue
+                    sizes = [float(span.get("size") or 0.0) for span in spans]
+                    fonts = " ".join(str(span.get("font", "")).lower() for span in spans)
+                    flags = [int(span.get("flags") or 0) for span in spans]
+                    bbox = line.get("bbox") or block.get("bbox") or [0, 0, 0, 0]
+                    blocks.append(
+                        {
+                            "page": page_index,
+                            "text": text,
+                            "font_size": max(sizes) if sizes else 0.0,
+                            "is_bold": "bold" in fonts or any(flag & 2 for flag in flags),
+                            "y0": float(bbox[1]) if len(bbox) > 1 else 0.0,
+                        }
+                    )
+    return blocks, page_count
+
+
+def _drop_repeated_noise(blocks: list[dict[str, Any]], page_count: int) -> list[dict[str, Any]]:
+    counts = Counter(_noise_key(block["text"]) for block in blocks if len(block["text"]) >= 4)
+    threshold = max(2, page_count // 2)
+    cleaned = []
+    for block in blocks:
+        key = _noise_key(block["text"])
+        if block["page"] != 1 and counts.get(key, 0) >= threshold and len(key) < 120:
+            continue
+        cleaned.append(block)
+    return cleaned
+
+
+def _section_label(text: str, *, font_ok: bool, structural_ok: bool) -> str:
+    if not (font_ok or structural_ok):
+        return ""
+    normalized = re.sub(r"\s+", " ", text.strip().lower().rstrip(":"))
+    if len(normalized) > 120 or normalized.endswith("."):
+        return ""
+    for label, patterns in SECTION_PATTERNS:
+        for pattern in patterns:
+            if re.fullmatch(pattern, normalized, flags=re.IGNORECASE):
+                return label
+    return ""
+
+
+def _classified_sections(blocks: list[dict[str, Any]]) -> list[tuple[int, str]]:
+    sections: list[tuple[int, str]] = []
+    for index, block in enumerate(blocks):
+        text = str(block["text"])
+        font_ok = float(block.get("font_size") or 0.0) >= 11.0 or bool(block.get("is_bold"))
+        structural_ok = len(text) < 100 and not text.endswith(".")
+        label = _section_label(text, font_ok=font_ok, structural_ok=structural_ok)
+        if label:
+            sections.append((index, label))
+    return sections
+
+
+def _fitz_text_anchors(paper_id: str, path: Path) -> list[dict[str, Any]]:
+    blocks, page_count = _fitz_blocks(path)
+    blocks = _drop_repeated_noise(blocks, page_count)
+    sections = _classified_sections(blocks)
+    anchors: list[dict[str, Any]] = []
+    seen_sections: set[str] = set()
+    for position, label in sections:
+        if label in seen_sections:
+            continue
+        next_position = next((next_pos for next_pos, _next_label in sections if next_pos > position), len(blocks))
+        body_blocks = blocks[position + 1 : next_position]
+        lines = [str(block["text"]) for block in body_blocks if len(str(block["text"])) >= 8]
+        if not lines:
+            continue
+        snippet = " ".join(lines)[:600]
+        page = int(blocks[position].get("page") or 1)
+        anchors.append(
+            {
+                "anchor_id": _anchor_id(paper_id, "section", f"{label}:{page}:{snippet}"),
+                "anchor_type": "section",
+                "anchor_source": "pdf_text",
+                "section": label,
+                "figure": "",
+                "table": "",
+                "page": page,
+                "snippet": snippet,
+                "extraction_method": "pdf_text",
+                "confidence": "medium",
+                "requires_human_check": True,
+                "extension_metadata": {"section_extractor": "pymupdf_font_or_structure"},
+            }
+        )
+        seen_sections.add(label)
+    if anchors:
+        return anchors
+    page_lines: dict[int, list[str]] = {}
+    for block in blocks:
+        text = str(block["text"])
+        if len(text) >= 8:
+            page_lines.setdefault(int(block.get("page") or 1), []).append(text)
+    for page, lines in sorted(page_lines.items()):
+        snippet = " ".join(lines)[:600]
+        if not snippet:
+            continue
+        anchors.append(
+            {
+                "anchor_id": _anchor_id(paper_id, "snippet", f"fallback:{page}:{snippet}"),
+                "anchor_type": "snippet",
+                "anchor_source": "pdf_text",
+                "section": "Full Text (non-standard format fallback)",
+                "figure": "",
+                "table": "",
+                "page": page,
+                "snippet": snippet,
+                "extraction_method": "pdf_text",
+                "confidence": "low",
+                "requires_human_check": True,
+                "extension_metadata": {"degraded": "non_standard_full_text_fallback"},
+            }
+        )
+    return anchors
+
+
+def _pdfplumber_table_anchors(paper_id: str, path: Path) -> list[dict[str, Any]]:
+    try:
         import pdfplumber  # type: ignore[import-not-found]
-    except Exception:
+    except (ImportError, ModuleNotFoundError):
         return []
     anchors: list[dict[str, Any]] = []
     try:
         with pdfplumber.open(str(path)) as pdf:
-            for page_index, page in enumerate(pdf.pages[:3], start=1):
-                text = " ".join((page.extract_text() or "").split())
-                if text:
-                    snippet = text[:600]
-                    anchors.append(
-                        {
-                            "anchor_id": _anchor_id(paper_id, "snippet", f"{page_index}:{snippet}"),
-                            "anchor_type": "snippet",
-                            "anchor_source": "pdf_text",
-                            "section": "",
-                            "figure": "",
-                            "table": "",
-                            "page": page_index,
-                            "snippet": snippet,
-                            "extraction_method": "pdfplumber",
-                            "confidence": "medium",
-                            "requires_human_check": True,
-                        }
-                    )
+            for page_index, page in enumerate(pdf.pages, start=1):
                 for table_index, table in enumerate(page.extract_tables() or [], start=1):
                     for row_index, row in enumerate(table or []):
                         cells = [str(cell or "").strip() for cell in row or []]
@@ -159,7 +313,43 @@ def _pdf_text_anchors(paper_id: str, source_pdf: str) -> list[dict[str, Any]]:
                                 "confirmation_note": "",
                             }
                         )
-    except Exception:
+    except Exception as exc:
+        _pdf_extract_warning("pdfplumber_table", exc)
+        return anchors
+    return anchors
+
+
+def _pdfplumber_text_and_table_anchors(paper_id: str, path: Path) -> list[dict[str, Any]]:
+    try:
+        import pdfplumber  # type: ignore[import-not-found]
+    except (ImportError, ModuleNotFoundError):
+        return []
+    anchors: list[dict[str, Any]] = []
+    try:
+        with pdfplumber.open(str(path)) as pdf:
+            for page_index, page in enumerate(pdf.pages, start=1):
+                text = " ".join((page.extract_text() or "").split())
+                if text:
+                    snippet = text[:600]
+                    anchors.append(
+                        {
+                            "anchor_id": _anchor_id(paper_id, "snippet", f"{page_index}:{snippet}"),
+                            "anchor_type": "snippet",
+                            "anchor_source": "pdf_text",
+                            "section": "Full Text (pdfplumber fallback)",
+                            "figure": "",
+                            "table": "",
+                            "page": page_index,
+                            "snippet": snippet,
+                            "extraction_method": "pdfplumber",
+                            "confidence": "low",
+                            "requires_human_check": True,
+                            "extension_metadata": {"degraded": "pymupdf_unavailable_or_empty"},
+                        }
+                    )
+        anchors.extend(_pdfplumber_table_anchors(paper_id, path))
+    except Exception as exc:
+        _pdf_extract_warning("pdfplumber_text", exc)
         return anchors
     return anchors
 

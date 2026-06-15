@@ -16,9 +16,9 @@ from typing import Any
 
 from gemini_cli_adapter import DEFAULT_GEMINI_MODEL, run_gemini_cli
 from kb_common import safe_print, safe_write, vault_path
+from llm_structured import StructuredOutputError, extract_json
 from opencode_cli_adapter import DEFAULT_OPENCODE_MODEL, run_opencode_cli
 from research_agenda_common import REVIEWS_DIR, rel, render_frontmatter
-from research_agenda_ideate import _extract_json_object
 
 
 DEFAULT_OUTPUT_ROOT = vault_path("projects", "research-agenda", "model-debates")
@@ -194,27 +194,10 @@ def _normalize_list(payload: dict[str, Any], key: str) -> list[dict[str, Any]]:
 
 def _extract_json_payload(text: str) -> dict[str, Any] | None:
     """Parse model JSON even when a CLI wraps it in Markdown or progress prose."""
-    for match in _FENCED_BLOCK_RE.finditer(text):
-        body = match.group(1).strip()
-        try:
-            parsed = json.loads(body)
-        except json.JSONDecodeError:
-            parsed = _extract_json_object(body)
-        if isinstance(parsed, dict):
-            return parsed
-    parsed = _extract_json_object(text)
-    if isinstance(parsed, dict):
-        return parsed
-    decoder = json.JSONDecoder()
-    for index, char in enumerate(text):
-        if char != "{":
-            continue
-        try:
-            parsed, _ = decoder.raw_decode(text[index:])
-        except json.JSONDecodeError:
-            continue
-        if isinstance(parsed, dict):
-            return parsed
+    try:
+        return extract_json(text)
+    except StructuredOutputError:
+        return None
     return None
 
 

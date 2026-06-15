@@ -18,6 +18,7 @@ from typing import Any
 
 from gemini_cli_adapter import run_gemini_cli
 from kb_common import safe_print, safe_write, vault_path
+from llm_structured import StructuredOutputError, extract_json
 from research_agenda_common import (
     CONCEPT_DELTA_DIR,
     DIVERGENT_DIR,
@@ -167,6 +168,23 @@ QUALITY_RUBRIC_WEIGHTS = {
 FREE_DIVERGENCE_START_DATE = "2026-05-08"
 QUALITY_PROMOTION_TIERS = {"S", "A"}
 DEFAULT_MIN_RAW_CANDIDATES = 6
+DIVERGENT_LIGHTWEIGHT_MIN_CANDIDATES = 12
+DIVERGENT_LIGHTWEIGHT_MAX_CANDIDATES = 16
+DIVERGENT_EXPANDED_SURVIVOR_LIMIT = 8
+DIVERGENT_CORE_FIELDS = [
+    "title",
+    "problem",
+    "engineering_pathology",
+    "mechanism",
+    "hypothesis",
+    "strongest_baseline",
+    "baseline_failure_mode",
+    "killer_experiment",
+    "evidence_links",
+    "speculative_jump",
+    "falsification",
+    "non_obvious_claim",
+]
 MIN_TOP_TIER_RAW_CANDIDATES = 1
 MAX_REJECTED_DRAFT_SUMMARY = 12
 WORKFLOW_CONTRACTS = {
@@ -551,7 +569,8 @@ def _infer_research_claim_type(axis: dict[str, Any]) -> str:
     return "interface_boundary"
 
 
-def _infer_origin_type(axis: dict[str, Any], claim_type: str) -> str:
+def _infer_origin_type(axis: dict[str, Any], claim_type: str | None = None) -> str:
+    claim_type = claim_type or _infer_research_claim_type(axis)
     token = _taxonomy_token(axis.get("origin_type"))
     if token in VALID_ORIGIN_TYPES:
         return token
@@ -1848,7 +1867,7 @@ def _cross_paper_tension_priorities(run_date: str, *, limit: int = 12) -> list[d
     return priorities[:limit]
 
 
-def _render_divergent_prompt(
+def _render_divergent_prompt_v1(
     candidates: list[tuple[int, dict[str, Any], list[dict[str, Any]], int]],
     *,
     records: list[dict[str, Any]],
@@ -2041,6 +2060,134 @@ def _render_divergent_prompt(
     return json.dumps(packet, ensure_ascii=False, indent=2)
 
 
+def _divergent_lightweight_target_range(limit: int) -> tuple[int, int]:
+    target_max = max(1, min(limit, DIVERGENT_LIGHTWEIGHT_MAX_CANDIDATES))
+    target_min = min(DIVERGENT_LIGHTWEIGHT_MIN_CANDIDATES, target_max)
+    return target_min, target_max
+
+
+def _render_divergent_prompt(
+    candidates: list[tuple[int, dict[str, Any], list[dict[str, Any]], int]],
+    *,
+    records: list[dict[str, Any]],
+    focus_keys: set[str],
+    limit: int,
+    min_candidates: int = DEFAULT_MIN_RAW_CANDIDATES,
+    retry_context: str = "",
+    free_divergence: bool = False,
+    run_date: str | None = None,
+) -> str:
+    del min_candidates
+    target_min, target_max = _divergent_lightweight_target_range(limit)
+    focus_records = [
+        record
+        for record in records
+        if str(record.get("zotero_key", "")).upper() in focus_keys and not _is_source_availability_note(record)
+    ]
+    packet = {
+        "task": "Generate lightweight divergent robotics research hypotheses after today's deep reading.",
+        "role": (
+            "You are a high-originality robotics invention partner. Your only job in this step is divergent mechanism ideation. "
+            "Do not fill downstream seed tables, categories, defense matrices, sprint plans, or review paperwork. "
+            "The local pipeline will score, attack, and expand surviving candidates deterministically."
+        ),
+        "output_schema": {
+            "candidates": [
+                {
+                    "title": "Short specific title, not a two-tag cross-gap template.",
+                    "problem": "A concrete robot episode, experimental bottleneck, or scientific deadlock.",
+                    "engineering_pathology": "The concrete robot-system failure, bottleneck, measurement gap, or evaluation deadlock.",
+                    "mechanism": "The core mechanism, interface change, or experimental object.",
+                    "hypothesis": "One falsifiable sentence.",
+                    "strongest_baseline": "The baseline most likely to kill this idea.",
+                    "baseline_failure_mode": "Why that strongest baseline should fail, or why the idea must be rewritten.",
+                    "killer_experiment": "The smallest decisive experiment.",
+                    "evidence_links": [
+                        "At least two newly_read_evidence sources; include paper/title/key plus the specific mechanism/result/failure used."
+                    ],
+                    "speculative_jump": "What is not yet proven by the local evidence.",
+                    "falsification": "Reject if ...",
+                    "non_obvious_claim": "Why this is not simple A+B or a module wrapper.",
+                }
+            ],
+            "rejected_drafts_summary": "Optional short list of drafts killed before output.",
+        },
+        "internal_survival_filter": [
+            "Privately draft the naive version first.",
+            "Privately let the strongest baseline kill the naive version.",
+            "Only output the mutated version if the mutation changes a mechanism, interface, controlled variable, feedback loop, evaluation signal, or experimental object.",
+            "If the mutation is still a two-tag combination, move it to rejected_drafts_summary.",
+        ],
+        "rules": [
+            "Return JSON only.",
+            "Top-level JSON may contain only candidates and rejected_drafts_summary.",
+            f"Generate {target_min}-{target_max} lightweight hypotheses. Quantity and variance matter here; downstream scoring will select survivors.",
+            "Each candidate needs exactly these fields: title, problem, engineering_pathology, mechanism, hypothesis, strongest_baseline, baseline_failure_mode, killer_experiment, evidence_links, speculative_jump, falsification, non_obvious_claim.",
+            "Do not output candidate_group, origin_type, research_claim_type, bottleneck_type, evidence_mode, risk_class, world_model_role, portfolio_slot, idea_archetype, contribution_shape, physical_failure_scene, interface, interface_innovation, optimization_space, loss_placement, decoder_boundary, manifold_safety, pipeline_steps, defense_patches, baseline_matrix, metric_suite, risk_assumptions, competition_map, two_week_sprint, reviewer_kill_shot, rescue_mutation, reviewer_pre_mortem, or other downstream table fields.",
+            "HARD BAN: Do not generate titles starting with 'cross-gap between', 'bridging X and Y', 'combining X with Y', or any two-tag permutation template.",
+            "HARD BAN: Do not write 'paper A has X, paper B has Y, so combine X and Y' as the idea.",
+            "EVIDENCE ANCHOR: Every candidate must cite at least 2 specific mechanisms or experimental findings from newly_read_evidence. Name the paper or Zotero key and the specific mechanism/result/failure that creates pressure for the idea.",
+            "Start from a concrete robot episode, experimental bottleneck, measurement gap, or scientific deadlock before naming the papers.",
+            "Think in this order: robot episode or bottleneck -> causal mechanism/interface -> strongest baseline -> why baseline should fail -> killer experiment -> title.",
+            "Preserve high-originality ideas if they have a sharp pathology, explicit speculative_jump, ruthless strongest_baseline, and measurable falsification.",
+            "Use cross-paper tensions only as generation pressure. They are not seed evidence unless the candidate also anchors to newly_read_evidence.",
+            "For active-viewpoint, wrist-camera, active-vision, or camera-orbit ideas, the strongest baseline is usually classical next-best-view, information gain, occupancy/geometric active vision, or a depth-discontinuity heuristic unless explicitly inapplicable.",
+            "For VLA/RL-token ideas, state what information is preserved, what is compressed away, and how off-manifold or decoder-boundary errors would be detected.",
+            "For world-model ideas, state the latent state, invariant, decision boundary, or hallucination test in the mechanism or killer_experiment.",
+            "The falsification field must start with 'Reject if ...' and name a measurable condition.",
+            "Avoid duplicating existing_seed_titles. If the idea is only a rename of an existing seed, return fewer candidates.",
+            "Use rejected_drafts_summary for killed drafts. Each rejected draft can contain draft_title, failure_reason, strongest_baseline, mutation_attempted, and why_not_candidate.",
+            "If the evidence does not support any sharp hypothesis, return {\"candidates\": []}.",
+        ],
+        "workflow_contracts": {
+            "gemini_greenhouse": WORKFLOW_CONTRACTS["gemini_greenhouse"],
+            "idea_quality_source_basis": WORKFLOW_CONTRACTS["idea_quality_source_basis"],
+            "idea_taxonomy": WORKFLOW_CONTRACTS["idea_taxonomy"],
+            "daily_readable_workflow": WORKFLOW_CONTRACTS["daily_readable_workflow"],
+            "provider_matrix": WORKFLOW_CONTRACTS["provider_matrix"],
+        },
+        "notemd_inspired_context": {
+            "source_snippet_policy": "Use source_snippet and evidence_anchor as compact local evidence, not as quoted paper text.",
+            "mechanism_graph_policy": "Daily mechanism graphs are draft_understanding_graph sidecars; use them only as structure compression when present in the agenda delta.",
+            "concept_delta_policy": "Concept deltas show local concept pressure and missing concept pages; they are not novelty proof.",
+        },
+        "free_divergence_policy": {
+            "enabled": free_divergence,
+            "boundary": "Use the four core axes as background only; do not turn them into generic labels.",
+            "instruction": "Prefer the strongest engineering pathology and clearest mechanism over historical topic coverage.",
+        },
+        "quality_target": {
+            "bar": "doctoral research hypothesis seed, not a filled seed pack",
+            "prefer": [
+                "new causal mechanism",
+                "new control, sensing, representation, or evaluation interface",
+                "strongest-baseline pressure",
+                "small killer experiment",
+                "explicit speculative jump",
+                "concrete robotics pathology",
+            ],
+            "avoid": [
+                "tag recombination",
+                "generic VLA/RL-token/Sim-to-Real framing",
+                "LLM reasoner as a magic box",
+                "module stacking",
+                "seed-pack table filling",
+            ],
+        },
+        "focus_track_context": "" if free_divergence else _focus_track_context(),
+        "existing_seed_titles": _existing_seed_titles(),
+        "retry_context": retry_context,
+        "newly_read_evidence": [_record_packet(record) for record in _dedupe_sources(focus_records, limit=28)],
+        "sidecar_context": _sidecar_context(run_date or today()),
+        "cross_paper_tension_priorities": _cross_paper_tension_priorities(run_date or today()),
+        "matrix_clusters": [
+            _jsonable_candidate(axis, evidence, recent)
+            for _, axis, evidence, recent in candidates[:8]
+        ],
+    }
+    return json.dumps(packet, ensure_ascii=False, indent=2)
+
+
 def _render_quality_rescue_prompt(
     previous_prompt: str,
     previous_candidates: list[dict[str, Any]],
@@ -2058,25 +2205,23 @@ def _render_quality_rescue_prompt(
         ],
         "manual_style_reference": [
             "Start from a robot failure, experimental bottleneck, or scientific deadlock that would annoy an experimentalist.",
-            "Use origin_type to prevent mode collapse: physical_scene is allowed, but representation_mismatch, objective_mismatch, evaluation_blind_spot, and paper_assumption_contradiction are equally valid origins.",
-            "Classify every candidate by research_claim_type, bottleneck_type, evidence_mode, risk_class, and portfolio_slot before writing the title.",
+            "Privately vary the origin so the rescue pass does not collapse into physical failure only.",
+            "Do not output classification fields; the local scorer infers origin_type, research_claim_type, bottleneck_type, evidence_mode, risk_class, and portfolio_slot.",
             "Invent or alter the sensing/control/evaluation interface, not just the model name.",
             "Describe the concrete robot episode or bottleneck before naming any source paper.",
-            "Choose the optimization space and loss placement before choosing the network module.",
-            "For RL-token ideas, decide whether the signal enters latent/token/action/critic space and whether it crosses the decoder boundary.",
-            "Reject A+B ideas unless the interface_innovation and falsification_discriminates_mechanism fields prove a new causal mechanism.",
+            "Privately choose the optimization space and loss placement before choosing the network module, but output only the 12 core fields.",
+            "For RL-token ideas, state the preserved information, compressed-away information, and error detection in mechanism or killer_experiment.",
+            "Reject A+B ideas unless non_obvious_claim, strongest_baseline, and killer_experiment prove a new causal mechanism.",
             "For every candidate, first write the bad naive A+B version, then let the strongest baseline kill it, then mutate the mechanism. The final candidate must be the mutation.",
             "For active-viewpoint/wrist-camera ideas, include NBV, information gain, occupancy/geometric active vision, or depth-discontinuity heuristics as the baseline pressure before claiming novelty.",
             "Use the local lab advantage: Franka arms, bimanual setup, wrist camera viewpoint control, FlexiTac/tactile sensing, and DLO/cable tasks.",
-            "Use HapToken-v3 style as structure: negative boundary, core insight, runnable pipeline, defense patches, baseline matrix, metric suite, risks, competition map, and two-week sprint.",
-            "Add a v0/v1/v2-style death table inside version_evolution_story: each row must say what failed and which boundary, space, representation, or feedback loop changed in the surviving version.",
+            "Do not write HapToken-v3 full structure; downstream deterministic expansion will create pipeline, baseline matrix, metrics, risks, and sprint fields.",
+            "Keep the v0 -> killed by baseline -> mutated mechanism trace internal unless it fits compactly in non_obvious_claim.",
             "Name the strongest baseline that could kill the idea.",
-            "Try to reject the idea before giving it S/A; if the objection wins, rewrite instead of promoting.",
-            "Prefer the first no-hardware pilot that can separate mechanism from engineering polish.",
-            "Choose online_control only when online execution is the actual contribution; otherwise use offline_replay, benchmark, dataset, or analysis_tool.",
+            "Try to reject the idea before output; if the objection wins, put it in rejected_drafts_summary.",
+            "Prefer a first no-hardware pilot that can separate mechanism from engineering polish.",
             "Compress the claim into one falsifiable sentence.",
-            "Keep risky ideas alive via rescue_mutation instead of deleting them.",
-            "World-model ideas must state their role, predicted state, physical invariant, decision boundary, and hallucination test; otherwise kill or rewrite them.",
+            "World-model ideas must state their role, predicted state, physical invariant, decision boundary, and hallucination test inside mechanism or killer_experiment; otherwise kill or rewrite them.",
         ],
     }
     packet["rules"] = [
@@ -2094,32 +2239,18 @@ def _render_quality_rescue_prompt(
             "A breakthrough bet must not be another failure detector or recovery shield with stronger language; it needs a different research object or contribution shape.",
             "Avoid the automatic-run failure mode: generic RL Token, generic VLA, generic Sim-to-Real, generic tactile add-on, shallow module replacement, shallow extra-input critic, and simple A+B stacking.",
             "Avoid the newly observed failure mode: calling an uncertainty mask plus camera orbit an interface innovation while ignoring classical next-best-view and information-gain active vision.",
-            "Do not assign S/A unless physical_failure_scene, interface_innovation, optimization_space, falsification_discriminates_mechanism, and lab_fit are all specific.",
-            "Do not assign S/A unless baseline_matrix, risk_assumptions, and two_week_sprint are concrete enough for a researcher to start tomorrow.",
-            "If you cannot make a top-tier candidate, still return raw rescue candidates with explicit reviewer_kill_shot and rescue_mutation so Codex can judge them.",
+            "Do not output full seed-pack fields. Output exactly the 12 core fields requested by output_schema.",
+            "If you cannot make a top-tier candidate, still return raw rescue candidates with explicit strongest_baseline, baseline_failure_mode, killer_experiment, and falsification so Codex can judge them.",
         ]
     )
     return json.dumps(packet, ensure_ascii=False, indent=2)
 
 
 def _extract_json_object(text: str) -> dict[str, Any] | None:
-    stripped = text.strip()
-    decoder = json.JSONDecoder()
-    first_payload: dict[str, Any] | None = None
-    for index, char in enumerate(stripped):
-        if char != "{":
-            continue
-        try:
-            payload, _ = decoder.raw_decode(stripped[index:])
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(payload, dict):
-            continue
-        if first_payload is None:
-            first_payload = payload
-        if isinstance(payload.get("candidates"), list):
-            return payload
-    return first_payload
+    try:
+        return extract_json(text, want=lambda payload: isinstance(payload.get("candidates"), list))
+    except StructuredOutputError:
+        return None
 
 
 def _refine_with_claude(
@@ -2195,11 +2326,30 @@ def _normalize_divergent_axis(item: dict[str, Any], *, fallback_domains: list[st
     text = " ".join(str(item.get(field, "")) for field in [*DIVERGENT_REQUIRED_FIELDS, *DIVERGENT_QUALITY_FIELDS])
     candidate_group = str(item.get("candidate_group", "")).strip().lower().replace("-", "_").replace(" ", "_")
     if candidate_group not in {"evidence_bound", "wild_engineering"}:
-        candidate_group = "evidence_bound"
+        candidate_group = _infer_candidate_group(item, [])
     normalized_item = {
         **item,
         "idea_archetype": _normalize_idea_archetype(item),
     }
+    if not _as_str(normalized_item.get("interface")).strip():
+        normalized_item["interface"] = f"interface_contract: {normalized_item.get('mechanism', 'candidate mechanism')}"
+    if not _as_str(normalized_item.get("nearest_pressure")).strip():
+        normalized_item["nearest_pressure"] = _as_str(
+            normalized_item.get("strongest_baseline", "strongest available local baseline")
+        ).strip()
+    if not _as_str(normalized_item.get("pilot")).strip():
+        normalized_item["pilot"] = _as_str(normalized_item.get("killer_experiment", "Run the smallest decisive comparison.")).strip()
+    if not _as_str(normalized_item.get("baselines")).strip():
+        normalized_item["baselines"] = _as_str(
+            normalized_item.get("strongest_baseline", "strongest baseline; ablation without proposed mechanism; simple heuristic baseline")
+        ).strip()
+    if not _as_str(normalized_item.get("metrics")).strip():
+        normalized_item["metrics"] = _infer_metrics(normalized_item)
+    if not _as_str(normalized_item.get("falsification")).strip():
+        normalized_item["falsification"] = _ensure_reject_prefix(
+            normalized_item.get("baseline_failure_mode", ""),
+            fallback="Reject if the strongest baseline matches the proposed mechanism under the same evidence and reset budget.",
+        )
     axis = {
         **normalized_item,
         "candidate_group": candidate_group,
@@ -2213,6 +2363,400 @@ def _normalize_divergent_axis(item: dict[str, Any], *, fallback_domains: list[st
         "status_boundary": "Gemini-divergent seed for user review only; no automatic promotion or paper claim is allowed.",
     }
     return _normalize_mechanism_axis(axis)
+
+
+def _ensure_reject_prefix(value: Any, *, fallback: str) -> str:
+    text = _as_str(value).strip()
+    if not text:
+        text = fallback
+    if text.lower().startswith("reject if"):
+        return text
+    return f"Reject if {text[0].lower() + text[1:] if text else fallback}"
+
+
+def _fill_if_short(axis: dict[str, Any], field: str, min_chars: int, value: str) -> None:
+    if len(_as_str(axis.get(field, "")).strip()) < min_chars:
+        axis[field] = value
+
+
+def _evidence_labels(evidence: list[dict[str, Any]], *, limit: int = 4) -> list[str]:
+    labels: list[str] = []
+    for record in _dedupe_sources(evidence, limit=limit):
+        title = _as_str(record.get("source_title") or record.get("source_note") or "local evidence").strip()
+        key = _as_str(record.get("zotero_key", "")).strip()
+        statement = _as_str(record.get("statement", "")).strip()
+        label = f"{title}"
+        if key:
+            label += f" ({key})"
+        if statement:
+            label += f": {statement[:180]}"
+        labels.append(label)
+    return labels
+
+
+def _evidence_context(evidence: list[dict[str, Any]]) -> str:
+    labels = _evidence_labels(evidence, limit=3)
+    return "; ".join(labels) if labels else "local newly_read_evidence"
+
+
+def _infer_candidate_group(axis: dict[str, Any], evidence: list[dict[str, Any]]) -> str:
+    token = _taxonomy_token(axis.get("candidate_group"))
+    if token in {"evidence_bound", "wild_engineering"}:
+        return token
+    text = _axis_text(axis)
+    speculative = len(_as_str(axis.get("speculative_jump", "")).strip())
+    if speculative >= 80 or any(marker in text for marker in ["breakthrough", "anti-roadmap", "new research line", "paradigm"]):
+        return "wild_engineering"
+    if _source_count(evidence) >= 2 or _as_str(axis.get("evidence_links", "")).strip():
+        return "evidence_bound"
+    return "evidence_bound"
+
+
+def _infer_claim_type(axis: dict[str, Any]) -> str:
+    return _infer_research_claim_type(axis)
+
+
+def _infer_contribution_shape(axis: dict[str, Any], claim_type: str) -> str:
+    shape = _taxonomy_token(axis.get("contribution_shape"))
+    if shape in GENERALIZABLE_SHAPES:
+        return shape
+    if claim_type == "evaluation_benchmark":
+        return "evaluation_protocol"
+    if claim_type == "data_curriculum":
+        return "dataset"
+    if claim_type == "sensing_observability":
+        return "failure_model"
+    if claim_type == "interface_boundary":
+        return "control_interface"
+    if claim_type in {"representation", "objective_optimization", "world_model_simulation"}:
+        return "algorithm"
+    if claim_type in {"embodiment_control_codesign", "continual_transfer", "safety_recovery"}:
+        return "system"
+    return "mechanism"
+
+
+def _infer_pipeline(axis: dict[str, Any]) -> str:
+    mechanism = _as_str(axis.get("mechanism", "the proposed mechanism")).strip()
+    experiment = _as_str(axis.get("killer_experiment", "a controlled pilot")).strip()
+    baseline = _as_str(axis.get("strongest_baseline", "the strongest baseline")).strip()
+    return (
+        "1. Select one local task episode and label the target failure mode. "
+        f"2. Implement a minimal interface for {mechanism}. "
+        f"3. Run {baseline} under the same observations, reset budget, and latency budget. "
+        "4. Add an ablation that removes only the proposed mechanism while preserving model capacity. "
+        f"5. Execute the killer experiment: {experiment}. "
+        "6. Report failure-conditioned metrics, mechanism ablations, and the reject-if condition before any broader robot run."
+    )
+
+
+def _infer_baseline_matrix(axis: dict[str, Any], evidence: list[dict[str, Any]]) -> str:
+    baseline = _as_str(axis.get("strongest_baseline", "strongest direct baseline")).strip()
+    evidence_text = _evidence_context(evidence)
+    return (
+        f"lower-bound baseline -> simple replay or rule heuristic -> must expose the raw pathology from {evidence_text}; "
+        f"strongest direct baseline -> {baseline} -> kills us if it matches success, latency, and failure-mode metrics; "
+        "simple heuristic baseline -> threshold, geometry, NBV/information-gain, or controller-only variant -> checks whether learning is unnecessary; "
+        "ablation baseline -> proposed system without the new mechanism/interface -> isolates mechanism value; "
+        "oracle or upper-bound baseline -> privileged labels, perfect state, or manually curated resets -> bounds what the mechanism could explain."
+    )
+
+
+def _infer_metrics(axis: dict[str, Any]) -> str:
+    experiment = _as_str(axis.get("killer_experiment", "")).strip()
+    falsification = _as_str(axis.get("falsification", "")).strip()
+    return (
+        "task success rate; failure-mode count; repeated failure rate; recovery or intervention count; "
+        "latency and smoothness; calibration or drift sensitivity; robustness under controlled perturbation; "
+        "mechanism ablation gap; baseline parity test"
+        + (f"; killer experiment readout: {experiment}" if experiment else "")
+        + (f"; falsification readout: {falsification}" if falsification else "")
+    )
+
+
+def _expand_candidate_fields(axis: dict[str, Any], evidence: list[dict[str, Any]], recent: int) -> dict[str, Any]:
+    """Deterministically expand a lightweight divergent hypothesis into a full seed axis."""
+    expanded = dict(axis)
+    evidence_text = _evidence_context(evidence)
+    problem = _as_str(expanded.get("problem", "the local robot-system bottleneck")).strip()
+    pathology = _as_str(expanded.get("engineering_pathology", problem)).strip()
+    mechanism = _as_str(expanded.get("mechanism", "the proposed mechanism")).strip()
+    baseline = _as_str(expanded.get("strongest_baseline", "the strongest direct baseline")).strip()
+    baseline_failure = _as_str(
+        expanded.get("baseline_failure_mode", "it should fail on the isolated mechanism-specific failure mode")
+    ).strip()
+    killer = _as_str(expanded.get("killer_experiment", "a matched ablation against the strongest baseline")).strip()
+    hypothesis = _as_str(expanded.get("hypothesis", f"{mechanism} will improve the isolated pathology.")).strip()
+    if len(baseline) < 20:
+        baseline = f"{baseline or 'the strongest direct baseline'} under matched observations, latency, reset budget, and data access"
+    if len(baseline_failure) < 50:
+        baseline_failure = f"{baseline_failure or 'the baseline should fail'} on the isolated failure mode rather than aggregate success."
+    if len(killer) < 50:
+        killer = f"{killer or 'Run a matched ablation'} against {baseline} with a no-mechanism ablation and failure-conditioned metrics."
+    if len(hypothesis) < 50:
+        hypothesis = f"{hypothesis or mechanism} should measurably improve the isolated pathology under the strongest-baseline comparison."
+
+    expanded["candidate_group"] = _infer_candidate_group(expanded, evidence)
+    claim_type = _infer_claim_type(expanded)
+    expanded["research_claim_type"] = claim_type
+    expanded["origin_type"] = _infer_origin_type(expanded, claim_type)
+    expanded["bottleneck_type"] = _infer_bottleneck_type(expanded)
+    expanded["evidence_mode"] = _infer_evidence_mode(expanded)
+    expanded["risk_class"] = _infer_risk_class(expanded, claim_type, expanded["origin_type"])
+    expanded["world_model_role"] = _infer_world_model_role(expanded)
+    expanded["portfolio_slot"] = _as_str(expanded.get("portfolio_slot", "")).strip() or _portfolio_slot(
+        claim_type, expanded["risk_class"]
+    )
+    expanded["contribution_shape"] = _infer_contribution_shape(expanded, claim_type)
+    expanded["idea_archetype"] = _normalize_idea_archetype(expanded) or "control_policy_mechanism"
+
+    if not _as_str(expanded.get("evidence_links", "")).strip():
+        expanded["evidence_links"] = evidence_text
+    if not _as_str(expanded.get("interface", "")).strip():
+        expanded["interface"] = f"interface_contract: expose a bounded state, token, critic, residual, or evaluation signal for {mechanism}."
+    _fill_if_short(
+        expanded,
+        "physical_failure_scene",
+        90,
+        (
+            "In a Franka or comparable bimanual robot episode, wrist camera occlusion, depth noise, contact slip, "
+            f"gripper force/torque drift, reset cost, or DLO/cable topology exposes this bottleneck: {problem} {pathology}"
+            if expanded["origin_type"] in {"physical_scene", "engineering_bottleneck"}
+            else (
+                "The concrete experimental deadlock is an evaluation, representation, assumption, objective, or metric blind spot: "
+                f"{problem} {pathology}. The pilot must isolate the latent variable, distribution shift, boundary, or unmodeled failure."
+            )
+        ),
+    )
+    _fill_if_short(
+        expanded,
+        "engineering_pathology",
+        80,
+        (
+            f"{pathology}. The bottleneck should be visible as contact, occlusion, calibration drift, latency, reset cost, "
+            "distribution shift, or evaluation blindness rather than a generic model-quality complaint."
+        ),
+    )
+    _fill_if_short(
+        expanded,
+        "interface_innovation",
+        80,
+        (
+            f"The interface innovation is to move {mechanism} into a bounded latent/token/action/critic state interface, "
+            "with an explicit gate or residual that changes the information flow rather than adding another module."
+        ),
+    )
+    _fill_if_short(
+        expanded,
+        "optimization_space",
+        70,
+        "Optimization happens in latent space, token space, action space, critic space, or evaluation space only where the failure is observed.",
+    )
+    _fill_if_short(
+        expanded,
+        "loss_placement",
+        55,
+        "The loss is placed on the mechanism readout or critic-side signal, not on an unconstrained end-to-end objective.",
+    )
+    _fill_if_short(
+        expanded,
+        "decoder_boundary",
+        55,
+        "The decoder boundary is kept explicit: pre-decoder and post-decoder effects are separated by ablation.",
+    )
+    _fill_if_short(
+        expanded,
+        "manifold_safety",
+        55,
+        "A bounded regularizer, dead zone, or projection prevents off-manifold latent, token, or action updates.",
+    )
+    _fill_if_short(
+        expanded,
+        "non_obvious_claim",
+        80,
+        (
+            f"Not simply A+B: instead of adding {mechanism} as a wrapper, the claim is that the interface boundary "
+            f"changes why {baseline} fails on {baseline_failure}."
+        ),
+    )
+    _fill_if_short(
+        expanded,
+        "naive_combination_version",
+        60,
+        f"Naive version: simply add a module for {mechanism} on top of the baseline and hope the extra signal fixes {pathology}.",
+    )
+    _fill_if_short(
+        expanded,
+        "strongest_baseline_kill_path",
+        80,
+        f"The strongest baseline, {baseline}, kills the idea if it can match or outperform the proposal on the same evidence, latency, reset, and ablation budget.",
+    )
+    _fill_if_short(
+        expanded,
+        "post_kill_mutation",
+        80,
+        f"Mutation after the baseline kill: instead shift the boundary, representation, feedback loop, loss, or gate so the test targets {baseline_failure}.",
+    )
+    _fill_if_short(
+        expanded,
+        "anti_combination_test",
+        80,
+        f"A skeptical reviewer should compare against {baseline} and an ablation without the interface; survival requires the mechanism-specific metric to improve because of {mechanism}.",
+    )
+    _fill_if_short(
+        expanded,
+        "top_tier_rationale",
+        80,
+        f"The contribution could survive review only if {killer} shows a mechanism-level effect, not a reliability patch, and if nearby work has not already solved it.",
+    )
+    _fill_if_short(
+        expanded,
+        "engineering_loop",
+        60,
+        "The affected loop is sense -> infer state or risk -> gate/control/evaluate -> observe failure-conditioned feedback -> update the next decision.",
+    )
+    _fill_if_short(expanded, "why_now", 60, f"Recent local evidence creates pressure from {evidence_text}; recent={recent}.")
+    _fill_if_short(expanded, "strongest_baseline", 20, baseline)
+    _fill_if_short(expanded, "baseline_failure_mode", 50, f"{baseline} should fail when {baseline_failure} is isolated under matched observations.")
+    _fill_if_short(expanded, "killer_experiment", 50, killer)
+    _fill_if_short(expanded, "novelty_risk", 60, f"Closest prior risk is that {baseline} or a nearby local source already implements the same interface.")
+    _fill_if_short(
+        expanded,
+        "reviewer_kill_shot",
+        60,
+        f"A reviewer may reject this if {baseline} already reaches comparable metrics or if {killer} cannot isolate the proposed mechanism.",
+    )
+    _fill_if_short(
+        expanded,
+        "rescue_mutation",
+        60,
+        f"If killed, narrow the claim to the specific failure mode in {pathology} and change only the interface or metric being tested.",
+    )
+    _fill_if_short(expanded, "claim_compression", 50, hypothesis)
+    _fill_if_short(
+        expanded,
+        "online_or_offline_mode",
+        40,
+        "offline_replay or benchmark first; move online only after the mechanism survives baseline and ablation pressure.",
+    )
+    _fill_if_short(
+        expanded,
+        "minimum_no_hardware_pilot",
+        60,
+        f"Use local logs, public data, toy dynamics, or paper-derived examples to run {killer} before any new real-robot trial.",
+    )
+    _fill_if_short(
+        expanded,
+        "baseline_kill_table",
+        70,
+        f"{baseline} -> kill if matched metrics -> survive only if mechanism ablation shows a gap; simple heuristic -> kill if equal -> survive if failure-mode metric improves; oracle -> upper bound -> bound remaining headroom.",
+    )
+    _fill_if_short(
+        expanded,
+        "what_would_make_this_not_a_paper",
+        55,
+        "Not a paper if the gain is only capacity, data volume, tuning, or an engineering wrapper without a discriminating mechanism.",
+    )
+    _fill_if_short(
+        expanded,
+        "reviewer_pre_mortem",
+        60,
+        f"Premortem: the idea dies if {baseline} explains the gains, if evidence from {evidence_text} is too indirect, or if the metric does not separate mechanism from patch.",
+    )
+    _fill_if_short(
+        expanded,
+        "falsification_discriminates_mechanism",
+        80,
+        f"The falsification must distinguish mechanism from patch by comparing {baseline}, a no-mechanism ablation, and the proposed interface on the same failure-conditioned metric.",
+    )
+    _fill_if_short(
+        expanded,
+        "lab_fit",
+        70,
+        "Use local lab advantages when relevant: Franka-quality arms, bimanual manipulation, wrist cameras, FlexiTac/tactile sensing, DLO/cable tasks, and offline logs; mark weak if none apply.",
+    )
+    _fill_if_short(
+        expanded,
+        "hardware_assumptions",
+        50,
+        "Robot: Franka or comparable arm; sensors: wrist camera plus optional FlexiTac/force-torque; compute: offline replay first; dataset/logs: local or public substitutes.",
+    )
+    _fill_if_short(
+        expanded,
+        "negative_claim_boundary",
+        80,
+        "Does not claim confirmed novelty, end-to-end training superiority, new hardware availability, or general robot autonomy before the killer experiment survives.",
+    )
+    _fill_if_short(
+        expanded,
+        "version_evolution_story",
+        100,
+        f"v0 naive add-on -> dies when {baseline} matches it -> v1 mutated interface shifts representation/boundary/feedback -> v2 keeps only the measurable failure-conditioned claim.",
+    )
+    _fill_if_short(
+        expanded,
+        "core_insight",
+        70,
+        f"The core insight is to test {mechanism} at the interface where {pathology} appears, before broad policy improvement claims.",
+    )
+    _fill_if_short(expanded, "pipeline_steps", 120, _infer_pipeline(expanded))
+    _fill_if_short(
+        expanded,
+        "defense_patches",
+        80,
+        "Use bounded deltas, zero initialization, asymmetric gating, dead-zone penalties, fallback controller, manifold tests, and no-mechanism ablations where applicable.",
+    )
+    _fill_if_short(expanded, "baseline_matrix", 120, _infer_baseline_matrix(expanded, evidence))
+    _fill_if_short(expanded, "metric_suite", 80, _infer_metrics(expanded))
+    _fill_if_short(
+        expanded,
+        "risk_assumptions",
+        100,
+        f"Assumption 1: evidence from {evidence_text} transfers to the task; if false, narrow the task. Assumption 2: {baseline} leaves a measurable gap; if false, rewrite. Assumption 3: labels/logs can expose the failure; if false, build the metric first.",
+    )
+    _fill_if_short(
+        expanded,
+        "competition_map",
+        80,
+        f"Nearby work classes include {baseline}, simple heuristics, direct policy tuning, and oracle/privileged-state controls; the claimed gap is the mechanism boundary, not topic coverage.",
+    )
+    _fill_if_short(
+        expanded,
+        "two_week_sprint",
+        80,
+        "Day 1 define labels and baselines; day 3 run no-mechanism ablation; week 1 execute killer experiment; week 2 stress-test failures and decide rewrite or promotion.",
+    )
+    _fill_if_short(
+        expanded,
+        "promotion_reason",
+        60,
+        "Promote only if the killer experiment separates the mechanism from the strongest baseline and the local evidence remains specific.",
+    )
+    _fill_if_short(
+        expanded,
+        "rescue_signal",
+        60,
+        f"Even if rejected, preserve the pathology ({pathology}), strongest baseline ({baseline}), and experiment ({killer}).",
+    )
+    _fill_if_short(expanded, "nearest_pressure", 40, f"{baseline}; local evidence pressure: {evidence_text}")
+    _fill_if_short(expanded, "pilot", 50, killer)
+    _fill_if_short(
+        expanded,
+        "baselines",
+        50,
+        f"{baseline}; ablation without proposed mechanism; simple rule-based or geometric heuristic baseline; oracle or privileged-state upper bound.",
+    )
+    baselines_text = _as_str(expanded.get("baselines", "")).strip()
+    if "baseline" not in baselines_text.lower() and ";" not in baselines_text:
+        expanded["baselines"] = (
+            f"strongest baseline: {baseline}; ablation without proposed mechanism; "
+            "simple rule-based or geometric heuristic baseline; oracle or privileged-state upper bound."
+        )
+    _fill_if_short(expanded, "metrics", 50, _infer_metrics(expanded))
+    expanded["falsification"] = _ensure_reject_prefix(
+        expanded.get("falsification", ""),
+        fallback=f"Reject if {baseline} matches the proposal and the no-mechanism ablation removes no meaningful gap.",
+    )
+    return _normalize_mechanism_axis(expanded)
 
 
 def _greenhouse_label(issues: list[str], promoted: bool, parked_reason: str = "") -> str:
@@ -2474,6 +3018,11 @@ def _sharpness_score(axis: dict[str, Any]) -> int:
         score += 4
     if len(str(axis.get("anti_combination_test", "")).strip()) >= 80 and len(str(axis.get("post_kill_mutation", "")).strip()) >= 80:
         score += 3
+    if axis.get("generation_rule") == "gemini_divergent" and not str(axis.get("pipeline_steps", "")).strip():
+        if len(str(axis.get("hypothesis", "")).strip()) >= 50 and len(str(axis.get("killer_experiment", "")).strip()) >= 40:
+            score += 2
+        if len(str(axis.get("baseline_failure_mode", "")).strip()) >= 50:
+            score += 2
     return min(20, score)
 
 
@@ -2495,6 +3044,11 @@ def _evidence_execution_score(axis: dict[str, Any], evidence: list[dict[str, Any
         score += 1
     if len(str(axis.get("rescue_mutation", "")).strip()) >= 60 or len(str(axis.get("post_kill_mutation", "")).strip()) >= 80:
         score += 3
+    if axis.get("generation_rule") == "gemini_divergent" and not str(axis.get("pipeline_steps", "")).strip():
+        if len(str(axis.get("baseline_failure_mode", "")).strip()) >= 50:
+            score += 2
+        if len(str(axis.get("falsification", "")).strip()) >= 40:
+            score += 2
     return min(20, score)
 
 
@@ -2654,27 +3208,45 @@ def _apply_research_quality(
         "evidence_fit": _evidence_component(evidence, recent, axis),
     }
     text = " ".join(str(axis.get(field, "")) for field in [*DIVERGENT_REQUIRED_FIELDS, *DIVERGENT_QUALITY_FIELDS]).lower()
+    lightweight_core = axis.get("generation_rule") == "gemini_divergent" and not str(axis.get("pipeline_steps", "")).strip()
     if any(marker in text for marker in GENERIC_COMBINATION_MARKERS) and components["mechanism_nonobviousness"] < 10:
         components["mechanism_nonobviousness"] = max(0, components["mechanism_nonobviousness"] - 4)
-    if len(str(axis.get("physical_failure_scene", "")).strip()) < 90:
+    if lightweight_core:
+        core_pathology = f"{axis.get('problem', '')} {axis.get('engineering_pathology', '')}"
+        if len(core_pathology.strip()) < 90:
+            components["engineering_pathology"] = max(0, components["engineering_pathology"] - 4)
+    elif len(str(axis.get("physical_failure_scene", "")).strip()) < 90:
         components["engineering_pathology"] = max(0, components["engineering_pathology"] - 6)
-    if len(str(axis.get("interface_innovation", "")).strip()) < 70:
+    if lightweight_core:
+        core_mechanism = f"{axis.get('mechanism', '')} {axis.get('non_obvious_claim', '')}"
+        if len(core_mechanism.strip()) < 100:
+            components["mechanism_nonobviousness"] = max(0, components["mechanism_nonobviousness"] - 3)
+    elif len(str(axis.get("interface_innovation", "")).strip()) < 70:
         components["mechanism_nonobviousness"] = max(0, components["mechanism_nonobviousness"] - 5)
-    if len(
+    if not lightweight_core and len(
         " ".join(
             str(axis.get(field, "")).strip()
             for field in ["optimization_space", "loss_placement", "decoder_boundary", "manifold_safety"]
         )
     ) < 120:
         components["mechanism_nonobviousness"] = max(0, components["mechanism_nonobviousness"] - 4)
-    if len(str(axis.get("reviewer_pre_mortem", "")).strip()) < 60:
+    if lightweight_core:
+        if len(f"{axis.get('strongest_baseline', '')} {axis.get('baseline_failure_mode', '')}".strip()) < 80:
+            components["baseline_killer"] = max(0, components["baseline_killer"] - 2)
+    elif len(str(axis.get("reviewer_pre_mortem", "")).strip()) < 60:
         components["baseline_killer"] = max(0, components["baseline_killer"] - 2)
-    if len(str(axis.get("falsification_discriminates_mechanism", "")).strip()) < 80:
+    if lightweight_core:
+        if len(f"{axis.get('killer_experiment', '')} {axis.get('falsification', '')}".strip()) < 80:
+            components["baseline_killer"] = max(0, components["baseline_killer"] - 3)
+    elif len(str(axis.get("falsification_discriminates_mechanism", "")).strip()) < 80:
         components["baseline_killer"] = max(0, components["baseline_killer"] - 4)
     lab_fit_text = str(axis.get("lab_fit", "")).lower()
-    if not any(marker in lab_fit_text for marker in ["franka", "flextac", "wrist", "camera", "bimanual", "dlo", "cable", "lab"]):
+    if not lightweight_core and not any(marker in lab_fit_text for marker in ["franka", "flextac", "wrist", "camera", "bimanual", "dlo", "cable", "lab"]):
         components["experimentability"] = max(0, components["experimentability"] - 3)
-    if len(str(axis.get("minimum_no_hardware_pilot", "")).strip()) < 50:
+    if lightweight_core:
+        if len(str(axis.get("killer_experiment", "")).strip()) < 50:
+            components["experimentability"] = max(0, components["experimentability"] - 2)
+    elif len(str(axis.get("minimum_no_hardware_pilot", "")).strip()) < 50:
         components["experimentability"] = max(0, components["experimentability"] - 2)
     support_score = min(100, evidence_score)
     originality_score = min(
@@ -2740,12 +3312,13 @@ def _refine_with_gemini_divergent(
     focus_records = [record for record in records if str(record.get("zotero_key", "")).upper() in focus_keys]
     if _source_count(focus_records) < 2:
         return [], f"failed:gemini_divergent_too_few_focus_sources:{_source_count(focus_records)}", {}
+    generation_min, _generation_max = _divergent_lightweight_target_range(max(1, raw_limit))
     prompt = _render_divergent_prompt(
         candidates,
         records=records,
         focus_keys=focus_keys,
         limit=max(1, raw_limit),
-        min_candidates=min_raw_candidates,
+        min_candidates=generation_min,
         free_divergence=free_divergence,
         run_date=run_date,
     )
@@ -2766,15 +3339,15 @@ def _refine_with_gemini_divergent(
         return [], f"failed:gemini_divergent_invalid_json{model_suffix}", generator_meta
     generator_meta["rejected_drafts_summary"] = _compact_rejected_drafts(parsed.get("rejected_drafts_summary"))
     raw_items = [item for item in parsed["candidates"] if isinstance(item, dict)]
-    under_generated = len(raw_items) < min_raw_candidates
+    under_generated = len(raw_items) < generation_min
     retry_status = ""
-    if under_generated and len(raw_items) > 0:
+    if under_generated:
         retry_prompt = _render_divergent_prompt(
             candidates,
             records=records,
             focus_keys=focus_keys,
             limit=max(1, raw_limit),
-            min_candidates=min_raw_candidates,
+            min_candidates=generation_min,
             free_divergence=free_divergence,
             run_date=run_date,
             retry_context=(
@@ -2845,6 +3418,23 @@ def _refine_with_gemini_divergent(
             scored.append((evidence_score, axis, evidence, recent))
         return scored
 
+    def expand_scored_items(
+        items: list[tuple[int, dict[str, Any], list[dict[str, Any]], int]]
+    ) -> list[tuple[int, dict[str, Any], list[dict[str, Any]], int]]:
+        survivor_limit = max(1, min(limit, DIVERGENT_EXPANDED_SURVIVOR_LIMIT, len(items)))
+        expanded_items: list[tuple[int, dict[str, Any], list[dict[str, Any]], int]] = []
+        for evidence_score, axis, evidence, recent in sorted(items, key=_quality_sort_key, reverse=True)[:survivor_limit]:
+            expanded_axis = _expand_candidate_fields(axis, evidence, recent)
+            expanded_axis = _apply_research_quality(
+                expanded_axis,
+                evidence,
+                recent,
+                evidence_score=evidence_score,
+                novelty_corpus=novelty_corpus,
+            )
+            expanded_items.append((evidence_score, expanded_axis, evidence, recent))
+        return expanded_items
+
     refined = score_raw_items(raw_items)
     top_tier_count = sum(
         1 for _, axis, _, _ in refined if str(axis.get("quality_tier", "")) in QUALITY_PROMOTION_TIERS
@@ -2899,12 +3489,15 @@ def _refine_with_gemini_divergent(
                 retry_status += f":quality_rescue_invalid_json{rescue_suffix}"
 
     refined = score_raw_items(raw_items)
+    refined = expand_scored_items(refined)
     suffix = retry_status
     if under_generated and not retry_status:
-        suffix = f":under_generated_warning:raw={len(raw_items)}:min={min_raw_candidates}"
-    if len(raw_items) < min_raw_candidates:
-        suffix += f":source_filter_under_min_warning:survivors={len(raw_items)}:min={min_raw_candidates}"
-    generator_meta["surviving_candidate_count"] = len(raw_items)
+        suffix = f":under_generated_warning:raw={len(raw_items)}:min={generation_min}"
+    if len(raw_items) < generation_min:
+        suffix += f":source_filter_under_min_warning:survivors={len(raw_items)}:min={generation_min}"
+    generator_meta["raw_lightweight_candidate_count"] = len(raw_items)
+    generator_meta["expanded_candidate_count"] = len(refined)
+    generator_meta["surviving_candidate_count"] = len(refined)
     generator_meta["source_rejected_draft_count"] = len(generator_meta.get("rejected_drafts_summary", []))
     return sorted(refined, key=_quality_sort_key, reverse=True), f"gemini-divergent:success{model_suffix}{suffix}", generator_meta
 

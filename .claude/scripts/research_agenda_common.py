@@ -59,6 +59,10 @@ DOMAIN_KEYWORDS = {
     "benchmark": ["benchmark", "evaluation", "metric", "dataset", "评测", "指标", "数据集"],
     "failure": ["failure", "risk", "limitation", "uncertain", "失败", "限制", "风险"],
 }
+DOMAIN_NEGATION_BEFORE_RE = re.compile(
+    r"(?:\b(?:no|not|without|lacks?|lacking|missing|does\s+not|did\s+not|do\s+not|not\s+evaluated|not\s+validated|not\s+cover(?:ed)?|not\s+involv(?:e|ed|es))\b[\w\s,;:()\-/]{0,80}|(?:没做|没有|未验证|未覆盖|不涉及|不包含|不包括|不处理|不做|无)[^。；，,.]{0,40})$",
+    flags=re.IGNORECASE,
+)
 
 
 def agenda_path(*parts: str) -> Path:
@@ -160,9 +164,18 @@ def detect_domains(text: str, tags: list[str]) -> list[str]:
         if tag in {"DLO", "tactile", "bimanual", "diffusion", "sim-to-real", "planning", "imitation"}:
             domains.add(tag)
     for domain, keywords in DOMAIN_KEYWORDS.items():
-        if any(keyword.lower() in haystack for keyword in keywords):
+        if any(_has_non_negated_keyword(haystack, keyword.lower()) for keyword in keywords):
             domains.add(domain)
     return sorted(domains)
+
+
+def _has_non_negated_keyword(haystack: str, keyword: str) -> bool:
+    for match in re.finditer(re.escape(keyword), haystack, flags=re.IGNORECASE):
+        before = haystack[max(0, match.start() - 120) : match.start()]
+        if DOMAIN_NEGATION_BEFORE_RE.search(before):
+            continue
+        return True
+    return False
 
 
 def evidence_key(record: dict[str, Any]) -> str:

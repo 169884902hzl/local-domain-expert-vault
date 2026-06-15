@@ -96,10 +96,31 @@ def _final_candidate_ids(run_date: str) -> set[str]:
     selected = read_json(artifact_dir(run_date) / "selected-candidates.json").get("selected", [])
     mutations_path = artifact_dir(run_date) / "gemini-mutations.json"
     mutations = read_json(mutations_path).get("mutations", []) if mutations_path.exists() else []
-    mutated_parent_ids = {str(item.get("parent_candidate_id")) for item in mutations if isinstance(item, dict)}
-    ids = {candidate_id(item) for item in selected if isinstance(item, dict) and candidate_id(item) not in mutated_parent_ids}
-    ids.update(candidate_id(item) for item in mutations if isinstance(item, dict))
+    mutated_parent_ids = {str(item.get("parent_candidate_id") or "").strip() for item in mutations if isinstance(item, dict) and str(item.get("parent_candidate_id") or "").strip()}
+    ids: set[str] = set()
+    for item in selected:
+        if not isinstance(item, dict):
+            continue
+        cid = _stored_or_fallback_candidate_id(item)
+        if cid not in mutated_parent_ids:
+            ids.add(cid)
+    ids.update(_stored_or_fallback_candidate_id(item) for item in mutations if isinstance(item, dict))
     return ids
+
+
+def _stored_or_fallback_candidate_id(item: dict[str, Any]) -> str:
+    stored = str(item.get("candidate_id") or "").strip()
+    return stored or candidate_id(item)
+
+
+def _missing_stored_candidate_id_errors(label: str, items: list[Any]) -> list[str]:
+    errors: list[str] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        if not str(item.get("candidate_id") or "").strip():
+            errors.append(f"candidate_alignment:{label}:stored_candidate_id_missing:{candidate_id(item)}")
+    return errors
 
 
 def _final_candidates(run_date: str) -> list[dict[str, Any]]:
@@ -154,8 +175,12 @@ def _validate_candidate_alignment(run_date: str) -> list[str]:
     required = ["selected-candidates.json", "novelty-scan.json", "codex-execution-review.json", "survival-decision.json"]
     if any(not (artifacts / name).exists() for name in required):
         return []
+    selected = read_json(artifacts / "selected-candidates.json").get("selected", [])
+    mutations_path = artifacts / "gemini-mutations.json"
+    mutations = read_json(mutations_path).get("mutations", []) if mutations_path.exists() else []
     final_ids = _final_candidate_ids(run_date)
-    errors: list[str] = []
+    errors: list[str] = _missing_stored_candidate_id_errors("selected_candidates", selected)
+    errors.extend(_missing_stored_candidate_id_errors("gemini_mutations", mutations))
     novelty_ids = {str(item.get("candidate_id")) for item in read_json(artifacts / "novelty-scan.json").get("scans", []) if isinstance(item, dict)}
     codex_ids = {str(item.get("candidate_id")) for item in read_json(artifacts / "codex-execution-review.json").get("reviews", []) if isinstance(item, dict)}
     survival_ids = {str(item.get("candidate_id")) for item in read_json(artifacts / "survival-decision.json").get("decisions", []) if isinstance(item, dict)}

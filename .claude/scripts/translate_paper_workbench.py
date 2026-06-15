@@ -20,6 +20,7 @@ from typing import Any
 
 from gemini_cli_adapter import DEFAULT_GEMINI_MODEL, DEFAULT_GEMINI_TIMEOUT_SEC, run_gemini_cli
 from kb_common import extract_frontmatter, parse_frontmatter_map, safe_print, safe_write, vault_path
+from llm_structured import StructuredOutputError, extract_json
 
 
 MAX_TRANSLATION_CONCURRENCY = 5
@@ -76,8 +77,8 @@ def fetch_zotero_fulltext(zotero_key: str, *, timeout: int = 20) -> tuple[str, s
     try:
         req = urllib.request.Request(url, headers={"Accept": "application/json"})
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-    except (OSError, urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+            data = extract_json(resp.read().decode("utf-8"), want=lambda payload: isinstance(payload, dict))
+    except (OSError, urllib.error.URLError, TimeoutError, StructuredOutputError) as exc:
         return "", f"unavailable:{type(exc).__name__}:{exc}"
     content = str(data.get("content", "") or "").strip() if isinstance(data, dict) else ""
     if not content:

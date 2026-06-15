@@ -818,7 +818,7 @@ def main() -> int:
                 semantic_scholar_mode=args.semantic_scholar_mode,
             )
         )
-    payload_status = "partial_empty_selection"
+    payload_status = "success_empty_selection"
     if scans:
         payload_status = "completed" if any(item.get("verification_scope") != "local_only" for item in scans) else "completed_local_only"
     payload = {
@@ -832,7 +832,7 @@ def main() -> int:
     }
     write_run_artifact(args.run_date, "novelty-scan.json", payload, state="novelty_checked", dry_run=args.dry_run)
     safe_print(f"NOVELTY_SCAN: status={payload['status']} scans={len(scans)}")
-    return 0 if scans else 2
+    return 0
 
 
 if __name__ == "__main__":

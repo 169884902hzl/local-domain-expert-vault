@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from pathlib import Path
 from typing import Any
 
 
@@ -35,11 +36,11 @@ def _resolve_gemini_path() -> str:
     if os.name == "nt":
         candidates.extend(
             [
-                str(Path)
-                for Path in [
-                    os.path.expandvars(r"%APPDATA%\npm\gemini.cmd"),
-                    os.path.expandvars(r"%ProgramFiles%\nodejs\gemini.cmd"),
-                    r"C:\nvm4w\nodejs\gemini.cmd",
+                str(path)
+                for path in [
+                    Path(os.path.expandvars(r"%APPDATA%\npm\gemini.cmd")),
+                    Path(os.path.expandvars(r"%ProgramFiles%\nodejs\gemini.cmd")),
+                    Path(r"C:\nvm4w\nodejs\gemini.cmd"),
                 ]
             ]
         )

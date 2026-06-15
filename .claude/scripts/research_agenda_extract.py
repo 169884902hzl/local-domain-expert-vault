@@ -123,6 +123,13 @@ def _clean(value: str) -> str:
     return " ".join(value.strip().strip('"').split())
 
 
+def _frontmatter_zotero_keys(fields: dict[str, str]) -> set[str]:
+    keys = {strip_quotes(fields.get("zotero_key", "")).upper()}
+    for alias_field in ("zotero_aliases", "zotero_keys"):
+        keys.update(item.upper() for item in frontmatter_list(fields, alias_field))
+    return {key for key in keys if key}
+
+
 def _structured_fields(body: str, *, include_decorated: bool = True) -> dict[str, str]:
     fields: dict[str, str] = {}
     pattern = DECORATED_STRUCTURED_FIELD_RE if include_decorated else LEGACY_STRUCTURED_FIELD_RE
@@ -637,21 +644,24 @@ def extract_from_note(path: Path, *, run_date: str, include_decorated_fields: bo
     return records
 
 
-def _selected_notes(*, all_notes: bool, zotero_keys: list[str]) -> tuple[list[Path], list[str]]:
+def _selected_notes(*, all_notes: bool, zotero_keys: list[str]) -> tuple[list[tuple[Path, str | None]], list[str]]:
     missing: list[str] = []
-    selected: list[Path] = []
-    key_filter = {key.upper() for key in zotero_keys}
+    selected: list[tuple[Path, str | None]] = []
+    key_order = [key.upper() for key in zotero_keys]
+    key_filter = set(key_order)
     found_keys: set[str] = set()
     for path in iter_topic_notes():
         fields, _ = read_frontmatter(path)
-        key = strip_quotes(fields.get("zotero_key", "")).upper()
         if all_notes:
             if note_is_done_literature(path):
-                selected.append(path)
-        elif key in key_filter:
-            found_keys.add(key)
+                selected.append((path, None))
+            continue
+        note_keys = _frontmatter_zotero_keys(fields)
+        matches = [key for key in key_order if key in note_keys]
+        if matches:
+            found_keys.update(matches)
             if note_is_done_literature(path):
-                selected.append(path)
+                selected.append((path, matches[0]))
     if key_filter:
         missing = sorted(key_filter - found_keys)
     return selected, missing
@@ -700,8 +710,15 @@ def extract_records(*, all_notes: bool, zotero_keys: list[str], run_date: str) -
     selected, missing = _selected_notes(all_notes=all_notes, zotero_keys=zotero_keys)
     records: list[dict[str, Any]] = []
     include_decorated = not all_notes
-    for path in selected:
-        records.extend(extract_from_note(path, run_date=run_date, include_decorated_fields=include_decorated))
+    for path, requested_key in selected:
+        note_records = extract_from_note(path, run_date=run_date, include_decorated_fields=include_decorated)
+        if requested_key:
+            for record in note_records:
+                canonical_key = str(record.get("zotero_key", ""))
+                if canonical_key and canonical_key.upper() != requested_key:
+                    record["canonical_zotero_key"] = canonical_key
+                record["zotero_key"] = requested_key
+        records.extend(note_records)
     return records, missing
 
 

@@ -12,7 +12,7 @@ python .claude/scripts/audit_focus_tracks.py --track $ARGUMENTS --json
 For RL Token, also check local retrieval:
 
 ```powershell
-python .claude/scripts/kb_search.py "RL Token VLA online RL" --limit 12
+python .claude/scripts/kb_search.py "RL Token VLA online RL" --semantic --limit 12
 ```
 
 Status language:

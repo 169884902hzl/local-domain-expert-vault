@@ -6,7 +6,7 @@
   "properties": {
     "schema_version": {"type": "string", "const": "novelty_scan.v1"},
     "run_date": {"type": "string"},
-    "status": {"type": "string", "enum": ["completed", "completed_local_only", "partial_empty_selection"]},
+    "status": {"type": "string", "enum": ["completed", "completed_local_only", "success_empty_selection", "partial_empty_selection"]},
     "scans": {
       "type": "array",
       "items": {

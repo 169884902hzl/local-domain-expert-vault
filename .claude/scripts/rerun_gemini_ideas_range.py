@@ -99,7 +99,12 @@ def _candidate_count(payload: dict[str, Any]) -> int:
     return 0
 
 
-def _extract_candidate_list(payload: dict[str, Any]) -> list[dict[str, Any]]:
+def _extract_candidate_list(payload: dict[str, Any] | str) -> list[dict[str, Any]]:
+    if isinstance(payload, str):
+        parsed = _extract_json_object(payload)
+        if not isinstance(parsed, dict):
+            return []
+        payload = parsed
     for key in ["raw_gemini_candidates", "raw_candidates", "candidates"]:
         value = payload.get(key)
         if isinstance(value, list):

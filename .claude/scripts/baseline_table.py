@@ -276,7 +276,7 @@ def load_baseline_tables(run_date: str) -> dict[str, dict[str, Any]]:
     if not path.exists():
         return {}
     payload = read_json(path)
-    if payload.get("schema_version") == "baseline_table.v1" and payload.get("candidate_id"):
+    if payload.get("schema_version") == "baseline_table.v1" and payload.get("candidate_id") != "__multi__":
         return {str(payload.get("candidate_id")): payload}
     return {str(item.get("candidate_id")): item for item in payload.get("tables", []) if isinstance(item, dict)}
 

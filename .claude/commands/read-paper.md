@@ -62,7 +62,9 @@ Strict Evidence Ledger contract:
   `section`, `table`, `figure`, `appendix`, `result_row`, `snippet`, `abstract`, `note_only`
 - Required coverage:
   at least one row for `problem`, `contribution` or `method`, `experiment` or `result` (or explicit `not_evidenced`), `limitation`, and `baseline` (or explicit `not_evidenced`).
+- Baseline coverage is machine-checked by the `claim_type` cell. At least one Evidence Ledger row must use `claim_type` exactly `baseline` or `strongest_baseline`; mentioning baselines inside a `result` or `experiment` row is not enough.
 - Exact paper numbers require page/section/table/figure/result_row anchors. Prefer table/result_row anchors for numeric result claims when the paper provides them.
+- Every sentence or bullet outside the Evidence Ledger that contains a numeric result, percentage, score, baseline comparison, metric, ablation value, dataset count, frame count, or error value must cite an existing Evidence Ledger claim_id in the same sentence, for example `[C7]` or `(C7)`. Do not write bare phrases such as `见C7`; use bracketed or parenthesized claim IDs.
 - Key claims in Problem, Contributions, Method, Experiments, Limitations, Baseline, and Transfer must not use `abstract` as a strong anchor. Use a concrete section/table/figure/appendix/snippet/result_row anchor, or downgrade to `abstract_only` with `screening_only`.
 - If a value is visually estimated from a figure, use `evidence_class: figure_approximation`, `anchor_type: figure`, a concrete figure/page anchor, and `downstream_use: requires_human_check`; never present it as exact.
 - If a machine-extracted row is not manually confirmed, use `evidence_class: result_row_unconfirmed`, `anchor_type: result_row`, and `downstream_use: requires_human_check`.
@@ -75,13 +77,17 @@ Strict Idea Fuel contract:
 - Use packets `IF-1`, `IF-2`, and `IF-3` when the paper has enough material; at minimum `IF-1` must exist.
 - Each packet must include all fields:
   Hypothesis / research opening; Evidence anchor; Evidence class; Engineering pathology; Hidden assumption; Fragile interface; Failure mode; Strongest baseline; Why this baseline is strongest; Paper win condition; Idea kill condition; DLO replacement baseline; Transfer distance to DLO; Why transfer may fail; Negative transfer risk; Minimum no-hardware micro-test; Downstream review target.
+- Each required IF packet field must be a separate `- Field name:` bullet. Do not merge labels, such as `Paper win condition and idea kill condition`; the parser treats merged labels as missing fields.
 - `Evidence anchor` must be existing Evidence Ledger `claim_id` values or exactly `not_evidenced`.
+- `Strongest baseline` must name a concrete comparator or a concrete missing comparator; do not write only `not_evidenced`. If the paper does not report the comparator, write the comparator that would be needed and state that it is missing.
 - `Downstream review target` must state what DeepSeek should attack and what Codex should verify.
 - Treat all Idea Fuel packets as `screening_only=true` and `requires_human_check=true`; never use them as accepted paper evidence.
 
 No-hardware Micro-test hard rule:
 - Must explicitly state: no robot, no real scene, no new data collection.
 - Must not require robot arm, gripper, cabinet, rope/cable hardware, tactile sensor, depth camera, motion capture, physical reset, teleoperation, human data collection, new video capture, real-world deployment, real cabinet/rope/cloth evaluation, or any physical hardware.
+- Inside micro-test field values, avoid the English word `hardware`; use `reported platform specification`, `runtime setting`, or `measurement setup` instead when auditing paper-reported compute or latency details.
+- Do not write non-negated phrases such as `independent of new data collection`; write `independent of newly collected data` instead.
 - Allowed tests only:
   paper tables/figures/results; public code/repo cited by paper; public dataset/simulator already used by paper; existing videos/images from paper/public dataset; synthetic toy arrays/graphs/trajectories; static metric calculation; pseudo-code or logic check.
 - Must include: artifact, input, deterministic 3-6 step protocol, metric, threshold, pass condition, fail/kill condition, compute/data cap, and no-hardware confirmation.
@@ -130,6 +136,7 @@ IF packet safety rules:
 - Never write combined evidence classes such as `pdf_verified + table_verified`, `pdf_verified/table_verified`, or any other combined evidence class.
 - In each `Protocol`, write 3-6 numbered steps on separate lines. Do not place all steps on one semicolon-separated line.
 - In no-hardware micro-test text, use the exact English confirmation `no robot; no real scene; no new data collection`; avoid Chinese hardware words such as `机器人`, `实机`, `机械臂`, `真实场景`.
+- Use `no new data collection` only as an explicit negation. In `Input`, `Artifact`, or `Compute/data cap` fields, prefer `newly collected data` when describing the absence of fresh data.
 
 ### IF-1
 - Hypothesis / research opening:

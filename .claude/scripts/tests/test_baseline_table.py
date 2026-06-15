@@ -35,6 +35,12 @@ class BaselineTableTest(V03TempAgendaTest):
         table = load_baseline_tables(RUN_DATE)["cand-alpha"]
         self.assertFalse(baseline_allows_active_seed(table))
 
+    def test_multi_candidate_wrapper_loads_per_candidate_tables(self) -> None:
+        self.write_multi_baseline_table(candidate_ids=("cand-alpha", "cand-beta"))
+        tables = load_baseline_tables(RUN_DATE)
+        self.assertEqual(set(tables), {"cand-alpha", "cand-beta"})
+        self.assertNotIn("__multi__", tables)
+
     def test_unknown_or_prohibitive_execution_blocks_active_seed(self) -> None:
         for status in ["unknown", "prohibitive", "partial"]:
             with self.subTest(status=status):

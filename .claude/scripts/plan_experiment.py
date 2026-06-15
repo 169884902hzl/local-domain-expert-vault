@@ -2,12 +2,16 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from kb_common import safe_print, safe_write, today_iso, vault_path
 from kb_search import SearchResult, search
+from audit_experiment_plan import audit as audit_plan, parse_note
+from research_governance_common import candidate_dir, read_json
 
 
 TAG_PRIORITY = ["DLO", "tactile", "diffusion", "bimanual", "planning", "sim-to-real", "VLM", "RL"]
@@ -72,6 +76,9 @@ def ns(query: str, limit: int, *, must_tag: str | None = None) -> argparse.Names
         year_from=None,
         year_to=None,
         limit=limit,
+        semantic=True,
+        semantic_floor=0.55,
+        expand_concepts=True,
     )
 
 
@@ -230,7 +237,7 @@ def render_plan(query: str, evidence: EvidenceSet) -> str:
     benchmark = first_with(evidence.items, terms=BENCHMARK_TERMS)
 
     def cite(item: SearchResult | None, fallback: str) -> str:
-        return wikilink(item) if item else f"evidence_gap:{fallback}"
+        return wikilink(item) if item else f"missing_evidence:{fallback}"
 
     lines = [
         "---",
@@ -352,34 +359,85 @@ def render_plan(query: str, evidence: EvidenceSet) -> str:
     return "\n".join(lines)
 
 
+def query_from_candidate(candidate: dict[str, Any]) -> str:
+    metadata = candidate.get("metadata", {}) if isinstance(candidate.get("metadata"), dict) else {}
+    parts = []
+    for key in ["title", "problem", "mechanism", "hypothesis", "minimum_no_hardware_pilot", "killer_experiment"]:
+        value = candidate.get(key) if key in candidate else metadata.get(key)
+        if str(value or "").strip():
+            parts.append(str(value).strip())
+    return " ".join(parts) or str(candidate.get("candidate_id") or "experiment plan")
+
+
+def query_from_accepted(path: Path) -> str:
+    payload = read_json(path)
+    candidate = payload.get("candidate", {}) if isinstance(payload.get("candidate"), dict) else {}
+    if not candidate:
+        decision = payload.get("survival_decision", {}) if isinstance(payload.get("survival_decision"), dict) else {}
+        candidate = {"candidate_id": payload.get("candidate_id", ""), "title": decision.get("candidate_title", "")}
+    return query_from_candidate(candidate)
+
+
+def query_from_candidate_id(candidate_id: str) -> str:
+    return query_from_candidate(read_json(candidate_dir(candidate_id) / "candidate-record.json"))
+
+
+def audit_plan_file(path: Path, *, min_evidence: int = 8) -> dict[str, Any]:
+    result = audit_plan(path, min_evidence)
+    _fields, body, parse_issues = parse_note(path)
+    if parse_issues:
+        result.setdefault("errors", []).extend(parse_issues)
+    if result.get("errors"):
+        result["status"] = "FAIL"
+    return result
+
+
+def plan_from_query(query: str, *, limit: int = 12, output: str = "", dry_run: bool = False) -> dict[str, Any]:
+    evidence = collect_evidence(query, limit)
+    content = render_plan(query, evidence)
+    if output:
+        out_path = vault_path(output)
+    else:
+        slug = slug_from_query(query, evidence)
+        out_path = vault_path("projects", "experiments", f"{today_iso()}-{slug}.md")
+
+    if dry_run:
+        safe_print(content)
+        return {"status": "dry_run", "path": str(out_path), "content": content, "evidence_level": evidence_level(evidence), "evidence_gaps": evidence.gaps}
+
+    safe_write(out_path, content)
+    audit = audit_plan_file(out_path)
+    return {"status": "success" if audit["status"] != "FAIL" else "audit_failed", "path": str(out_path), "audit": audit, "evidence_level": evidence_level(evidence), "evidence_gaps": evidence.gaps}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("query", help="Research question or experiment direction.")
+    parser.add_argument("query", nargs="?", help="Research question or experiment direction.")
+    parser.add_argument("--from-candidate", default="", help="Build query from a v1 candidate-record.")
+    parser.add_argument("--from-accepted", default="", help="Build query from an accepted backlog item.")
     parser.add_argument("--limit", type=int, default=12, help="Maximum local evidence items to include.")
     parser.add_argument("--output", help="Optional output path relative to the vault root.")
     parser.add_argument("--dry-run", action="store_true", help="Print the draft without writing it.")
     args = parser.parse_args()
 
-    evidence = collect_evidence(args.query, args.limit)
-    content = render_plan(args.query, evidence)
-    if args.output:
-        out_path = vault_path(args.output)
+    if args.from_candidate:
+        query = query_from_candidate_id(args.from_candidate)
+    elif args.from_accepted:
+        query = query_from_accepted(Path(args.from_accepted))
+    elif args.query:
+        query = args.query
     else:
-        slug = slug_from_query(args.query, evidence)
-        out_path = vault_path("projects", "experiments", f"{today_iso()}-{slug}.md")
+        parser.error("provide query, --from-candidate, or --from-accepted")
 
+    result = plan_from_query(query, limit=args.limit, output=args.output or "", dry_run=args.dry_run)
     if args.dry_run:
-        safe_print(content)
         return 0
-
-    safe_write(out_path, content)
+    out_path = Path(result["path"])
     safe_print(f"PLAN_PATH: {rel(out_path)}")
-    safe_print(f"EVIDENCE_LEVEL: {evidence_level(evidence)}")
-    if evidence.gaps:
-        safe_print("EVIDENCE_GAPS: " + ", ".join(evidence.gaps))
-    else:
-        safe_print("EVIDENCE_GAPS: none")
-    return 0
+    safe_print(f"EVIDENCE_LEVEL: {result['evidence_level']}")
+    safe_print("EVIDENCE_GAPS: " + (", ".join(result["evidence_gaps"]) if result["evidence_gaps"] else "none"))
+    safe_print("PLAN_AUDIT: " + json.dumps(result.get("audit", {}), ensure_ascii=False, sort_keys=True))
+    return 1 if result["status"] == "audit_failed" else 0
 
 
 if __name__ == "__main__":

@@ -6,7 +6,7 @@ Primary source:
 - Start from `output/recall-queue.md`.
 - If the queue is empty or the user gives a focus, search local notes only:
   ```powershell
-  python .claude/scripts/kb_search.py "$ARGUMENTS" --limit 20
+  python .claude/scripts/kb_search.py "$ARGUMENTS" --semantic --limit 20
   ```
 
 Session rules:

@@ -209,7 +209,7 @@ try {
     "--raw-candidate-limit",
     "8",
     "--min-raw-candidates",
-    "6",
+    "3",
     "--max-generated",
     "3",
     "--target-deep-read",
@@ -267,6 +267,19 @@ try {
     }
   }
   $RunDate = Get-Date -Format "yyyy-MM-dd"
+  Write-TaskLog "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss zzz")] INDEX_SWEEP start run_date=$RunDate"
+  if ($WrapperTestMode) {
+    Write-TaskLog "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss zzz")] TEST_MODE skip index sweep"
+  }
+  else {
+    & $Python ".claude/scripts/kb_embed.py" "build" 2>&1 |
+      ForEach-Object { $_ | Out-File -FilePath $LogPath -Append -Encoding utf8 }
+    $SweepExitCode = $LASTEXITCODE
+    if ($SweepExitCode -ne 0) {
+      Write-TaskLog "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss zzz")] WARN index_sweep_exit_code=$SweepExitCode; continuing"
+    }
+    Write-TaskLog "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss zzz")] INDEX_SWEEP end exit_code=$SweepExitCode"
+  }
   Write-TaskLog "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss zzz")] QUALITY_AUDIT start run_date=$RunDate"
   if ($WrapperTestMode) {
     $QualityExitText = [Environment]::GetEnvironmentVariable("DAILY_ARXIV_WRAPPER_TEST_QUALITY_EXIT", "Process")

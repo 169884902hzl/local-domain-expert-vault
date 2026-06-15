@@ -87,10 +87,18 @@ def is_generic_batch_summary(summary: str) -> bool:
     return summary.startswith("提出基于") and "的" in summary and "方法" in summary and summary.endswith("。")
 
 
+def topic_zotero_keys(fields: dict[str, str]) -> set[str]:
+    keys = {fields.get("zotero_key", "").strip('"').upper()}
+    for alias_field in ("zotero_aliases", "zotero_keys"):
+        keys.update(item.upper() for item in parse_list_value(fields.get(alias_field, "")))
+    return {key for key in keys if key}
+
+
 def find_topic_by_key(zotero_key: str) -> Path | None:
-    pattern = re.compile(rf'^zotero_key:\s*"?{re.escape(zotero_key)}"?\s*$', re.MULTILINE)
+    requested_key = zotero_key.upper()
     for path in sorted(TOPICS_DIR.glob("*.md")):
-        if pattern.search(read(path)):
+        fields, _body, _issues = frontmatter(path)
+        if requested_key in topic_zotero_keys(fields):
             return path
     return None
 
@@ -265,7 +273,7 @@ def target_payload(
         issues.extend(note_issues)
         if args.strict_reading and _status != "done":
             issues.append(f"strict_target_not_done:{_status or 'missing'}")
-        if requested_key and zkey and requested_key.upper() != zkey.upper():
+        if requested_key and requested_key.upper() not in topic_zotero_keys(fields):
             issues.append("target_note_mismatch:zotero_key_field_differs")
     payload = {
         "target_note": {

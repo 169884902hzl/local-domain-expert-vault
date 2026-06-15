@@ -4,7 +4,7 @@ Argument: $ARGUMENTS (natural-language question or keyword query)
 
 Run:
 ```powershell
-python .claude/scripts/kb_search.py "$ARGUMENTS" --limit 12
+python .claude/scripts/kb_search.py "$ARGUMENTS" --semantic --limit 12
 ```
 
 Rules:
@@ -15,7 +15,7 @@ Rules:
 
 For strict tag filters, use:
 ```powershell
-python .claude/scripts/kb_search.py "$ARGUMENTS" --must-tag diffusion --must-tag DLO --type literature
+python .claude/scripts/kb_search.py "$ARGUMENTS" --semantic --must-tag diffusion --must-tag DLO --type literature
 ```
 
 The search script expands tag aliases from `.claude/scripts/schema.json`, so Chinese queries such as "扩散策略在双臂操控中的最新进展" should still retrieve local literature notes.

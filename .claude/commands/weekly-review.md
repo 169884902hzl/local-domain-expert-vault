@@ -5,7 +5,7 @@ Scope:
 - Read `output/recall-queue.md`.
 - Use local retrieval only when needed:
   ```powershell
-  python .claude/scripts/kb_search.py "$ARGUMENTS" --limit 20
+  python .claude/scripts/kb_search.py "$ARGUMENTS" --semantic --limit 20
   ```
 
 Output:

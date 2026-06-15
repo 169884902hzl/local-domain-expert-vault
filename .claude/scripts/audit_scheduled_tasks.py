@@ -337,6 +337,7 @@ def audit_task(expected: ExpectedTask, active_pauses: list[dict[str, Any]] | Non
     task_path = _system_task_path(expected.name)
     xml_root = _task_xml(task_path) if task_path.exists() else None
     xml_info: dict[str, Any] = {"path": str(task_path), "exists": task_path.exists()}
+    enabled = ""
 
     if xml_root is None:
         errors.append("missing_or_unreadable_task_xml")
@@ -359,9 +360,9 @@ def audit_task(expected: ExpectedTask, active_pauses: list[dict[str, Any]] | Non
         )
         if enabled == "true" and pause_active:
             errors.append("task_enabled_during_active_pause")
-        elif enabled != "true" and pause_active:
+        elif enabled == "false" and pause_active:
             notes.append("task_disabled_by_active_pause")
-        elif enabled != "true":
+        elif enabled == "false":
             errors.append("task_disabled")
         if str(expected.script) not in action:
             errors.append("action_does_not_point_to_expected_wrapper")
@@ -390,6 +391,8 @@ def audit_task(expected: ExpectedTask, active_pauses: list[dict[str, Any]] | Non
         scheduled_state = runtime.get("scheduled_task_state", "").lower()
         last_result = runtime.get("last_result", "")
         last_run_time = runtime.get("last_run_time", "")
+        if not enabled and scheduled_state == "enabled":
+            notes.append("task_enabled_by_default_absent_xml_enabled")
         if runtime_status and pause_active and runtime_status in {"ready", "running"}:
             errors.append(f"runtime_status_not_disabled_during_active_pause:{runtime_status}")
         elif runtime_status and runtime_status not in {"ready", "running"}:

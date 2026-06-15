@@ -38,7 +38,9 @@ from generate_gemini_idea_prompt import render_prompt as render_gemini_prompt
 from arxiv_metadata_sync import DEFAULT_DB as ARXIV_METADATA_DB
 from arxiv_metadata_sync import query_mirror, mirror_status_path
 from canonical_baseline_backfill import build_baseline_backfill_report, write_baseline_backfill_report
-from kb_common import extract_frontmatter, parse_frontmatter_map, safe_print, safe_write, today_iso, vault_path
+from llm_structured import backoff_seconds as structured_backoff_seconds
+from llm_structured import classify_transient as structured_classify_transient
+from kb_common import extract_frontmatter, parse_frontmatter_map, parse_list_value, safe_print, safe_write, today_iso, vault_path
 from paper_intake_triage import build_triage
 from research_seed_v2_common import DEFAULT_V2_PUBLISH_POLICY
 from zotero_import import (
@@ -1277,16 +1279,23 @@ def ingest_zotero_key(zotero_key: str, *, timeout: int = 600) -> tuple[str, str]
     return ("success" if code == 0 else "failed", output)
 
 
+def frontmatter_zotero_keys(fields: dict[str, str]) -> set[str]:
+    keys = {str(fields.get("zotero_key", "")).strip('"').upper()}
+    for alias_field in ("zotero_aliases", "zotero_keys"):
+        keys.update(item.upper() for item in parse_list_value(str(fields.get(alias_field, ""))))
+    return {key for key in keys if key}
+
+
 def local_note_status(zotero_key: str) -> tuple[str, str]:
-    key_pattern = re.compile(rf'^zotero_key:\s*"?{re.escape(zotero_key)}"?\s*$', re.MULTILINE)
+    requested_key = zotero_key.upper()
     for path in sorted(vault_path("wiki", "topics").glob("*.md")):
         text = path.read_text(encoding="utf-8")
-        if not key_pattern.search(text):
-            continue
         parsed = extract_frontmatter(text)
         if not parsed:
-            return "missing_frontmatter", str(path.relative_to(vault_path()))
+            continue
         fields = parse_frontmatter_map(parsed[0])
+        if requested_key not in frontmatter_zotero_keys(fields):
+            continue
         status = fields.get("status", "").strip('"')
         return status or "missing_status", str(path.relative_to(vault_path()))
     return "missing_note", ""
@@ -2292,13 +2301,20 @@ Output requirement:
   - Every Evidence Ledger `evidence_class` and every IF packet `Evidence class` must be exactly one token: `pdf_verified`, `table_verified`, `figure_verified`, `appendix_verified`, `result_row_unconfirmed`, `figure_approximation`, `note_derived`, `abstract_only`, or `not_evidenced`.
   - Never write combined evidence classes such as `pdf_verified + table_verified`, `pdf_verified/table_verified`, or any other combined evidence class.
   - Do not use `abstract` as a strong anchor for key Problem, Contribution, Method, Experiments, Limitations, Baseline, or Transfer claims. Use a concrete section/table/figure/appendix/snippet/result_row anchor, or downgrade to `abstract_only` with `screening_only`.
+  - Evidence Ledger baseline coverage is machine-checked by `claim_type`. Include at least one row whose `claim_type` is exactly `baseline` or `strongest_baseline`; putting baseline names only inside `result` or `experiment` rows will fail finalization.
+  - Any sentence or bullet outside the Evidence Ledger that contains a numeric result, percentage, score, baseline comparison, metric, ablation value, dataset count, frame count, or error value must cite an existing Evidence Ledger claim_id in the same sentence, using bracketed or parenthesized form such as `[C7]` or `(C7)`. Do not write bare `见C7`.
+  - Every IF packet field must be its own `- Field name:` bullet. Do not merge labels, such as `Paper win condition and idea kill condition`; merged labels will fail finalization as missing fields.
+  - IF packet `Strongest baseline` must name a concrete comparator or a concrete missing comparator; do not write only `not_evidenced`. If the paper does not report the comparator, write the comparator that would be needed and state that it is missing.
   - Every IF packet and global no-hardware `Protocol` must use 3-6 numbered steps on separate lines, not one semicolon-separated line.
   - In no-hardware micro-test sections, use the exact English confirmation `no robot; no real scene; no new data collection`; avoid Chinese hardware words such as `机器人`, `实机`, `机械臂`, `真实场景`.
+  - In no-hardware micro-test field values, avoid the English word `hardware`; use `reported platform specification`, `runtime setting`, or `measurement setup` instead when auditing paper-reported compute or latency details.
+  - Use `no new data collection` only as an explicit negation. In `Input`, `Artifact`, or `Compute/data cap` fields, prefer `newly collected data` when describing the absence of fresh data.
   - In Evidence Metadata `Summary`, every number, percentage, table result, baseline comparison, or model score must cite an Evidence Ledger claim_id in the same sentence.
 - Use Chinese prose and keep technical terms in English.
 - Every research-facing claim must be anchored to an Evidence Ledger claim_id or explicitly marked `not_evidenced` / `screening_only`.
 - Idea Fuel is adversarial review pressure, not confirmed evidence.
 - No-hardware Micro-test must explicitly state: no robot, no real scene, no new data collection.
+- Avoid non-negated phrases such as `independent of new data collection`; use `independent of newly collected data` instead.
 
 Strict /read-paper output contract:
 {command_contract}
@@ -2720,25 +2736,11 @@ def _read_failure_reason(output: str, note_status: str) -> str:
 
 
 def _staged_transient_retry_reason(stdout: str, stderr: str) -> str:
-    text = f"{stdout}\n{stderr}".lower()
-    if "already in use" in text:
-        return "session_in_use"
-    if "api error: 524" in text or "origin_response_timeout" in text:
-        return "api_524"
-    if "tool call could not be parsed" in text:
-        return "tool_call_parse_failed"
-    if '"retryable":true' in text or '"retryable": true' in text:
-        return "retryable_api_error"
-    return ""
+    return structured_classify_transient(stdout, stderr)
 
 
 def _staged_retry_delay_seconds(stdout: str, stderr: str, *, command_attempt: int, reason: str) -> int:
-    if reason == "session_in_use":
-        return 15 * command_attempt
-    match = re.search(r'"retry_after"\s*:\s*(\d+)', f"{stdout}\n{stderr}")
-    if match:
-        return max(30, min(180, int(match.group(1))))
-    return min(180, 30 * command_attempt)
+    return structured_backoff_seconds(stdout, stderr, attempt=command_attempt, reason=reason)
 
 
 def read_zotero_key(

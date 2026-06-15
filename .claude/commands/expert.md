@@ -12,7 +12,7 @@ Examples:
 - `/expert Audit whether the vault can answer DLO manipulation questions.`
 
 Non-negotiable rules:
-- Local evidence first. For any domain question, run `python .claude/scripts/kb_search.py "$ARGUMENTS" --limit 12` before answering.
+- Local evidence first. For any domain question, run `python .claude/scripts/kb_search.py "$ARGUMENTS" --semantic --limit 12` before answering.
 - Cite local note paths such as `wiki/topics/...md` and `wiki/concepts/...md` in the answer.
 - If `kb_search.py` returns `NO_LOCAL_MATCHES`, say the vault has no local evidence and ask before using web/arXiv/PubMed.
 - Do not produce shallow summaries, generic summaries, empty Evidence Notes, or unverified numbers.
@@ -47,7 +47,7 @@ python .claude/scripts/finalize_reading.py ZOTERO_KEY --analysis raw/readings/ZO
    - Trigger words or meaning: progress, latest work, what papers, how, why, survey, synthesis, comparison, difference, or an equivalent Chinese domain question.
    - Run:
 ```powershell
-python .claude/scripts/kb_search.py "$ARGUMENTS" --limit 12
+python .claude/scripts/kb_search.py "$ARGUMENTS" --semantic --limit 12
 ```
    - Open and read the top relevant topic/concept/entity notes.
    - Answer only from local evidence unless the user explicitly permits external search.

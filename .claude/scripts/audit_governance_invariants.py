@@ -13,7 +13,10 @@ from state_machine_guard import run_audit as run_state_machine_audit
 
 
 def _git_files(root: Path) -> list[str]:
-    output = subprocess.check_output(["git", "ls-files"], cwd=root, text=True)
+    try:
+        output = subprocess.check_output(["git", "ls-files"], cwd=root, text=True, stderr=subprocess.DEVNULL)
+    except subprocess.CalledProcessError:
+        return []
     return [line.strip().replace("\\", "/") for line in output.splitlines() if line.strip()]
 
 

@@ -10,6 +10,7 @@ from typing import Any
 
 from gemini_cli_adapter import DEFAULT_GEMINI_MODEL, DEFAULT_GEMINI_TIMEOUT_SEC, run_gemini_cli
 from kb_common import extract_frontmatter, parse_frontmatter_map, safe_print, safe_write, vault_path
+from llm_structured import StructuredOutputError, extract_json
 from research_agenda_common import DOMAIN_KEYWORDS, rel, slugify
 from research_agenda_extract import _section_text, _structured_fields
 
@@ -128,8 +129,8 @@ def _llm_refine_packet(packet: dict[str, Any], *, timeout: int, model: str) -> d
         packet["llm_refine_status"] = f"failed:{result.get('error') or 'empty_output'}"
         return packet
     try:
-        refined = json.loads(raw)
-    except json.JSONDecodeError:
+        refined = extract_json(raw)
+    except StructuredOutputError:
         packet["llm_refine_status"] = "failed:invalid_json"
         return packet
     if isinstance(refined, dict):

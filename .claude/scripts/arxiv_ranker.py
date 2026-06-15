@@ -1,10 +1,13 @@
 """Rank arXiv papers for the daily embodied-AI scout pipeline."""
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, timezone
 from typing import Any
+
+from kb_embed import EmbeddingUnavailable
 
 
 TOP1_THRESHOLD = 85
@@ -14,6 +17,10 @@ BELOW_REVIEW_DECISION = "below_review_threshold"
 LEGACY_REJECT_DECISION = "reject"
 FOCUS_REVIEW_DECISION = "focus_review_queue"
 AUTO_IMPORT_DECISIONS = {"top1_candidate", "venue_auto_import"}
+# Personalised scout: rank daily candidates partly by how similar they are to
+# the papers you have actually finished reading (the read-library anchor).
+# On by default; set KB_RANKER_READ_LIB=0 to fall back to keyword-only ranking.
+ENABLE_READ_LIB_SIMILARITY = os.environ.get("KB_RANKER_READ_LIB", "1").strip().lower() not in {"0", "false", "no", "off"}
 
 DEFAULT_QUERIES = [
     'all:"embodied AI" OR all:"embodied artificial intelligence" OR all:"robot learning"',
@@ -107,6 +114,18 @@ VENUE_TERMS = [
     "cvpr",
     "icml",
     "science robotics",
+    "ijrr",
+    "hri",
+    "wafr",
+    "iser",
+    "robosoft",
+    "auro",
+    "jfr",
+    "eccv",
+    "iccv",
+    "aaai",
+    "ijcai",
+    "siggraph",
 ]
 ROBOTICS_TOP_VENUES = {
     "rss": ["rss", "robotics science and systems", "robotics: science and systems"],
@@ -115,13 +134,25 @@ ROBOTICS_TOP_VENUES = {
     "corl": ["corl", "conference on robot learning"],
     "ra-l": ["ra-l", "ral", "robotics and automation letters"],
     "t-ro": ["t-ro", "tro", "transactions on robotics"],
+    "ijrr": ["ijrr", "international journal of robotics research"],
     "science robotics": ["science robotics"],
+    "hri": ["hri", "human-robot interaction"],
+    "wafr": ["wafr", "algorithmic foundations of robotics"],
+    "iser": ["iser", "international symposium on experimental robotics"],
+    "robosoft": ["robosoft", "soft robotics"],
+    "auro": ["auro", "autonomous robots"],
+    "jfr": ["jfr", "journal of field robotics"],
 }
 ML_VISION_TOP_VENUES = {
     "neurips": ["neurips", "neural information processing systems"],
     "iclr": ["iclr", "international conference on learning representations"],
     "icml": ["icml", "international conference on machine learning"],
     "cvpr": ["cvpr", "computer vision and pattern recognition"],
+    "eccv": ["eccv", "european conference on computer vision"],
+    "iccv": ["iccv", "international conference on computer vision"],
+    "aaai": ["aaai", "association for the advancement of artificial intelligence"],
+    "ijcai": ["ijcai", "international joint conference on artificial intelligence"],
+    "siggraph": ["siggraph"],
 }
 ACCEPTED_TERMS = [
     "accepted",
@@ -293,6 +324,7 @@ class RankedPaper:
     focus_matches: dict[str, list[str]] = field(default_factory=dict)
     research_value_score: int = 0
     diversity_features: list[str] = field(default_factory=list)
+    read_lib_similarity: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -306,6 +338,7 @@ class RankedPaper:
             "focus_matches": self.focus_matches,
             "research_value_score": self.research_value_score,
             "diversity_features": self.diversity_features,
+            "read_lib_similarity": self.read_lib_similarity,
         }
 
     @classmethod
@@ -321,6 +354,7 @@ class RankedPaper:
             focus_matches=dict(data.get("focus_matches", {}) or {}),
             research_value_score=int(data.get("research_value_score", 0)),
             diversity_features=list(data.get("diversity_features", []) or []),
+            read_lib_similarity=float(data.get("read_lib_similarity", 0.0) or 0.0),
         )
 
 
@@ -452,7 +486,29 @@ def _venue_auto_import_label(paper: ArxivPaper, domain_labels: set[str], text: s
     return None
 
 
-def rank_paper(paper: ArxivPaper) -> RankedPaper:
+def _batch_read_lib_similarity(papers: list[ArxivPaper]) -> dict[int, float]:
+    """Embed all candidate papers in one batch and score each against the read
+    library anchor. Returns {id(paper): similarity}. If the embedding backend is
+    unavailable the whole batch degrades to an empty dict -- a single failure,
+    never a per-paper timeout walked across the entire candidate list."""
+    if not ENABLE_READ_LIB_SIMILARITY or not papers:
+        return {}
+    try:
+        from kb_embed import embed_texts, load_read_lib_anchor, query_vector_similar
+
+        matrix = load_read_lib_anchor()
+        qvecs = embed_texts([f"{paper.title}\n\n{paper.summary}" for paper in papers], is_query=True)
+    except EmbeddingUnavailable:
+        return {}
+    sims: dict[int, float] = {}
+    for paper, qvec in zip(papers, qvecs):
+        hits = query_vector_similar(qvec, matrix, top_k=10)
+        if hits:
+            sims[id(paper)] = float(sum(score for _row, score in hits) / len(hits))
+    return sims
+
+
+def rank_paper(paper: ArxivPaper, read_lib_sim: float = 0.0) -> RankedPaper:
     text = paper_text(paper)
     matched_terms: list[str] = []
     reasons: list[str] = []
@@ -506,7 +562,12 @@ def rank_paper(paper: ArxivPaper) -> RankedPaper:
 
     venue_text = f"{paper.comment} {paper.journal_ref}".lower()
     venue_matches = _count_matches(venue_text, VENUE_TERMS)
-    if venue_matches:
+    confirmed_top_venue = bool(venue_matches) and _confirmed_venue(venue_text)
+    if confirmed_top_venue:
+        matched_terms.extend(venue_matches[:3])
+        score += 25
+        reasons.append("confirmed_top_venue_accepted")
+    elif venue_matches:
         matched_terms.extend(venue_matches[:3])
         score += min(6 + len(venue_matches), 10)
         reasons.append("venue_or_comment_signal")
@@ -542,6 +603,12 @@ def rank_paper(paper: ArxivPaper) -> RankedPaper:
             reasons.append(f"focus_track_bonus:{track}:{bonus}")
             matched_terms.extend(matches[:8])
 
+    read_lib_similarity = 0.0
+    if ENABLE_READ_LIB_SIMILARITY and read_lib_sim > 0.0:
+        read_lib_similarity = read_lib_sim
+        score += min(15, round(read_lib_similarity * 25))
+        reasons.append(f"read_lib_similarity:{read_lib_similarity:.2f}")
+
     score = max(0, min(100, score))
     venue_auto_label = _venue_auto_import_label(paper, domain_labels, text)
     if venue_auto_label:
@@ -569,9 +636,11 @@ def rank_paper(paper: ArxivPaper) -> RankedPaper:
         focus_matches={track: sorted(set(matches)) for track, matches in focus_matches.items()},
         research_value_score=research_value_score,
         diversity_features=diversity_features,
+        read_lib_similarity=read_lib_similarity,
     )
 
 
 def rank_papers(papers: list[ArxivPaper]) -> list[RankedPaper]:
-    ranked = [rank_paper(paper) for paper in papers]
+    read_lib_sims = _batch_read_lib_similarity(papers)
+    ranked = [rank_paper(paper, read_lib_sims.get(id(paper), 0.0)) for paper in papers]
     return sorted(ranked, key=lambda item: (-item.quality_score, item.paper.updated, item.paper.title))

@@ -7,7 +7,7 @@ Use this command when the user wants an answer, synthesis, comparison, trend sum
 Required workflow:
 1. Run local search before answering:
 ```powershell
-python .claude/scripts/kb_search.py "$ARGUMENTS" --limit 12
+python .claude/scripts/kb_search.py "$ARGUMENTS" --semantic --limit 12
 ```
 2. Open and read the most relevant returned notes. Use topic notes first, then concept pages, then entity pages.
 3. Answer only from local evidence unless the user explicitly approves external search.

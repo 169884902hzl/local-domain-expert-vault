@@ -2619,6 +2619,26 @@ class ResearchSeedV2StateMachineTest(unittest.TestCase):
         self.assertFalse(allowed)
         self.assertEqual(reason, "insufficient_local_or_external_evidence")
 
+    def test_novelty_empty_selection_is_success_noop(self) -> None:
+        write_run_artifact(
+            RUN_DATE,
+            "selected-candidates.json",
+            {"schema_version": "selected_candidates.v1", "run_date": RUN_DATE, "selected": [], "rejected": []},
+            state="portfolio_selected",
+        )
+        old_argv = sys.argv
+        try:
+            sys.argv = ["novelty_baseline_scan.py", "--run-date", RUN_DATE, "--target-policy", "seed-candidates-only"]
+            exit_code = novelty_scan.main()
+        finally:
+            sys.argv = old_argv
+
+        payload = read_json(artifact_dir(RUN_DATE) / "novelty-scan.json")
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["status"], "success_empty_selection")
+        self.assertEqual(payload["scans"], [])
+        self.assertEqual(validate_payload(payload, "novelty_scan.v1"), [])
+
     def test_arxiv_external_provider_timeout_fails_closed(self) -> None:
         with patch.object(novelty_scan.urllib.request, "urlopen", side_effect=TimeoutError("test timeout")):
             hits, summary = novelty_scan._scan_arxiv_api(self.candidate(), max_queries=1, timeout=1, delay_sec=0)

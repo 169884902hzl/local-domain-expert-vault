@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from kb_common import safe_print
+from llm_structured import extract_json
 from opencode_cli_adapter import DEFAULT_OPENCODE_MODEL, run_opencode_cli
 from research_seed_v2_common import artifact_dir, artifact_hashes, candidate_id, ensure_v2_dirs, read_json, write_json, write_run_artifact
 
@@ -138,79 +139,10 @@ def _load_provider_payload(path_value: str) -> dict[str, Any]:
 
 
 def _extract_json_object(text: str) -> dict[str, Any]:
-    stripped = text.strip()
-    if stripped.startswith("```"):
-        lines = stripped.splitlines()
-        if lines and lines[0].strip().startswith("```"):
-            lines = lines[1:]
-        if lines and lines[-1].strip() == "```":
-            lines = lines[:-1]
-        stripped = "\n".join(lines).strip()
-    decoder = json.JSONDecoder()
-    first_payload: dict[str, Any] | None = None
-    for index, char in enumerate(stripped):
-        if char != "{":
-            continue
-        try:
-            payload, _ = decoder.raw_decode(stripped[index:])
-        except json.JSONDecodeError:
-            continue
-        if isinstance(payload, dict):
-            if first_payload is None:
-                first_payload = payload
-            if _looks_like_review_payload(payload):
-                return payload
-    for candidate in _balanced_json_like_objects(stripped):
-        try:
-            payload = json.loads(_repair_js_object_literal(candidate))
-        except json.JSONDecodeError:
-            continue
-        if isinstance(payload, dict):
-            if first_payload is None:
-                first_payload = payload
-            if _looks_like_review_payload(payload):
-                return payload
-    if first_payload is not None and not _looks_like_opencode_event(first_payload):
-        return first_payload
-    raise ValueError("provider_output_json_object_not_found")
-
-
-def _balanced_json_like_objects(text: str) -> list[str]:
-    objects: list[str] = []
-    start: int | None = None
-    depth = 0
-    in_string = False
-    quote = ""
-    escaped = False
-    for index, char in enumerate(text):
-        if in_string:
-            if escaped:
-                escaped = False
-            elif char == "\\":
-                escaped = True
-            elif char == quote:
-                in_string = False
-            continue
-        if char in {'"', "'"}:
-            in_string = True
-            quote = char
-            continue
-        if char == "{":
-            if depth == 0:
-                start = index
-            depth += 1
-            continue
-        if char == "}" and depth:
-            depth -= 1
-            if depth == 0 and start is not None:
-                objects.append(text[start : index + 1])
-                start = None
-    return objects
-
-
-def _repair_js_object_literal(text: str) -> str:
-    repaired = re.sub(r"(?<=[{,])\s*([A-Za-z_][A-Za-z0-9_]*)\s*:", r'"\1":', text)
-    return re.sub(r",\s*([}\]])", r"\1", repaired)
+    payload = extract_json(text, want=_looks_like_review_payload)
+    if _looks_like_opencode_event(payload) and not _looks_like_review_payload(payload):
+        raise ValueError("provider_output_json_object_not_found")
+    return payload
 
 
 def _looks_like_review_payload(payload: dict[str, Any]) -> bool:

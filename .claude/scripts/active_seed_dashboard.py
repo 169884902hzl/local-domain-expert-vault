@@ -22,6 +22,7 @@ from research_seed_v2_common import (
     write_run_artifact,
     write_text,
 )
+from research_governance_common import pilot_plan_dir
 
 
 DASHBOARD_HASH_INPUTS = [
@@ -98,8 +99,7 @@ def _novelty_cache_status(scan: dict[str, Any] | None) -> str:
 
 
 def _pilot_plan_status(candidate: dict[str, Any]) -> str:
-    slug = slugify(str(candidate.get("title") or candidate_id(candidate)))
-    path = agenda_v2_path("pilots", slug, "pilot-plan.json")
+    path = pilot_plan_dir(candidate_id(candidate)) / "pilot-plan.json"
     if not path.exists():
         return "missing"
     try:
@@ -109,7 +109,9 @@ def _pilot_plan_status(candidate: dict[str, Any]) -> str:
     required = ["metric", "baseline_implementation_path", "resource_budget"]
     if not all(str(plan.get(field, "")).strip() for field in required):
         return "partial"
-    return "executable" if plan.get("executable") is True and str(plan.get("metric_automation", "")).strip() else "planned"
+    if plan.get("plan_status") == "ready" and plan.get("human_confirmed") is True:
+        return "ready"
+    return "draft"
 
 
 def _current_state(decision: dict[str, Any] | None) -> str:
@@ -197,6 +199,83 @@ def build_dashboard(run_date: str) -> dict[str, Any]:
     }
 
 
+def _status_from_accepted_risks(risks: set[str]) -> tuple[str, str, str, str]:
+    manual_status = "missing" if "manual_prior_art_review_missing" in risks else "not_blocked"
+    manual_quality = "incomplete" if "manual_prior_art_quality_incomplete" in risks or "manual_prior_art_query_log_missing" in risks else "not_blocked"
+    if "baseline_table_missing" in risks:
+        baseline_verification = "missing"
+        baseline_execution = "unknown"
+    elif "strongest_baseline_unknown" in risks:
+        baseline_verification = "partial"
+        baseline_execution = "unknown"
+    elif "baseline_execution_not_ready" in risks:
+        baseline_verification = "present"
+        baseline_execution = "partial"
+    else:
+        baseline_verification = "not_blocked"
+        baseline_execution = "not_blocked"
+    return manual_status, manual_quality, baseline_verification, baseline_execution
+
+
+def iter_accepted_payloads() -> list[tuple[dict[str, Any], Path]]:
+    accepted_root = agenda_v2_path("seed-candidates", "accepted")
+    if not accepted_root.exists():
+        return []
+    payloads: list[tuple[dict[str, Any], Path]] = []
+    for path in sorted(accepted_root.rglob("*.json")):
+        payload = read_json(path)
+        if isinstance(payload, dict) and isinstance(payload.get("survival_decision"), dict):
+            payloads.append((payload, path))
+    return payloads
+
+
+def build_accepted_backlog() -> dict[str, Any]:
+    rows: list[dict[str, Any]] = []
+    for payload, path in iter_accepted_payloads():
+        decision = payload.get("survival_decision", {})
+        candidate = payload.get("candidate", {}) if isinstance(payload.get("candidate"), dict) else {}
+        cid = str(decision.get("candidate_id") or payload.get("candidate_id") or candidate.get("candidate_id") or "")
+        if not cid:
+            continue
+        risks = {str(item) for item in decision.get("risks", []) if item}
+        blocks = [str(item) for item in decision.get("blocks", []) if item]
+        manual_status, manual_quality, baseline_verification, baseline_execution = _status_from_accepted_risks(risks)
+        source = str(path.relative_to(agenda_v2_path())).replace("\\", "/")
+        row_candidate = {"candidate_id": cid, "title": str(candidate.get("title") or decision.get("candidate_title") or cid)}
+        rows.append(
+            {
+                "candidate_id": cid,
+                "title": str(candidate.get("title") or decision.get("candidate_title") or ""),
+                "accepted_source": source,
+                "run_date": str(payload.get("run_date") or decision.get("run_date") or path.parent.name),
+                "current_state": _current_state(decision),
+                "formal_rehearsal_allowed": bool(decision.get("formal_rehearsal_allowed", False)),
+                "active_seed_allowed": bool(decision.get("active_seed_allowed", False)),
+                "pilot_ready_allowed": bool(decision.get("pilot_ready_allowed", False)),
+                "manual_prior_art_status": manual_status,
+                "manual_review_quality_status": manual_quality,
+                "baseline_verification_status": baseline_verification,
+                "baseline_execution_status": baseline_execution,
+                "novelty_scope": str(decision.get("verification_scope") or "missing"),
+                "novelty_cache_status": "stale" if "stale_external_novelty_cache" in risks else "not_blocked",
+                "evidence_anchor_status": _evidence_anchor_status(risks),
+                "result_row_status": _result_row_status(risks),
+                "cross_paper_edge_status": _cross_paper_edge_status(risks),
+                "pilot_plan_status": _pilot_plan_status(row_candidate),
+                "risk_markers": sorted(risks),
+                "blocking_reasons": blocks or sorted(risks),
+            }
+        )
+    return {
+        "schema_version": "accepted_backlog_dashboard.v1",
+        "run_date": "accepted-backlog",
+        "generated_at": utc_now(),
+        "source_of_truth": "derived_view_only",
+        "rows": rows,
+        "boundary": "Accepted backlog dashboard is diagnostic only and cannot promote seeds or satisfy governance evidence gates.",
+    }
+
+
 def render_markdown(payload: dict[str, Any]) -> str:
     lines = [
         f"# Active Seed Dashboard - {payload['run_date']}",
@@ -236,12 +315,25 @@ def write_dashboard(run_date: str, *, latest: bool = True, dry_run: bool = False
     return payload
 
 
+def write_accepted_backlog(*, dry_run: bool = False) -> dict[str, Any]:
+    ensure_v2_dirs()
+    payload = build_accepted_backlog()
+    write_json(agenda_v2_path("dashboard", "accepted-backlog.json"), payload, dry_run=dry_run)
+    write_text(agenda_v2_path("dashboard", "accepted-backlog.md"), render_markdown(payload), dry_run=dry_run)
+    return payload
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run-date", required=True)
     parser.add_argument("--no-latest", action="store_true")
+    parser.add_argument("--accepted-backlog", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
+    if args.accepted_backlog:
+        payload = write_accepted_backlog(dry_run=args.dry_run)
+        safe_print(json.dumps({"rows": len(payload["rows"]), "view": "accepted-backlog"}, ensure_ascii=False, sort_keys=True))
+        return 0
     payload = write_dashboard(args.run_date, latest=not args.no_latest, dry_run=args.dry_run)
     safe_print(json.dumps({"run_date": args.run_date, "rows": len(payload["rows"])}, ensure_ascii=False, sort_keys=True))
     return 0
