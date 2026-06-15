@@ -5,21 +5,31 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](#clone-后能直接做什么)
 
-> 把 Obsidian + Zotero 文献库变成一个每天自更新、可审计、会复盘的本地领域专家，并在 v1.0 中把 research agenda 升级为 Research Governance Workbench：自动化只能生成候选、证据草稿、筛查和 dashboard；active seed 必须是人工治理下的研究承诺。
+> **把 Obsidian + Zotero 文献库变成一个记得你读过的每一篇论文、每一张图、每一处局限的领域专家——并让每一个 AI 辅助的 idea 都锚定在你自己的证据上。**
 
 [English README](README_EN.md)
 
-这是一个面向领域研究者的 **Obsidian + Zotero + Claudian research vault**。更准确地说，它是一个 **本地领域专家 vault**：不是把所有问题丢给泛用 AI，而是把一个专业方向的论文、概念、实体、精读报告、本地检索和研究 idea 草案组织成可追踪的判断依据。
+大多数 AI 研究工作流仍然像「一次性对话」：你贴进一篇论文、拿到一段摘要、要一个 idea，一周后却很难把这个答案追溯回任何一篇论文、一张图、一处局限，或你语料里真实存在的 gap。
 
-这里的“领域专家”不是指仓库里训练了一个新模型，而是指 LLM 的每次精读、比较、发散和实验草案，都被本地 `wiki/` 证据、Zotero 来源、概念网络和人工 review 边界约束。它可以像一个长期读过你文献库的研究同伴一样工作，但所有结论都要能回到本地证据。
+这个仓库走相反的路——一个 **本地优先的 Obsidian + Zotero + Claude research vault**：LLM 的每一次精读、比较、发散和实验草案，都被强制回流到你本地的 `wiki/` 证据、Zotero 来源、概念图谱、对抗式模型评审和人工批准门。少一点泛用聊天机器人，多一点「读过你语料上百遍的研究同伴」。
 
-公开版本以机器人操控文献为示例，覆盖 DLO、VLM/VLA、RL、Sim-to-Real 和 embodied AI。你可以把它迁移到其他学科，但需要替换论文集合、概念页、实体页、Claudian prompt 和 arXiv 过滤规则。
+![Claudian 完全基于本地证据回答一个领域问题](docs/assets/claudian-rl-token-result.png)
 
-适合对象：需要长期追踪一个专业方向的研究生、PI / 实验室知识库维护者，以及希望把 LLM 变成“有本地文献记忆的领域专家”的研究者。
+## 60 秒上手
 
-当前公开版本：`v1.0.0`。`v0.1.0` 是首个可发行 local-first vault 版本；`v0.2.x` 加入 research-seed v2 状态机和 external screening hardening；`v0.3.x` 加入 supervised research-validity hardening。`v1.0.0` 把 active seed 从 publish side effect 重构为人工治理的 Research Governance Workbench 承诺。
+```bash
+git clone https://github.com/169884902hzl/local-domain-expert-vault
+cd local-domain-expert-vault
 
-Hardened v1.0 release gate 依赖本轮 hardening：v1 governance schemas 根对象默认 strict；provider command construction 有单 `--provider` builder 和 stage-builder tests；scheduled quality audit 非 0 会让任务失败；active commit 必须 hash-link 独立的 provider review packet 与 novelty screen；legacy `publish_research_run.py` formal writer surface 已禁用。v0.3.x 的 survival decision / formal publish 说明只保留为 historical context，不是 v1 active truth。
+# 向你自己的语料提问 —— 答案来自本地笔记，带引用
+python .claude/scripts/kb_search.py "deformable cable manipulation"
+```
+
+本地关键词检索不需要 API key、不需要 GPU、不需要任何云账号。接入一个 `bge-m3` embedding 端点即可解锁跨语言语义检索；再配上 Zotero + arXiv 凭据即可解锁完整的每日自动化——见 [Clone 后能直接做什么](#clone-后能直接做什么)。
+
+**适合谁：** 需要长期追踪一个专业方向的研究生、PI / 实验室知识库维护者，以及希望把 LLM 变成「有本地文献记忆的领域专家」的研究者。公开示例方向是机器人操控（DLO、VLA/VLM、RL、Sim-to-Real、embodied AI）；工作流可迁移到任何学科。
+
+> **v1.0 是什么？** 一个人工治理的 **Research Governance Workbench**：自动化可以生成候选、证据、筛查、模型评审、队列和 dashboard——但一个 *active seed* 必须是人工慎重做出的研究承诺，绝不是自动化的副产品。完整设计、术语和硬边界见下文。
 
 ## v1.0: Research Governance Workbench
 
