@@ -5,23 +5,31 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](#what-works-immediately-after-cloning)
 
-> A local-first research vault that turns an Obsidian + Zotero library into a domain expert with memory, and in v1.0 upgrades the research agenda into a Research Governance Workbench: automation may draft candidates, evidence, screening, critiques, queues, and dashboards, but an active seed must be a human-governed research commitment.
+> **Turn your Obsidian + Zotero library into a domain expert that remembers every paper, figure, and limitation you have read — and keeps every AI-assisted idea anchored to your own evidence.**
 
 [中文 README](README.md)
 
-Most AI research workflows still behave like disposable conversations. You paste a paper, get a summary, ask for an idea, and a week later the answer is hard to trace back to a paper, a figure, a limitation, or a real gap in your own corpus.
+Most AI research workflows behave like disposable conversations: you paste a paper, get a summary, ask for an idea, and a week later you cannot trace the answer back to any paper, figure, limitation, or real gap in your own corpus.
 
-This repository takes the opposite route. It is an **Obsidian + Zotero + Claudian research vault** for researchers who work inside a specialized literature field and want LLM assistance to stay grounded in local evidence. More precisely, it is a **local domain-expert vault**: papers, concepts, entities, deep-reading reports, retrieval results, idea seeds, reviewer attacks, and weekly reviews are organized as a traceable research memory.
+This repo takes the opposite route — a **local-first Obsidian + Zotero + Claude research vault** where every LLM-assisted reading, comparison, hypothesis, and experiment-plan draft is forced back through your local `wiki/` evidence, Zotero sources, concept graph, adversarial model review, and human-approval gates. Less general chatbot, more a research colleague that has read your corpus a hundred times.
 
-The phrase "domain expert" does not mean this repository trains a new model. It means every LLM-assisted reading, comparison, hypothesis, and experiment-plan draft is forced back through local `wiki/` evidence, Zotero sources, concept networks, adversarial review, and human approval boundaries. The system is designed to act less like a general chatbot and more like a research colleague that has repeatedly read the same corpus you are building.
+![Claudian answering a domain question grounded entirely in local evidence](docs/assets/claudian-rl-token-result.png)
 
-The public vault uses robotic manipulation as its example domain, especially DLO manipulation, VLM/VLA systems, RL, Sim-to-Real, and embodied AI. The workflow is portable, but the papers, concepts, entities, Claudian prompts, and arXiv filters are domain-specific and should be replaced for another field.
+## Try it in 60 seconds
 
-It is built for graduate students, PI/lab knowledge-base maintainers, and researchers who need long-term literature memory rather than another one-off summarizer.
+```bash
+git clone https://github.com/169884902hzl/local-domain-expert-vault
+cd local-domain-expert-vault
 
-Current public version: `v1.0.0`. `v0.1.0` was the first releasable local-first vault; `v0.2.x` added the research-seed v2 state machine and external-screening hardening; `v0.3.x` added supervised research-validity hardening. `v1.0.0` redesigns the active seed path as a human-governed Research Governance Workbench commitment, not a publish side effect.
+# ask your own corpus a question — answered from local notes, with citations
+python .claude/scripts/kb_search.py "deformable cable manipulation"
+```
 
-The hardened v1.0 release gate depends on this hardening pass: v1 governance schemas are strict at the root; provider command construction is covered by a single-`--provider` builder and stage-builder tests; scheduled quality-audit failure fails the scheduled task; active commit requires hash-linked provider review and novelty screen artifacts; the legacy `publish_research_run.py` formal writer surface is disabled. v0.3.x survival decision / formal publish wording is historical context, not v1 active truth.
+No API key, no GPU, and no cloud account are needed for local keyword retrieval. Add a `bge-m3` embedding endpoint to unlock cross-lingual semantic search, and add Zotero + arXiv credentials to unlock the full daily automation — see [What works immediately after cloning](#what-works-immediately-after-cloning).
+
+**Who it is for:** graduate students, PI / lab knowledge-base maintainers, and researchers who need long-term literature memory rather than another one-off summarizer. The public example domain is robotic manipulation (DLO, VLA/VLM, RL, Sim-to-Real, embodied AI); the workflow is portable to any field.
+
+> **What is v1.0?** A human-governed **Research Governance Workbench**: automation may draft candidates, evidence, screening, model critiques, queues, and dashboards — but an *active seed* must be a deliberate human research commitment, never an automation side effect. Full design, terminology, and hard boundaries are documented below.
 
 ## v1.0: Research Governance Workbench
 
