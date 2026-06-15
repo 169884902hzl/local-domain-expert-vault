@@ -18,13 +18,28 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import numpy as np
+try:
+    import numpy as np
+except ModuleNotFoundError as exc:  # pragma: no cover - exercised by CI smoke import path
+    np = None  # type: ignore[assignment]
+    _NUMPY_IMPORT_ERROR = exc
+else:
+    _NUMPY_IMPORT_ERROR = None
 
 from kb_common import extract_frontmatter, parse_frontmatter_map, parse_list_value, safe_print, vault_path
 
 
 class EmbeddingUnavailable(RuntimeError):
     """Raised when the configured embedding backend or local index is unavailable."""
+
+
+class _MissingNumpy:
+    def __getattr__(self, name: str) -> Any:
+        raise EmbeddingUnavailable(f"numpy is required for embedding index operations: {_NUMPY_IMPORT_ERROR}") from _NUMPY_IMPORT_ERROR
+
+
+if np is None:
+    np = _MissingNumpy()  # type: ignore[assignment]
 
 
 def _settings_env() -> dict[str, str]:
