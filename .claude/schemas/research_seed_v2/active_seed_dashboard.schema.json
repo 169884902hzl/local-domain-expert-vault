@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Research Seed v2 Active Seed Dashboard",
+  "type": "object",
+  "required": ["schema_version", "run_date", "generated_at", "rows", "source_of_truth"],
+  "properties": {
+    "schema_version": {"type": "string", "const": "active_seed_dashboard.v1"},
+    "run_date": {"type": "string"},
+    "generated_at": {"type": "string"},
+    "source_of_truth": {"type": "string", "const": "derived_view_only"},
+    "rows": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/row"}
+    },
+    "source_artifact_hashes": {"type": "object"},
+    "boundary": {"type": "string"}
+  },
+  "$defs": {
+    "row": {
+      "type": "object",
+      "required": [
+        "candidate_id",
+        "title",
+        "current_state",
+        "formal_rehearsal_allowed",
+        "active_seed_allowed",
+        "pilot_ready_allowed",
+        "risk_markers",
+        "blocking_reasons"
+      ],
+      "properties": {
+        "candidate_id": {"type": "string", "minLength": 1},
+        "title": {"type": "string"},
+        "current_state": {"type": "string"},
+        "formal_rehearsal_allowed": {"type": "boolean"},
+        "active_seed_allowed": {"type": "boolean"},
+        "pilot_ready_allowed": {"type": "boolean"},
+        "manual_prior_art_status": {"type": "string"},
+        "manual_review_quality_status": {"type": "string"},
+        "baseline_verification_status": {"type": "string"},
+        "baseline_execution_status": {"type": "string"},
+        "novelty_scope": {"type": "string"},
+        "novelty_cache_status": {"type": "string"},
+        "evidence_anchor_status": {"type": "string"},
+        "result_row_status": {"type": "string"},
+        "cross_paper_edge_status": {"type": "string"},
+        "pilot_plan_status": {"type": "string"},
+        "risk_markers": {"type": "array", "items": {"type": "string"}},
+        "blocking_reasons": {"type": "array", "items": {"type": "string"}}
+      },
+      "additionalProperties": true
+    }
+  }
+}

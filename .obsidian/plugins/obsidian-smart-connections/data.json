@@ -1,0 +1,7 @@
+{
+  "installed_at": 1777054586035,
+  "last_version": "4.3.0",
+  "excluded_headings": "",
+  "excluded_paths": "templates/**,.claude/**,.agents/**,.claudian/**,.obsidian/**,.smart-env/**,raw/**,output/**,archive/**,exports/**,attachments/**,projects/**,AGENTS.md,CLAUDE.md,SCHEMA.md,Dashboard.md",
+  "language": "zh"
+}

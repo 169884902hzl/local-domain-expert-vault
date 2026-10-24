@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Research Seed v2 Claim Graph Record",
+  "oneOf": [
+    {
+      "type": "object",
+      "required": [
+        "schema_version",
+        "record_type",
+        "node_id",
+        "paper_key",
+        "claim_type",
+        "statement",
+        "confidence",
+        "evidence_anchor",
+        "anchor_type",
+        "requires_human_check"
+      ],
+      "properties": {
+        "schema_version": {"type": "string", "const": "research_claim_graph.v1"},
+        "record_type": {"type": "string", "const": "node"},
+        "node_id": {"type": "string", "minLength": 1},
+        "paper_key": {"type": "string"},
+        "source_note": {"type": "string"},
+        "source_title": {"type": "string"},
+        "claim_type": {
+          "type": "string",
+          "enum": [
+            "central_claim",
+            "method_assumption",
+            "strongest_baseline",
+            "actual_baseline_result",
+            "missing_ablation",
+            "unmodeled_latent_variable",
+            "evaluation_blind_spot",
+            "interface_boundary",
+            "transfer_failure",
+            "reusable_primitive",
+            "contradiction"
+          ]
+        },
+        "statement": {"type": "string", "minLength": 1},
+        "confidence": {"type": "string", "enum": ["high", "medium", "low", "unusable"]},
+        "confidence_reason": {"type": "string"},
+        "evidence_anchor": {"type": "string"},
+        "anchor_type": {"type": "string", "enum": ["section", "figure", "table", "appendix", "result_row", "snippet", "abstract", "note_only"]},
+        "anchor_source": {"type": "string"},
+        "summary_origin": {"type": "string"},
+        "requires_human_check": {"type": "boolean"},
+        "evidence_class": {"type": "string"},
+        "downstream_use": {"type": "string"},
+        "screening_only": {"type": "boolean"},
+        "record_role": {"type": "string"},
+        "anchor": {"type": "object"},
+        "domains": {"type": "array", "items": {"type": "string"}},
+        "supporting_node_ids": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "schema_version",
+        "record_type",
+        "edge_id",
+        "source_node_id",
+        "target_node_id",
+        "relation",
+        "confidence",
+        "supporting_node_ids"
+      ],
+      "properties": {
+        "schema_version": {"type": "string", "const": "research_claim_graph.v1"},
+        "record_type": {"type": "string", "const": "edge"},
+        "edge_id": {"type": "string", "minLength": 1},
+        "paper_key": {"type": "string"},
+        "source_paper_key": {"type": "string"},
+        "target_paper_key": {"type": "string"},
+        "source_paper_id": {"type": "string"},
+        "target_paper_id": {"type": "string"},
+        "edge_scope": {"type": "string", "enum": ["same_paper", "cross_paper"]},
+        "source_node_id": {"type": "string", "minLength": 1},
+        "target_node_id": {"type": "string", "minLength": 1},
+        "relation": {
+          "type": "string",
+          "enum": [
+            "supports",
+            "contradicts",
+            "limits",
+            "exposes_gap",
+            "baseline_for",
+            "depends_on",
+            "evaluates",
+            "transfers_to"
+          ]
+        },
+        "confidence": {"type": "string", "enum": ["high", "medium", "low", "unusable"]},
+        "confidence_reason": {"type": "string"},
+        "edge_reason": {"type": "string"},
+        "relation_rule": {"type": "string"},
+        "overlap_evidence": {"type": "object"},
+        "evidence_nodes": {"type": "array", "items": {"type": "string"}},
+        "requires_human_check": {"type": "boolean"},
+        "human_check_required": {"type": "boolean"},
+        "human_confirmed": {"type": "boolean"},
+        "confirmed_by": {"type": "string"},
+        "confirmed_at": {"type": "string"},
+        "edge_quality_status": {"type": "string", "enum": ["template", "weak", "requires_human_check", "audited", "confirmed"]},
+        "supporting_node_ids": {
+          "type": "array",
+          "items": {"type": "string"},
+          "minItems": 2
+        }
+      }
+    }
+  ]
+}

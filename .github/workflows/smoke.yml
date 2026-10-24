@@ -1,0 +1,111 @@
+name: smoke
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  public-smoke:
+    name: Public package smoke tests
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install test dependencies
+        shell: pwsh
+        run: python -m pip install --upgrade pip pytest jsonschema
+
+      - name: Compile scripts
+        shell: pwsh
+        run: python -m compileall -q .claude/scripts
+
+      - name: Run pytest smoke tests
+        shell: pwsh
+        run: python -m pytest
+
+      - name: Run v2 state machine unittest suite
+        shell: pwsh
+        run: python -m unittest discover -s .claude/scripts/tests -p "test_*.py"
+
+      - name: Run v1 governance audits
+        shell: pwsh
+        run: |
+          python .claude/scripts/audit_governance_invariants.py --strict
+          python .claude/scripts/state_machine_guard.py --audit
+          python .claude/scripts/migrate_v03_to_v10.py --dry-run
+
+      - name: Audit local knowledge base
+        shell: pwsh
+        run: |
+          python .claude/scripts/audit_kb.py
+          python .claude/scripts/audit_kb.py --strict-reading --strict-concepts
+
+      - name: Search local evidence
+        shell: pwsh
+        run: python .claude/scripts/kb_search.py "diffusion policy DLO" --limit 5
+
+      - name: Check arXiv mirror status without creating a DB
+        shell: pwsh
+        run: |
+          python .claude/scripts/arxiv_metadata_sync.py --status
+          if (Test-Path "projects/arxiv-daily/metadata") {
+            throw "arxiv_metadata_sync.py --status created projects/arxiv-daily/metadata"
+          }
+
+      - name: Check mirror-first dry-run stays local-only
+        shell: pwsh
+        run: |
+          $output = python .claude/scripts/daily_arxiv_pipeline.py --dry-run --source mirror-first --max-candidates 5 --days-back 14 --idea-mode template --skip-read
+          $output | Out-String | Write-Host
+          if (($output -join "`n") -notmatch "source=mirror_missing") {
+            throw "Expected mirror_missing in fresh clone dry-run"
+          }
+          if (($output -join "`n") -match "search_api") {
+            throw "Fresh clone mirror-first dry-run unexpectedly used Search API fallback"
+          }
+
+      - name: Check provider review command builder dry-run
+        shell: pwsh
+        run: python .claude/scripts/daily_arxiv_pipeline.py --dry-run --source mirror-first --max-candidates 5 --days-back 14 --idea-mode template --skip-read --deepseek-provider opencode --codex-execution-provider codex-cli
+
+      - name: Check Zotero preflight fails safely without private config
+        shell: pwsh
+        run: |
+          $output = python .claude/scripts/zotero_import.py --preflight --json 2>&1
+          $exitCode = $LASTEXITCODE
+          $output | Out-String | Write-Host
+          if ($exitCode -eq 0) {
+            throw "Zotero preflight unexpectedly passed without private configuration"
+          }
+          if (($output -join "`n") -notmatch "missing_collection_key") {
+            throw "Expected missing_collection_key in public fresh clone"
+          }
+          exit 0
+
+      - name: Check scheduled task dry-run redaction
+        shell: pwsh
+        run: powershell -ExecutionPolicy Bypass -File .claude/scripts/register_daily_arxiv_task.ps1 -DryRun -Time "12:00"
+
+      - name: Check scheduled task provider dry-run
+        shell: pwsh
+        run: powershell -ExecutionPolicy Bypass -File .claude/scripts/register_daily_arxiv_task.ps1 -DryRun -Time "12:00" -DeepSeekProvider opencode -CodexExecutionProvider codex-cli
+
+      - name: Check tracked artifacts and secrets
+        shell: pwsh
+        run: |
+          python tools/scan_public_package.py
+          python tools/scan_public_package.py --scan-tree
+          python .claude/scripts/audit_public_package_v1.py

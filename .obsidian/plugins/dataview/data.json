@@ -1,0 +1,7 @@
+{
+  "renderNullAs": "\\-",
+  "defaultDateFormat": "YYYY-MM-DD",
+  "defaultDateTimeFormat": "YYYY-MM-DD HH:mm",
+  "enableDataviewJs": false,
+  "enableInlineDataviewJs": false
+}

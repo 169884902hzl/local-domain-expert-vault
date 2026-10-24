@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Research Seed v2 Novelty Scan",
+  "type": "object",
+  "required": ["schema_version", "run_date", "status", "scans"],
+  "properties": {
+    "schema_version": {"type": "string", "const": "novelty_scan.v1"},
+    "run_date": {"type": "string"},
+    "status": {"type": "string", "enum": ["completed", "completed_local_only", "success_empty_selection", "partial_empty_selection"]},
+    "scans": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "candidate_id",
+          "novelty_classification",
+          "promotion_allowed",
+          "formal_promotion_allowed",
+          "verification_scope",
+          "external_providers_used",
+          "provider_results",
+          "provider_errors",
+          "formal_publish_risk",
+          "nearest_works",
+          "strongest_baseline",
+          "duplicate_guard"
+        ],
+        "properties": {
+          "candidate_id": {"type": "string", "minLength": 1},
+          "candidate_title": {"type": "string"},
+          "status": {"type": "string"},
+          "novelty_classification": {"type": "string", "enum": ["likely_open", "partial_overlap", "unknown", "duplicate"]},
+          "novelty_remaining_delta": {"type": "string"},
+          "promotion_allowed": {"type": "boolean"},
+          "formal_promotion_allowed": {"type": "boolean"},
+          "verification_scope": {"type": "string", "enum": ["local_only", "local_plus_arxiv_api", "local_plus_s2_or_openalex", "strict_multi_provider"]},
+          "external_providers_used": {"type": "array", "items": {"type": "string", "enum": ["arxiv_api", "openalex", "semantic_scholar"]}},
+          "provider_results": {
+            "type": "object",
+            "additionalProperties": {"$ref": "#/$defs/provider_result"}
+          },
+          "provider_errors": {
+            "type": "array",
+            "items": {"$ref": "#/$defs/provider_error"}
+          },
+          "formal_publish_risk": {"type": "string"},
+          "classification_reason": {"type": "string"},
+          "nearest_works": {
+            "type": "array",
+            "items": {"$ref": "#/$defs/nearest_work"}
+          },
+          "strongest_baseline": {"$ref": "#/$defs/nearest_work"},
+          "local_scan_evidence": {"type": "object"},
+          "external_scan_evidence": {"type": "object"},
+          "duplicate_guard": {"type": "object"}
+          ,
+          "provider_health_summary": {"type": "object"},
+          "stale_external_novelty_cache": {"type": "boolean"}
+        }
+      }
+    },
+    "provider_policy": {"type": "object"},
+    "artifact_hashes": {"type": "object"}
+  },
+  "$defs": {
+    "provider_result": {
+      "type": "object",
+      "required": ["provider", "status", "records_scanned", "cached"],
+      "properties": {
+        "provider": {"type": "string", "enum": ["arxiv_api", "openalex", "semantic_scholar"]},
+        "status": {"type": "string", "enum": ["success", "provider_unavailable", "timeout", "rate_limited", "invalid_response"]},
+        "cache_status": {"type": "string", "enum": ["fresh", "stale", "missing", "provider_unavailable"]},
+        "query": {"type": "string"},
+        "query_hash": {"type": "string"},
+        "created_at": {"type": "string"},
+        "expires_at": {"type": "string"},
+        "ttl_days": {"type": "integer", "minimum": 0},
+        "result_count": {"type": "integer", "minimum": 0},
+        "rate_limit_observed": {"type": "string"},
+        "records_scanned": {"type": "integer", "minimum": 0},
+        "cached": {"type": "boolean"},
+        "queries": {"type": "integer", "minimum": 0},
+        "timeout_sec": {"type": "integer", "minimum": 0},
+        "rate_limit_delay_sec": {"type": "number", "minimum": 0},
+        "api_key_present": {"type": "boolean"},
+        "cache_key": {"type": "string"},
+        "cache_path": {"type": "string"},
+        "error": {"type": "string"},
+        "warnings": {"type": "array", "items": {"type": "string"}}
+      },
+      "additionalProperties": true
+    },
+    "provider_error": {
+      "type": "object",
+      "required": ["provider", "status", "error"],
+      "properties": {
+        "provider": {"type": "string", "enum": ["arxiv_api", "openalex", "semantic_scholar"]},
+        "status": {"type": "string"},
+        "error": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+    "nearest_work": {
+      "type": "object",
+      "required": ["source", "score", "title"],
+      "properties": {
+        "source": {"type": "string"},
+        "score": {"type": "number"},
+        "work_id": {"type": "string"},
+        "title": {"type": "string"},
+        "year": {"type": ["integer", "string", "null"]},
+        "url": {"type": "string"},
+        "abstract": {"type": "string"},
+        "authors": {"type": "array", "items": {"type": "string"}},
+        "venue": {"type": "string"},
+        "overlap_score": {"type": "number"},
+        "overlap_type": {"type": "string"},
+        "what_is_already_done": {"type": "string"},
+        "remaining_delta": {"type": "string"},
+        "locator": {"type": "string"},
+        "evidence": {"type": "string"}
+      },
+      "additionalProperties": true
+    }
+  }
+}

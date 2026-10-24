@@ -1,0 +1,9 @@
+{
+  "id": "paper-reading-workbench",
+  "name": "Paper Reading Workbench",
+  "version": "0.1.0",
+  "minAppVersion": "1.4.5",
+  "description": "Open a four-pane paper workbench: PDF/source entry, deep reading note, Gemini ideas, and Chinese translation cache.",
+  "author": "Hu Zhilun vault automation",
+  "isDesktopOnly": true
+}

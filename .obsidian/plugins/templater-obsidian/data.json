@@ -1,0 +1,21 @@
+{
+  "command_timeout": 5,
+  "templates_folder": "templates",
+  "templates_pairs": [
+    [
+      "Literature Note",
+      "templates/文献笔记模板"
+    ],
+    [
+      "Concept Note",
+      "templates/概念笔记模板"
+    ],
+    [
+      "Project Note",
+      "templates/项目笔记模板"
+    ]
+  ],
+  "trigger_on_file_creation": true,
+  "auto_jump_to_cursor": true,
+  "enable_system_commands": false
+}

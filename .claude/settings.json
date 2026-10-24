@@ -1,0 +1,24 @@
+{
+  "env": {
+    "GEMINI_CLI_NO_RELAUNCH": "true"
+  },
+  "permissions": {
+    "allow": [
+      "Read",
+      "Glob",
+      "Grep",
+      "Bash(python .claude/scripts/audit_kb.py*)",
+      "Bash(python .claude/scripts/kb_search.py*)",
+      "Bash(python .claude/scripts/daily_arxiv_pipeline.py --dry-run*)",
+      "Bash(python .claude/scripts/arxiv_metadata_sync.py --dry-run*)",
+      "Bash(python .claude/scripts/arxiv_metadata_sync.py --status)",
+      "Bash(python .claude/scripts/zotero_import.py --preflight --json)"
+    ],
+    "deny": [
+      "mcp__stitch__*",
+      "mcp__playwright__*",
+      "mcp__task-master__*",
+      "mcp__plugin_repomix-mcp_repomix__*"
+    ]
+  }
+}
